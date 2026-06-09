@@ -49,6 +49,8 @@ dist/
 Dataset/U_FFIA/features/
 Dataset/U_FFIA/audio/
 Dataset/U_FFIA/video/
+Dataset/AFFIA3k
+Dataset/Multimodal_Fish_Feeding_Intensity
 
 # Model outputs
 checkpoints/

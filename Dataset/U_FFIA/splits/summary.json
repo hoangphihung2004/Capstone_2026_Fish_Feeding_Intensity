@@ -1,0 +1,47 @@
+{
+  "label_map": {
+    "none": 0,
+    "strong": 1,
+    "medium": 2,
+    "weak": 3
+  },
+  "total_by_class": {
+    "none": 4871,
+    "strong": 7577,
+    "medium": 6640,
+    "weak": 7979
+  },
+  "splits": {
+    "train": {
+      "total": 21467,
+      "by_class": {
+        "none": 3471,
+        "strong": 6177,
+        "medium": 5240,
+        "weak": 6579
+      }
+    },
+    "test": {
+      "total": 2800,
+      "by_class": {
+        "none": 700,
+        "strong": 700,
+        "medium": 700,
+        "weak": 700
+      }
+    },
+    "val": {
+      "total": 2800,
+      "by_class": {
+        "none": 700,
+        "strong": 700,
+        "medium": 700,
+        "weak": 700
+      }
+    }
+  },
+  "dataset_root": "D:\\Fish_Feeding_Intensity\\Dataset\\U_FFIA",
+  "output_dir": "D:\\Fish_Feeding_Intensity\\Dataset\\U_FFIA\\splits",
+  "seed": 25,
+  "test_sample_per_class": 700
+}
