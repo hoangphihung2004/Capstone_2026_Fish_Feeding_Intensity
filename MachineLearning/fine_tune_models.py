@@ -97,7 +97,7 @@ def get_models():
         "boosting_type": ["gbdt", "dart"],
         "num_leaves": np.random.randint(15, 50, size=34),
         "max_depth": [None] + list(range(5, 41)),
-        "learning_rate": [0.001, 0.01, 0.1, -1, 3, 10],
+        "learning_rate": [0.001, 0.01, 0.1, 1, 3, 10],
         "n_estimators": np.random.randint(50, 501, size=300),
         "class_weight": ["balanced", None]
     }
