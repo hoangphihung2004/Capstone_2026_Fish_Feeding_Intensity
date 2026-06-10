@@ -71,7 +71,7 @@ def get_models():
         "penalty": ["l1", "l2"],
         "C": [0.01, 0.1, 1.0, 10, 100],
         "solver": ["liblinear", "saga"],
-        "max_iter": np.random.randint(300, 1000, size=300)
+        "max_iter": np.random.randint(300, 500, size=100)
     }
 
     param_KNN = {
@@ -83,7 +83,7 @@ def get_models():
 
     param_SVM = {
         "kernel": ["linear", "rbf"],
-        "C": [0.1, 1, 10],
+        "C": [0.01, 0.03, 0.1, 0.3, 1.0, 3.0],
         "gamma": ["scale", "auto"]
     }
 
