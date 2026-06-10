@@ -12,16 +12,13 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = None
+    sr: Optional[int] = 48000
     pre_emphasis: float = 0.97
-    frame_length: int = 1024
-    hop_length: int = 512
+    n_fft: Optional[int] = None
     windowing: str = "hamming"
-    use_std: bool = False
 
-    @property
-    def n_fft(self) -> int:
-        return self.frame_length
+    def __post_init__(self):
+        self.n_fft = self.sr
 
 
 class FFT:
@@ -39,17 +36,11 @@ class FFT:
             signal = np.asarray(audio, dtype=np.float32)
 
         signal = self._apply_pre_emphasis(signal)
-        frames = self._framing(signal)
-        frames = self._windowing(frames)
-        magnitude = self._fft_frames(frames)
+        signal = self._fix_length(signal)
+        magnitude = self._fft_signal(signal)
         log_magnitude = np.log(magnitude + 1e-10)
 
-        mean = np.mean(log_magnitude, axis=0)
-        if not self.config.use_std:
-            return mean.astype(np.float32)
-
-        std = np.std(log_magnitude, axis=0)
-        return np.concatenate([mean, std]).astype(np.float32)
+        return log_magnitude.astype(np.float32)
 
     def _apply_pre_emphasis(self, signal: np.ndarray) -> np.ndarray:
         if signal.size == 0:
@@ -61,31 +52,36 @@ class FFT:
 
         return np.append(signal[0], signal[1:] - coeff * signal[:-1]).astype(np.float32)
 
-    def _framing(self, signal: np.ndarray) -> np.ndarray:
-        frame_length = self.config.frame_length
-        hop_length = self.config.hop_length
-        signal_length = len(signal)
+    def _fix_length(self, signal: np.ndarray) -> np.ndarray:
+        if self.config.n_fft is None:
+            return signal
 
-        num_frames = max(1, int(np.ceil((signal_length - frame_length) / hop_length)) + 1)
-        pad_length = (num_frames - 1) * hop_length + frame_length
-        pad_signal = np.pad(signal, (0, max(0, pad_length - signal_length)), mode="constant")
-        indices = np.arange(frame_length)[None, :] + np.arange(num_frames)[:, None] * hop_length
-        return pad_signal[indices]
+        n_fft = self.config.n_fft
+        if signal.size >= n_fft:
+            return signal[:n_fft]
 
-    def _windowing(self, frames: np.ndarray) -> np.ndarray:
+        return np.pad(signal, (0, n_fft - signal.size), mode="constant").astype(np.float32)
+
+    def _get_window(self, signal_length: int) -> np.ndarray:
         w = self.config.windowing.lower()
 
         if w == "hamming":
-            window = np.hamming(frames.shape[1])
-        elif w == "hann":
-            window = np.hanning(frames.shape[1])
-        else:
-            raise ValueError("windowing must be 'hamming' or 'hann'")
+            return np.hamming(signal_length).astype(np.float32)
 
-        return frames * window
+        if w == "hann":
+            return np.hanning(signal_length).astype(np.float32)
 
-    def _fft_frames(self, frames: np.ndarray) -> np.ndarray:
-        return np.abs(np.fft.rfft(frames, n=self.config.n_fft, axis=1))
+        raise ValueError("windowing must be 'hamming' or 'hann'")
+
+    def _fft_signal(self, signal: np.ndarray) -> np.ndarray:
+        if signal.size == 0:
+            n_fft = self.config.n_fft or 1
+            signal = np.zeros(n_fft, dtype=np.float32)
+
+        window = self._get_window(signal.size)
+        signal = signal * window
+
+        return np.abs(np.fft.rfft(signal))
 
 
 def main(
@@ -96,14 +92,10 @@ def main(
     config = config or Config()
     extractor = FFT(config)
     config_info = asdict(config)
-    config_info["n_fft"] = config.n_fft
-    config_info["feature_dim"] = (config.n_fft // 2 + 1) * (2 if config.use_std else 1)
+    config_info["feature_dim"] = None if config.n_fft is None else config.n_fft // 2 + 1
 
     config_hash = hashlib.md5(json.dumps(config_info, sort_keys=True).encode("utf-8")).hexdigest()[:8]
-    config_name = (
-        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_"
-        f"hop_{config.hop_length}_win_{config.windowing}_std_{config.use_std}_{config_hash}"
-    )
+    config_name = f"sr_{config.sr}_pre_{config.pre_emphasis}_nfft_{config.n_fft}_win_{config.windowing}_{config_hash}"
     output_dir = Path(output_root) / "fft_features" / config_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
