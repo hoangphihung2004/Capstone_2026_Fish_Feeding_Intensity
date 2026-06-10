@@ -263,8 +263,7 @@ def fine_tune_models(feature_path, label="label"):
 
 
 def main():
-    feature_path = r""
-
+    feature_path = input("Path: ")
     result = fine_tune_models(feature_path)
 
     print(result)
