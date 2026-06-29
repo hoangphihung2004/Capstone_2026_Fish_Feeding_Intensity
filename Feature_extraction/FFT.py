@@ -12,13 +12,13 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = 48000
+    sr: Optional[int] = 96000
+    n_fft: int = 1024
     pre_emphasis: float = 0.97
-    n_fft: Optional[int] = None
-    windowing: str = "hamming"
 
-    def __post_init__(self):
-        self.n_fft = self.sr
+    @property
+    def feature_dim(self) -> int:
+        return self.n_fft // 2 + 1
 
 
 class FFT:
@@ -26,62 +26,34 @@ class FFT:
         self.config = config or Config()
 
     def load_audio(self, audio_path: str) -> tuple[np.ndarray, int]:
-        signal, sr = librosa.load(audio_path, sr=self.config.sr)
+        signal, sr = librosa.load(audio_path, sr=self.config.sr, mono=True)
         return signal.astype(np.float32), sr
 
-    def extract(self, audio: Union[str, np.ndarray]) -> np.ndarray:
+    def extract(self, audio: Union[str, np.ndarray], sr: Optional[int] = None) -> np.ndarray:
         if isinstance(audio, str):
-            signal, _ = self.load_audio(audio)
+            signal, sr = self.load_audio(audio)
         else:
             signal = np.asarray(audio, dtype=np.float32)
+            if sr is None:
+                if self.config.sr is None:
+                    raise ValueError("sr must be provided when audio is an array and config.sr is None")
+                sr = self.config.sr
 
         signal = self._apply_pre_emphasis(signal)
-        signal = self._fix_length(signal)
-        magnitude = self._fft_signal(signal)
-        log_magnitude = np.log(magnitude + 1e-10)
+
+        fft_result = np.fft.rfft(signal, n=self.config.n_fft)
+        magnitude = np.abs(fft_result)
+        log_magnitude = np.log(np.maximum(magnitude, 1e-8))
 
         return log_magnitude.astype(np.float32)
 
-    def _apply_pre_emphasis(self, signal: np.ndarray) -> np.ndarray:
-        if signal.size == 0:
-            return signal
 
+    def _apply_pre_emphasis(self, signal: np.ndarray) -> np.ndarray:
         coeff = self.config.pre_emphasis
         if coeff is None or coeff == 0:
             return signal
 
         return np.append(signal[0], signal[1:] - coeff * signal[:-1]).astype(np.float32)
-
-    def _fix_length(self, signal: np.ndarray) -> np.ndarray:
-        if self.config.n_fft is None:
-            return signal
-
-        n_fft = self.config.n_fft
-        if signal.size >= n_fft:
-            return signal[:n_fft]
-
-        return np.pad(signal, (0, n_fft - signal.size), mode="constant").astype(np.float32)
-
-    def _get_window(self, signal_length: int) -> np.ndarray:
-        w = self.config.windowing.lower()
-
-        if w == "hamming":
-            return np.hamming(signal_length).astype(np.float32)
-
-        if w == "hann":
-            return np.hanning(signal_length).astype(np.float32)
-
-        raise ValueError("windowing must be 'hamming' or 'hann'")
-
-    def _fft_signal(self, signal: np.ndarray) -> np.ndarray:
-        if signal.size == 0:
-            n_fft = self.config.n_fft or 1
-            signal = np.zeros(n_fft, dtype=np.float32)
-
-        window = self._get_window(signal.size)
-        signal = signal * window
-
-        return np.abs(np.fft.rfft(signal))
 
 
 def main(
@@ -92,10 +64,12 @@ def main(
     config = config or Config()
     extractor = FFT(config)
     config_info = asdict(config)
-    config_info["feature_dim"] = None if config.n_fft is None else config.n_fft // 2 + 1
+    config_info["feature_dim"] = config.feature_dim
 
     config_hash = hashlib.md5(json.dumps(config_info, sort_keys=True).encode("utf-8")).hexdigest()[:8]
-    config_name = f"sr_{config.sr}_pre_{config.pre_emphasis}_nfft_{config.n_fft}_win_{config.windowing}_{config_hash}"
+    config_name = (
+        f"sr_{config.sr}_nfft_{config.n_fft}_pre_{config.pre_emphasis}_{config_hash}"
+    )
     output_dir = Path(output_root) / "fft_features" / config_name
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -3,3 +3,4 @@ pandas
 tqdm
 scikit-learn
 lightgbm
+torch

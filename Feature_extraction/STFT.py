@@ -12,21 +12,19 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = None
+    sr: Optional[int] = 96000
     pre_emphasis: float = 0.97
     frame_length: int = 1024
     hop_length: int = 512
+    n_fft: int = 1024
     windowing: str = "hamming"
     use_std: bool = False
-
-    @property
-    def n_fft(self) -> int:
-        return self.frame_length
 
 
 class STFT:
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
+        self._validate_config()
 
     def load_audio(self, audio_path: str) -> tuple[np.ndarray, int]:
         signal, sr = librosa.load(audio_path, sr=self.config.sr)
@@ -63,6 +61,14 @@ class STFT:
         std = np.std(log_magnitude, axis=1)
         return np.concatenate([mean, std]).astype(np.float32)
 
+    def _validate_config(self) -> None:
+        if self.config.frame_length <= 0:
+            raise ValueError("frame_length must be > 0")
+        if self.config.hop_length <= 0:
+            raise ValueError("hop_length must be > 0")
+        if self.config.n_fft <= 0:
+            raise ValueError("n_fft must be > 0")
+
     def _apply_pre_emphasis(self, signal: np.ndarray) -> np.ndarray:
         if signal.size == 0:
             return signal
@@ -93,12 +99,11 @@ def main(
     config = config or Config()
     extractor = STFT(config)
     config_info = asdict(config)
-    config_info["n_fft"] = config.n_fft
     config_info["feature_dim"] = (config.n_fft // 2 + 1) * (2 if config.use_std else 1)
 
     config_hash = hashlib.md5(json.dumps(config_info, sort_keys=True).encode("utf-8")).hexdigest()[:8]
     config_name = (
-        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_"
+        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_nfft_{config.n_fft}_"
         f"hop_{config.hop_length}_win_{config.windowing}_std_{config.use_std}_{config_hash}"
     )
     output_dir = Path(output_root) / "stft_features" / config_name

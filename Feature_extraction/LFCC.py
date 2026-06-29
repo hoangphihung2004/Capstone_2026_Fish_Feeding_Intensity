@@ -14,10 +14,11 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = None
+    sr: Optional[int] = 96000
     pre_emphasis: Optional[float] = 0.97
     frame_length: int = 1024
     hop_length: int = 512
+    n_fft: int = 1024
     windowing: str = "hamming"
     pad: int = 0
     power: float = 2.0
@@ -34,10 +35,6 @@ class Config:
     norm: str = "ortho"
     log_lf: bool = True
     use_std: bool = False
-
-    @property
-    def n_fft(self) -> int:
-        return self.frame_length
 
 
 class LFCC:
@@ -109,6 +106,8 @@ class LFCC:
             raise ValueError("frame_length must be > 0")
         if self.config.hop_length <= 0:
             raise ValueError("hop_length must be > 0")
+        if self.config.n_fft <= 0:
+            raise ValueError("n_fft must be > 0")
         if self.config.power is not None and self.config.power <= 0:
             raise ValueError("power must be > 0 or None")
         if self.config.f_max is not None and self.config.sr is not None:
@@ -156,12 +155,11 @@ def main(
     config = config or Config()
     extractor = LFCC(config)
     config_info = asdict(config)
-    config_info["n_fft"] = config.n_fft
     config_info["feature_dim"] = config.n_lfcc * (2 if config.use_std else 1)
 
     config_hash = hashlib.md5(json.dumps(config_info, sort_keys=True).encode("utf-8")).hexdigest()[:8]
     config_name = (
-        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_"
+        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_nfft_{config.n_fft}_"
         f"hop_{config.hop_length}_win_{config.windowing}_filters_{config.num_filters}_"
         f"lfcc_{config.n_lfcc}_std_{config.use_std}_{config_hash}"
     )

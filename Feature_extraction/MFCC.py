@@ -11,23 +11,21 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = None
+    sr: Optional[int] = 256000
     pre_emphasis: float = 0.97
-    frame_length: int = 1024
-    hop_length: int = 512
+    frame_length: int = 4096
+    hop_length: int = 2048
+    n_fft: int = 4096
     windowing: str = "hamming"
     num_filters: int = 40
     n_mfcc: int = 13
-    use_std: bool = False
-
-    @property
-    def n_fft(self) -> int:
-        return self.frame_length
+    feature_mode: str = "mean"
 
 
 class MFCC:
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
+        self._validate_config()
 
     def load_audio(self, audio_path: str) -> tuple[np.ndarray, int]:
         signal, sr = librosa.load(audio_path, sr=self.config.sr)
@@ -57,12 +55,60 @@ class MFCC:
             n_mels=self.config.num_filters,
         )
 
-        mean = np.mean(mfcc, axis=1)
-        if not self.config.use_std:
-            return mean.astype(np.float32)
+        return self._build_feature(mfcc)
 
-        std = np.std(mfcc, axis=1)
-        return np.concatenate([mean, std]).astype(np.float32)
+    def _build_feature(self, mfcc: np.ndarray) -> np.ndarray:
+        mode = self.config.feature_mode.lower()
+        mean = np.mean(mfcc, axis=1)
+
+        if mode == "mean":
+            feature = mean
+        elif mode == "mean_std":
+            feature = np.concatenate([mean, np.std(mfcc, axis=1)])
+        elif mode == "mean_delta":
+            delta1 = librosa.feature.delta(mfcc, order=1, mode="nearest")
+            feature = np.concatenate([mean, np.mean(delta1, axis=1)])
+        elif mode == "mean_delta_delta":
+            delta1 = librosa.feature.delta(mfcc, order=1, mode="nearest")
+            delta2 = librosa.feature.delta(mfcc, order=2, mode="nearest")
+            feature = np.concatenate([mean, np.mean(delta1, axis=1), np.mean(delta2, axis=1)])
+        elif mode == "mean_delta2":
+            delta2 = librosa.feature.delta(mfcc, order=2, mode="nearest")
+            feature = np.concatenate([mean, np.mean(delta2, axis=1)])
+        else:
+            raise ValueError(
+                "feature_mode must be one of: mean, mean_std, mean_delta, "
+                "mean_delta_delta, mean_delta2"
+            )
+
+        return feature.astype(np.float32)
+
+    def _validate_config(self) -> None:
+        valid_modes = {"mean", "mean_std", "mean_delta", "mean_delta_delta", "mean_delta2"}
+        if self.config.feature_mode.lower() not in valid_modes:
+            raise ValueError(f"feature_mode must be one of: {', '.join(sorted(valid_modes))}")
+        if self.config.frame_length <= 0:
+            raise ValueError("frame_length must be > 0")
+        if self.config.hop_length <= 0:
+            raise ValueError("hop_length must be > 0")
+        if self.config.n_fft <= 0:
+            raise ValueError("n_fft must be > 0")
+        if self.config.num_filters <= 0:
+            raise ValueError("num_filters must be > 0")
+        if self.config.n_mfcc <= 0:
+            raise ValueError("n_mfcc must be > 0")
+
+    @property
+    def feature_dim(self) -> int:
+        mode = self.config.feature_mode.lower()
+        multipliers = {
+            "mean": 1,
+            "mean_std": 2,
+            "mean_delta": 2,
+            "mean_delta_delta": 3,
+            "mean_delta2": 2,
+        }
+        return self.config.n_mfcc * multipliers[mode]
 
     def _apply_pre_emphasis(self, signal: np.ndarray) -> np.ndarray:
         if signal.size == 0:
@@ -94,14 +140,13 @@ def main(
     config = config or Config()
     extractor = MFCC(config)
     config_info = asdict(config)
-    config_info["n_fft"] = config.n_fft
-    config_info["feature_dim"] = config.n_mfcc * (2 if config.use_std else 1)
+    config_info["feature_dim"] = extractor.feature_dim
 
     config_hash = hashlib.md5(json.dumps(config_info, sort_keys=True).encode("utf-8")).hexdigest()[:8]
     config_name = (
-        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_"
+        f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_nfft_{config.n_fft}_"
         f"hop_{config.hop_length}_win_{config.windowing}_filters_{config.num_filters}_"
-        f"mfcc_{config.n_mfcc}_std_{config.use_std}_{config_hash}"
+        f"mfcc_{config.n_mfcc}_mode_{config.feature_mode}_{config_hash}"
     )
     output_dir = Path(output_root) / "mfcc_features" / config_name
     output_dir.mkdir(parents=True, exist_ok=True)
