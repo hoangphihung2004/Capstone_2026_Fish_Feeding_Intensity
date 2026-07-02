@@ -257,7 +257,7 @@ def fine_tune_models(feature_path, label="label"):
         })
 
     result = pd.DataFrame(results)
-    result.to_csv(output_dir / f"{feature_name}_result.csv", index=False)
+    result.to_csv(output_dir / f"result.csv", index=False)
 
     return result
 
