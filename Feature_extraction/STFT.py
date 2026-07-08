@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -12,13 +13,14 @@ from tqdm import tqdm
 
 @dataclass
 class Config:
-    sr: Optional[int] = 96000
+    sr: Optional[int] = None
     pre_emphasis: float = 0.97
-    frame_length: int = 1024
-    hop_length: int = 512
-    n_fft: int = 1024
+    frame_length: int = 4096
+    hop_length: int = 2048
+    n_fft: int = 4096
     windowing: str = "hamming"
     use_std: bool = False
+    num_workers: int = -1
 
 
 class STFT:
@@ -91,6 +93,22 @@ class STFT:
         raise ValueError("windowing must be 'hamming' or 'hanning'")
 
 
+def process_single_file(row, dataset_dir, extractor_config):
+    audio_path = Path(row["audio_path"])
+    if not audio_path.is_absolute():
+        audio_path = Path(dataset_dir) / audio_path
+
+    if not audio_path.exists():
+        return None, f"Missing: {audio_path}"
+
+    try:
+        extractor = STFT(extractor_config)
+        feature = extractor.extract(str(audio_path))
+        return {"feature": json.dumps(feature.tolist()), **row}, None
+    except Exception as e:
+        return None, f"Error processing {audio_path}: {e}"
+
+
 def main(
     dataset_dir: str = "D:/Fish_Feeding_Intensity/Dataset/U_FFIA",
     output_root: str = "D:/Fish_Feeding_Intensity/Dataset/U_FFIA/features",
@@ -106,7 +124,7 @@ def main(
         f"sr_{config.sr}_pre_{config.pre_emphasis}_frame_{config.frame_length}_nfft_{config.n_fft}_"
         f"hop_{config.hop_length}_win_{config.windowing}_std_{config.use_std}_{config_hash}"
     )
-    output_dir = Path(output_root) / "stft_features" / config_name
+    output_dir = Path(output_root) / "stft_pre_features" / config_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     (output_dir / "config.txt").write_text(json.dumps(config_info, indent=4), encoding="utf-8")
@@ -114,24 +132,46 @@ def main(
     split_dir = Path(dataset_dir) / "splits"
     output_csv_path = output_dir / "features.csv"
 
+    max_workers = config.num_workers if config.num_workers > 0 else None
+
+    all_tasks = []
+    for split in ("train", "val", "test"):
+        input_csv_path = split_dir / f"{split}.csv"
+        if not input_csv_path.exists():
+            continue
+
+        with input_csv_path.open("r", encoding="utf-8", newline="") as input_file:
+            reader = csv.DictReader(input_file)
+            for row in reader:
+                task_row = dict(row)
+                task_row["type"] = split
+                all_tasks.append(task_row)
+
+    print(f"\nTotal tasks loaded: {len(all_tasks)} files")
+    print(f"Executing parallel STFT extraction using {max_workers or 'all'} CPU cores...")
+
+    total_failed = 0
+
     with output_csv_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = None
 
-        for split in ("train", "val", "test"):
-            input_csv_path = split_dir / f"{split}.csv"
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(process_single_file, task, dataset_dir, config): task
+                for task in all_tasks
+            }
 
-            with input_csv_path.open("r", encoding="utf-8", newline="") as input_file:
-                reader = csv.DictReader(input_file)
-                fieldnames = ["feature", "type"] + list(reader.fieldnames or [])
-
-                if writer is None:
-                    writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-                    writer.writeheader()
-
-                rows = list(reader)
-                for row in tqdm(rows, desc=f"Extracting STFT {split}", unit="file"):
-                    feature = extractor.extract(row["audio_path"])
-                    writer.writerow({"feature": json.dumps(feature.tolist()), "type": split, **row})
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Extracting STFT features", unit="file"):
+                result, error_msg = future.result()
+                if error_msg:
+                    print(f"\n{error_msg}")
+                    total_failed += 1
+                elif result:
+                    if writer is None:
+                        fieldnames = ["feature", "type"] + [k for k in result.keys() if k not in ("feature", "type")]
+                        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+                        writer.writeheader()
+                    writer.writerow(result)
 
 
 if __name__ == "__main__":

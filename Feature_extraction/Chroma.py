@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -20,6 +21,7 @@ class Config:
     windowing: str = "hamming"
     n_chroma: int = 12
     use_std: bool = False
+    num_workers: int = -1
 
     @property
     def feature_dim(self) -> int:
@@ -109,6 +111,22 @@ class Chroma:
 ChromaSTFT = Chroma
 
 
+def process_single_file(row, dataset_dir, extractor_config):
+    audio_path = Path(row["audio_path"])
+    if not audio_path.is_absolute():
+        audio_path = Path(dataset_dir) / audio_path
+
+    if not audio_path.exists():
+        return None, f"Missing: {audio_path}"
+
+    try:
+        extractor = Chroma(extractor_config)
+        feature = extractor.extract(str(audio_path))
+        return {"feature": json.dumps(feature.tolist()), **row}, None
+    except Exception as e:
+        return None, f"Error processing {audio_path}: {e}"
+
+
 def main(
     dataset_dir: str = "D:/Fish_Feeding_Intensity/Dataset/U_FFIA",
     output_root: str = "D:/Fish_Feeding_Intensity/Dataset/U_FFIA/features",
@@ -133,24 +151,46 @@ def main(
     split_dir = Path(dataset_dir) / "splits"
     output_csv_path = output_dir / "features.csv"
 
+    max_workers = config.num_workers if config.num_workers > 0 else None
+
+    all_tasks = []
+    for split in ("train", "val", "test"):
+        input_csv_path = split_dir / f"{split}.csv"
+        if not input_csv_path.exists():
+            continue
+
+        with input_csv_path.open("r", encoding="utf-8", newline="") as input_file:
+            reader = csv.DictReader(input_file)
+            for row in reader:
+                task_row = dict(row)
+                task_row["type"] = split
+                all_tasks.append(task_row)
+
+    print(f"\nTotal tasks loaded: {len(all_tasks)} files")
+    print(f"Executing parallel Chroma extraction using {max_workers or 'all'} CPU cores...")
+
+    total_failed = 0
+
     with output_csv_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = None
 
-        for split in ("train", "val", "test"):
-            input_csv_path = split_dir / f"{split}.csv"
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(process_single_file, task, dataset_dir, config): task
+                for task in all_tasks
+            }
 
-            with input_csv_path.open("r", encoding="utf-8", newline="") as input_file:
-                reader = csv.DictReader(input_file)
-                fieldnames = ["feature", "type"] + list(reader.fieldnames or [])
-
-                if writer is None:
-                    writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-                    writer.writeheader()
-
-                rows = list(reader)
-                for row in tqdm(rows, desc=f"Extracting Chroma {split}", unit="file"):
-                    feature = extractor.extract(row["audio_path"])
-                    writer.writerow({"feature": json.dumps(feature.tolist()), "type": split, **row})
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Extracting Chroma features", unit="file"):
+                result, error_msg = future.result()
+                if error_msg:
+                    print(f"\n{error_msg}")
+                    total_failed += 1
+                elif result:
+                    if writer is None:
+                        fieldnames = ["feature", "type"] + [k for k in result.keys() if k not in ("feature", "type")]
+                        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+                        writer.writeheader()
+                    writer.writerow(result)
 
 
 if __name__ == "__main__":
