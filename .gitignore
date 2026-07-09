@@ -54,8 +54,7 @@ Dataset/AFFIA3k/
 Dataset/Multimodal_Fish_Feeding_Intensity/Audio/
 Dataset/Multimodal_Fish_Feeding_Intensity/Image/
 Dataset/Multimodal_Fish_Feeding_Intensity/Wave/
-Dataset/Multimodal_Fish_Feeding_Intensity/splits/*.csv
-Dataset/Multimodal_Fish_Feeding_Intensity/splits/*.jsonl
+Dataset/Multimodal_Fish_Feeding_Intensity/features/
 
 # Model outputs
 checkpoints/
