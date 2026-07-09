@@ -1,0 +1,58 @@
+{
+  "label_map": {
+    "none": 0,
+    "weak": 1,
+    "strong": 2
+  },
+  "target_split_quotas": {
+    "strong": {
+      "train": 1927,
+      "val": 241,
+      "test": 241
+    },
+    "weak": {
+      "train": 1881,
+      "val": 236,
+      "test": 236
+    },
+    "none": {
+      "train": 1861,
+      "val": 233,
+      "test": 233
+    }
+  },
+  "total_by_class": {
+    "none": 2327,
+    "weak": 2353,
+    "strong": 2409
+  },
+  "splits": {
+    "train": {
+      "total": 5669,
+      "by_class": {
+        "none": 1861,
+        "weak": 1881,
+        "strong": 1927
+      }
+    },
+    "val": {
+      "total": 710,
+      "by_class": {
+        "none": 233,
+        "weak": 236,
+        "strong": 241
+      }
+    },
+    "test": {
+      "total": 710,
+      "by_class": {
+        "none": 233,
+        "weak": 236,
+        "strong": 241
+      }
+    }
+  },
+  "dataset_root": "D:\\Fish_Feeding_Intensity\\Dataset\\Multimodal_Fish_Feeding_Intensity",
+  "output_dir": "D:\\Fish_Feeding_Intensity\\Dataset\\Multimodal_Fish_Feeding_Intensity\\splits",
+  "seed": 42
+}
