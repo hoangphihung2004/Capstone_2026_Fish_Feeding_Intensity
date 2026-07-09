@@ -45,12 +45,17 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# Dataset and generated features
+# Dataset raw data and generated features
+# Keep Dataset/*.py and Dataset/*.md trackable; ignore only heavy data folders.
 Dataset/U_FFIA/features/
 Dataset/U_FFIA/audio/
 Dataset/U_FFIA/video/
-Dataset/AFFIA3k
-Dataset/Multimodal_Fish_Feeding_Intensity
+Dataset/AFFIA3k/
+Dataset/Multimodal_Fish_Feeding_Intensity/Audio/
+Dataset/Multimodal_Fish_Feeding_Intensity/Image/
+Dataset/Multimodal_Fish_Feeding_Intensity/Wave/
+Dataset/Multimodal_Fish_Feeding_Intensity/splits/*.csv
+Dataset/Multimodal_Fish_Feeding_Intensity/splits/*.jsonl
 
 # Model outputs
 checkpoints/

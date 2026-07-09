@@ -4,3 +4,4 @@ tqdm
 scikit-learn
 lightgbm
 torch
+scikit-image

@@ -35,8 +35,8 @@ CLASS_TO_LABEL = {
 
 LABEL_TO_CLASS = {v: k for k, v in CLASS_TO_LABEL.items()}
 
-DEFAULT_DATASET_ROOT = Path(r"D:\Fish_Feeding_Intensity\Dataset\U_FFIA")
-DEFAULT_OUTPUT_DIR = Path(r"D:\Fish_Feeding_Intensity\Dataset\U_FFIA\splits")
+DEFAULT_DATASET_ROOT = Path(r"/Dataset/U_FFIA")
+DEFAULT_OUTPUT_DIR = Path(r"/Dataset/U_FFIA/splits")
 DEFAULT_SEED = 25
 DEFAULT_TEST_SAMPLE_PER_CLASS = 700
 

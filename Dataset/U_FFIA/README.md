@@ -217,7 +217,7 @@ python data_split.py `
 ```python
 import pandas as pd
 
-train_df = pd.read_csv(r"D:\Fish_Feeding_Intensity\Dataset\U_FFIA\splits\train.csv")
+train_df = pd.read_csv(r"/Dataset/U_FFIA/splits/train.csv")
 print(train_df.head())
 ```
 
