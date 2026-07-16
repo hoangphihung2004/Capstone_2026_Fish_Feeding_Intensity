@@ -202,7 +202,9 @@ class FishDataSplitter(BaseDataSplitter):
 
     def _resolve_video_path(self, audio_path: str) -> str:
         """Automatically resolve the corresponding video path from an audio path."""
-        parts = Path(audio_path).parts
+        # Replace backslashes with forward slashes to ensure cross-platform compatibility
+        normalized_audio = str(audio_path).replace('\\', '/')
+        parts = Path(normalized_audio).parts
         parts_list = list(parts)
         if "audio" in parts_list:
             idx = parts_list.index("audio")
@@ -239,6 +241,7 @@ class FishDataSplitter(BaseDataSplitter):
             logger.info("==================================================")
             logger.info(f"Kích hoạt chế độ Fallback: Phát hiện phân chia có sẵn tại '{splits_dir}'.")
             logger.info("Đang nạp tập dữ liệu đã chia thay vì tính toán lại...")
+            logger.info(f"Đường dẫn tìm kiếm âm thanh cơ sở: '{self.audio_path}'")
             logger.info("==================================================")
 
             train_dict = []
@@ -267,26 +270,60 @@ class FishDataSplitter(BaseDataSplitter):
                             
                             # If the audio path does not exist, attempt automatic path correction
                             if not os.path.exists(raw_audio_path):
-                                parts = Path(raw_audio_path).parts
+                                # Replace backslashes with forward slashes to ensure cross-platform compatibility
+                                normalized_audio = raw_audio_path.replace('\\', '/')
+                                parts = Path(normalized_audio).parts
                                 if len(parts) >= 4:
-                                    # Reconstruct the absolute audio path based on the current directory
-                                    fixed_path = os.path.join(self.audio_path, parts[-4], parts[-3], parts[-2], parts[-1])
-                                    if os.path.exists(fixed_path):
+                                    # Generate multiple possible paths due to different server layouts
+                                    candidates = [
+                                        os.path.join(self.audio_path, parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.dataset_path, 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.dataset_path, parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.dataset_path, 'U_FFIA', 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                    ]
+                                    
+                                    fixed_path = None
+                                    for cand in candidates:
+                                        if os.path.exists(cand):
+                                            fixed_path = cand
+                                            break
+                                            
+                                    if fixed_path is not None:
                                         if audio_fix_example is None:
                                             audio_fix_example = (raw_audio_path, fixed_path)
                                         raw_audio_path = fixed_path
                                         fixed_count += 1
                                         need_rewrite_files = True
                                     else:
+                                        if missing_count < 3:
+                                            # Display the primary checked path in warning for reference
+                                            primary_checked = candidates[0]
+                                            logger.warning(f"Tập {split_name}: Thử các đường dẫn sửa đổi (ví dụ: '{primary_checked}') nhưng file vẫn không tồn tại trên server!")
                                         missing_count += 1
                             
                             # Reconstruct and verify the existence of video_path
                             video_path_str = row.get("video_path", "")
                             if video_path_str and not os.path.exists(video_path_str):
-                                parts_v = Path(video_path_str).parts
+                                # Replace backslashes with forward slashes to ensure cross-platform compatibility
+                                normalized_video = video_path_str.replace('\\', '/')
+                                parts_v = Path(normalized_video).parts
                                 if len(parts_v) >= 4:
-                                    fixed_video = os.path.join(self.dataset_path, 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1])
-                                    if os.path.exists(fixed_video):
+                                    candidates_v = [
+                                        os.path.join(self.dataset_path, 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
+                                        os.path.join(self.dataset_path, parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
+                                        os.path.join(self.dataset_path, 'U_FFIA', 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
+                                    ]
+                                    fixed_video = None
+                                    for cand in candidates_v:
+                                        if os.path.exists(cand):
+                                            fixed_video = cand
+                                            break
+                                            
+                                    if fixed_video is not None:
                                         if video_fix_example is None:
                                             video_fix_example = (video_path_str, fixed_video)
                                         video_path_str = fixed_video

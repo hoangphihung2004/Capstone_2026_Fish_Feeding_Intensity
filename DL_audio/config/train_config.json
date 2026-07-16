@@ -8,7 +8,7 @@
   "delta": 0.0,
   "cache_audio": true,
   "dataset_splitter": {
-    "dataset_path": "/marimo/audio",
+    "dataset_path": "/marimo/U_FFIA",
     "seed": 25,
     "test_sample_per_class": 700,
     "save_results": true,
