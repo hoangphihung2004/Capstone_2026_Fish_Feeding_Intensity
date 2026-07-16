@@ -114,12 +114,12 @@ def get_models():
     }
 
     models = {
-        "LR": (LogisticRegression(random_state=RANDOM_STATE), param_LR, 3, True),
-        "KNN": (KNeighborsClassifier(), param_KNN, 40, True),
-        "SVM": (SVC(), param_SVM, 3, True),
-        "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_RF, 20, False),
-        "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_ET, 50, False),
-        "LGBM": (LGBMClassifier(objective="multiclass", random_state=RANDOM_STATE, force_col_wise=True, verbose=-1, n_jobs=-1), param_LGBM, 30, False)
+        "LR": (LogisticRegression(random_state=RANDOM_STATE), param_LR, 10, True),
+        "KNN": (KNeighborsClassifier(), param_KNN, 100, True),
+        "SVM": (SVC(), param_SVM, 10, True),
+        "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_RF, 100, False),
+        "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_ET, 100, False),
+        "LGBM": (LGBMClassifier(objective="multiclass", random_state=RANDOM_STATE, force_col_wise=True, verbose=-1, n_jobs=-1), param_LGBM, 100, False)
     }
 
     return models
