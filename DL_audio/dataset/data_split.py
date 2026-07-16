@@ -194,9 +194,15 @@ class FishDataSplitter(BaseDataSplitter):
         audio = []
         l1 = os.listdir(path)
         for folder_name in l1:
-            l2 = os.listdir(os.path.join(path, folder_name))
+            folder_path = os.path.join(path, folder_name)
+            if folder_name == 'splits' or not os.path.isdir(folder_path):
+                continue
+            l2 = os.listdir(folder_path)
             for session_folder in l2:
-                wav_dir = os.path.join(path, folder_name, session_folder, split_name, '*.wav')
+                session_path = os.path.join(folder_path, session_folder)
+                if not os.path.isdir(session_path):
+                    continue
+                wav_dir = os.path.join(session_path, split_name, '*.wav')
                 audio.append(glob.glob(wav_dir))
         return list(chain.from_iterable(audio))
 
@@ -227,11 +233,17 @@ class FishDataSplitter(BaseDataSplitter):
         return ""
 
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
-        # Automatically determine the splits directory
-        if Path(self.dataset_path).name in ['audio', 'video']:
-            splits_dir = Path(self.dataset_path).parent / 'splits'
+        # Automatically determine the splits directory. When dataset_path points
+        # directly to an audio folder, keep splits inside that folder so the
+        # audio root remains self-contained on marimo.
+        dataset_path = Path(self.dataset_path)
+        local_splits_dir = dataset_path / 'splits'
+        legacy_splits_dir = dataset_path.parent / 'splits'
+
+        if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
+            splits_dir = legacy_splits_dir
         else:
-            splits_dir = Path(self.dataset_path) / 'splits'
+            splits_dir = local_splits_dir
 
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
