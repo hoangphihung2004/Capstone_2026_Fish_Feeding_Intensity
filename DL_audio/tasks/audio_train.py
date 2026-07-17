@@ -117,6 +117,20 @@ class AudioTrainer(BaseTrainer):
             splitter_data = config_obj.dataset_splitter.model_dump()
             with open(os.path.join(self.ckpt_dir, 'splitter_config.json'), 'w', encoding='utf-8') as f:
                 json.dump(splitter_data, f, indent=2)
+
+            dataset_path = Path(config_obj.dataset_splitter.dataset_path)
+            local_splits_dir = dataset_path / 'splits'
+            legacy_splits_dir = dataset_path.parent / 'splits'
+            if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
+                splits_dir = legacy_splits_dir
+            else:
+                splits_dir = local_splits_dir
+
+            if splits_dir.exists():
+                shutil.copytree(splits_dir, os.path.join(self.ckpt_dir, 'splits'), dirs_exist_ok=True)
+                logger.info(f"Successfully backed up dataset splits from '{splits_dir}' to checkpoint directory.")
+            else:
+                logger.warning(f"Warning: Dataset splits directory not found, cannot back it up: '{splits_dir}'")
             logger.info("Successfully backed up active configurations to checkpoint directory.")
         except Exception as e:
             logger.warning(f"Warning: Failed to backup configuration files: {str(e)}")
@@ -282,11 +296,11 @@ class AudioTrainer(BaseTrainer):
         # Calculate final training time in seconds
         training_time = time.perf_counter() - train_start_time
 
-        # Generate training curves plot
+        # Generate learning curves plot
         try:
             self.history_logger.plot_history()
         except Exception as e:
-            logger.warning(f"Warning: Failed to generate training curves plot: {str(e)}")
+            logger.warning(f"Warning: Failed to generate learning curves plot: {str(e)}")
 
         # 6. Run final evaluation on test set using best checkpoint
         logger.info("==================================================")

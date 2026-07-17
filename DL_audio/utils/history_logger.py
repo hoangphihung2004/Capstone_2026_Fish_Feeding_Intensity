@@ -210,7 +210,7 @@ class HistoryLogger:
 
         # Create a beautiful 3-panel figure
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle('Fish Feeding Intensity Model Training History', fontsize=16, fontweight='bold', y=0.98)
+        fig.suptitle('Fish Feeding Intensity Model Learning History', fontsize=16, fontweight='bold', y=0.98)
 
         # 1. Loss Panel
         axes[0].plot(epochs, train_losses, label='Train Loss', color='#1f77b4', linewidth=2, linestyle='--')
@@ -240,7 +240,7 @@ class HistoryLogger:
         axes[2].legend(frameon=True)
 
         plt.tight_layout()
-        plot_path = os.path.join(self.log_dir, 'training_curves.png')
+        plot_path = os.path.join(self.log_dir, 'learning_curves.png')
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
-        logger.info(f"Successfully generated and saved training curves to: '{plot_path}'")
+        logger.info(f"Successfully generated and saved learning curves to: '{plot_path}'")
