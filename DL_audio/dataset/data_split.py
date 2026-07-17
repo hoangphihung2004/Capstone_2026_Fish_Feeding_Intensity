@@ -58,8 +58,8 @@ class BaseDataSplitter(ABC):
             # If video was requested but no video directory exists, log a warning and auto-fallback
             if self.include_video:
                 logger.warning("==================================================")
-                logger.warning("Cảnh báo: Không tìm thấy thư mục 'video' trong dataset_path.")
-                logger.warning("Tự động chuyển chế độ RAM output về chỉ bao gồm đường dẫn 'audio'.")
+                logger.warning("Warning: Could not find 'video' directory in dataset_path.")
+                logger.warning("Automatically falling back to audio-only RAM output.")
                 logger.warning("==================================================")
                 self.include_video = False
 
@@ -146,7 +146,7 @@ class BaseDataSplitter(ABC):
             fieldnames = ["video_path", "audio_path", "label", "class_name", "date", "session", "sample_id"]
             self._write_jsonl(samples, output_path / f"{split_name}.jsonl")
             self._write_csv(samples, output_path / f"{split_name}.csv", fieldnames=fieldnames)
-            logger.info(f"Đã lưu thành công các file phân chia vào {output_path}")
+            logger.info(f"Successfully saved split files to {output_path}")
 
         # 2. Generate and save the summary.json file
         summary: Dict[str, Any] = {
@@ -178,7 +178,7 @@ class BaseDataSplitter(ABC):
 
         with (output_path / "summary.json").open("w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
-        logger.info(f"Đã lưu thành công file tóm tắt phân chia vào {output_path}")
+        logger.info(f"Successfully saved split summary file to {output_path}")
 
 
 class FishDataSplitter(BaseDataSplitter):
@@ -251,9 +251,9 @@ class FishDataSplitter(BaseDataSplitter):
 
         if splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
             logger.info("==================================================")
-            logger.info(f"Kích hoạt chế độ Fallback: Phát hiện phân chia có sẵn tại '{splits_dir}'.")
-            logger.info("Đang nạp tập dữ liệu đã chia thay vì tính toán lại...")
-            logger.info(f"Đường dẫn tìm kiếm âm thanh cơ sở: '{self.audio_path}'")
+            logger.info(f"Fallback mode enabled: found existing split files at '{splits_dir}'.")
+            logger.info("Loading existing dataset splits instead of recomputing them...")
+            logger.info(f"Base audio search path: '{self.audio_path}'")
             logger.info("==================================================")
 
             train_dict = []
@@ -312,7 +312,7 @@ class FishDataSplitter(BaseDataSplitter):
                                         if missing_count < 3:
                                             # Display the primary checked path in warning for reference
                                             primary_checked = candidates[0]
-                                            logger.warning(f"Tập {split_name}: Thử các đường dẫn sửa đổi (ví dụ: '{primary_checked}') nhưng file vẫn không tồn tại trên server!")
+                                            logger.warning(f"{split_name} split: Tried path correction candidates, for example '{primary_checked}', but the file still does not exist on this server.")
                                         missing_count += 1
                             
                             # Reconstruct and verify the existence of video_path
@@ -361,15 +361,15 @@ class FishDataSplitter(BaseDataSplitter):
                     
                     # Print detailed logs
                     if fixed_count > 0:
-                        logger.info(f"Tập {split_name}: Tự động phát hiện và sửa đổi thành công {fixed_count} đường dẫn audio sai lệch.")
+                        logger.info(f"{split_name} split: Successfully auto-corrected {fixed_count} invalid audio paths.")
                         if audio_fix_example:
-                            logger.info(f"   * Ví dụ sửa đổi đường dẫn audio:\n     - Cũ: {audio_fix_example[0]}\n     - Mới: {audio_fix_example[1]}")
+                            logger.info(f"   * Audio path correction example:\n     - Old: {audio_fix_example[0]}\n     - New: {audio_fix_example[1]}")
                     if video_updated_count > 0:
-                        logger.info(f"Tập {split_name}: Tự động bổ sung thành công {video_updated_count} đường dẫn video mới phát hiện trên máy.")
+                        logger.info(f"{split_name} split: Successfully auto-filled {video_updated_count} newly detected video paths.")
                         if video_fix_example:
-                            logger.info(f"   * Ví dụ bổ sung video path: {video_fix_example[1]}")
+                            logger.info(f"   * Video path example: {video_fix_example[1]}")
                     if missing_count > 0:
-                        logger.warning(f"Tập {split_name}: Có {missing_count} tệp tin không tồn tại trên máy hiện tại (vui lòng kiểm tra lại bộ dữ liệu).")
+                        logger.warning(f"{split_name} split: {missing_count} files do not exist on this machine. Please check the dataset.")
                         
                     return loaded_data
 
@@ -377,55 +377,55 @@ class FishDataSplitter(BaseDataSplitter):
                 test_dict = load_and_fix_csv(test_csv, "Test")
                 val_dict = load_and_fix_csv(val_csv, "Validation")
 
-                logger.info(f"Đã nạp thành công các phân chia từ file:")
-                logger.info(f"- Tổng số mẫu tập Train: {len(train_dict)}")
-                logger.info(f"- Tổng số mẫu tập Test:  {len(test_dict)}")
-                logger.info(f"- Tổng số mẫu tập Val:   {len(val_dict)}")
+                logger.info("Successfully loaded dataset splits from files:")
+                logger.info(f"- Train samples: {len(train_dict)}")
+                logger.info(f"- Test samples:  {len(test_dict)}")
+                logger.info(f"- Val samples:   {len(val_dict)}")
                 
                 # Print first samples for user verification
                 if len(train_dict) > 0:
-                    logger.info(f"  * Mẫu Train đầu tiên được nạp: {train_dict[0]}")
+                    logger.info(f"  * First loaded train sample: {train_dict[0]}")
                 if len(test_dict) > 0:
-                    logger.info(f"  * Mẫu Test đầu tiên được nạp:  {test_dict[0]}")
+                    logger.info(f"  * First loaded test sample:  {test_dict[0]}")
                 if len(val_dict) > 0:
-                    logger.info(f"  * Mẫu Val đầu tiên được nạp:   {val_dict[0]}")
+                    logger.info(f"  * First loaded val sample:   {val_dict[0]}")
                 
                 # If any paths were corrected or new video paths added, overwrite split files on disk to synchronize
                 if need_rewrite_files:
-                    logger.info("Đang tự động cập nhật và ghi đè lại các tệp tin phân chia trên đĩa để đồng bộ các thay đổi...")
+                    logger.info("Updating split files on disk to synchronize corrected paths...")
                     self._save_splits(train_dict, test_dict, val_dict, splits_dir)
-                    logger.info("Đồng bộ và sửa đổi tệp tin phân chia trên đĩa hoàn tất!")
+                    logger.info("Finished synchronizing corrected split files on disk.")
                 
                 logger.info("==================================================")
                 return train_dict, test_dict, val_dict
             except Exception as e:
-                logger.warning(f"Lỗi nạp hoặc tự động sửa phân chia: {e}. Chuyển sang quy trình phân chia tiêu chuẩn.")
+                logger.warning(f"Failed to load or auto-correct existing splits: {e}. Falling back to standard splitting.")
 
         logger.info("==================================================")
-        logger.info("Bắt đầu quá trình phân chia dữ liệu âm thanh và video...")
-        logger.info(f"Thư mục gốc bộ dữ liệu: '{self.dataset_path}'")
-        logger.info(f"Seed ngẫu nhiên: {self.seed}")
-        logger.info(f"Số lượng mẫu Test/Val mỗi class: {self.test_sample_per_class}")
-        logger.info(f"Tự động lưu kết quả: {self.save_results}")
-        logger.info(f"RAM bao gồm video path: {self.include_video}")
+        logger.info("Starting audio and video dataset splitting...")
+        logger.info(f"Dataset root directory: '{self.dataset_path}'")
+        logger.info(f"Random seed: {self.seed}")
+        logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
+        logger.info(f"Save split results: {self.save_results}")
+        logger.info(f"Include video paths in RAM output: {self.include_video}")
         logger.info("==================================================")
 
         # Scan files and log the counts
-        logger.info("Đang quét danh sách file âm thanh cho từng class...")
+        logger.info("Scanning audio files for each class...")
         strong_list = self.get_file_list(split_name='strong')
-        logger.info(f"Class 'strong': Tìm thấy {len(strong_list)} files.")
+        logger.info(f"Class 'strong': Found {len(strong_list)} files.")
         
         medium_list = self.get_file_list(split_name='medium')
         logger.info(f"Class 'medium': Found {len(medium_list)} files.")
         
         weak_list = self.get_file_list(split_name='weak')
-        logger.info(f"Class 'weak': Tìm thấy {len(weak_list)} files.")
+        logger.info(f"Class 'weak': Found {len(weak_list)} files.")
         
         none_list = self.get_file_list(split_name='none')
-        logger.info(f"Class 'none': Tìm thấy {len(none_list)} files.")
+        logger.info(f"Class 'none': Found {len(none_list)} files.")
 
         # Shuffle each class list independently
-        logger.info(f"Đang tiến hành xáo trộn (shuffle) danh sách độc lập với seed={self.seed}...")
+        logger.info(f"Shuffling each class list independently with seed={self.seed}...")
         random_state = np.random.RandomState(self.seed)
         random_state.shuffle(strong_list)
         random_state.shuffle(medium_list)
@@ -433,7 +433,7 @@ class FishDataSplitter(BaseDataSplitter):
         random_state.shuffle(none_list)
 
         # Perform dataset splitting
-        logger.info("Đang tiến hành phân chia (slicing) các tập dữ liệu...")
+        logger.info("Slicing class lists into train, test, and val splits...")
         strong_test = strong_list[:self.test_sample_per_class]
         medium_test = medium_list[:self.test_sample_per_class]
         weak_test = weak_list[:self.test_sample_per_class]
@@ -453,17 +453,17 @@ class FishDataSplitter(BaseDataSplitter):
         for class_name, size in [('strong', len(strong_list)), ('medium', len(medium_list)), ('weak', len(weak_list)), ('none', len(none_list))]:
             req_samples = 2 * self.test_sample_per_class
             if size < req_samples:
-                logger.warning(f"Class '{class_name}' chỉ có {size} files, trong khi cần tối thiểu {req_samples} samples để chia Test và Val.")
+                logger.warning(f"Class '{class_name}' has only {size} files, but at least {req_samples} samples are required for Test and Val splits.")
 
         # Log detailed split sizes per class
-        logger.info(f"Chi tiết phân chia mỗi class:")
+        logger.info("Per-class split details:")
         logger.info(f"       - class 'strong': Train={len(strong_train)}, Test={len(strong_test)}, Val={len(strong_val)}")
         logger.info(f"       - class 'medium': Train={len(medium_train)}, Test={len(medium_test)}, Val={len(medium_val)}")
         logger.info(f"       - class 'weak':   Train={len(weak_train)}, Test={len(weak_test)}, Val={len(weak_val)}")
         logger.info(f"       - class 'none':   Train={len(none_train)}, Test={len(none_test)}, Val={len(none_val)}")
 
         # Map integer labels and merge lists using list comprehension
-        logger.info("Đang ánh xạ nhãn số nguyên và tạo danh sách tập dữ liệu...")
+        logger.info("Mapping integer labels and building dataset lists...")
         if self.include_video:
             train_dict = (
                 [[wav, self._resolve_video_path(wav), 1] for wav in strong_train] +
@@ -504,22 +504,22 @@ class FishDataSplitter(BaseDataSplitter):
             )
 
         # Final shuffle of the Train set
-        logger.info("Xáo trộn (shuffle) lần cuối cho tập dữ liệu Train...")
+        logger.info("Applying final shuffle to the train split...")
         random_state.shuffle(train_dict)
 
         logger.info("==================================================")
-        logger.info("Phân chia hoàn tất thành công!")
-        logger.info(f"- Tổng số mẫu tập Train: {len(train_dict)}")
-        logger.info(f"- Tổng số mẫu tập Test:  {len(test_dict)}")
-        logger.info(f"- Tổng số mẫu tập Val:   {len(val_dict)}")
+        logger.info("Dataset splitting completed successfully!")
+        logger.info(f"- Train samples: {len(train_dict)}")
+        logger.info(f"- Test samples:  {len(test_dict)}")
+        logger.info(f"- Val samples:   {len(val_dict)}")
         
         # Print first samples for user verification
         if len(train_dict) > 0:
-            logger.info(f"  * Mẫu Train đầu tiên được sinh: {train_dict[0]}")
+            logger.info(f"  * First generated train sample: {train_dict[0]}")
         if len(test_dict) > 0:
-            logger.info(f"  * Mẫu Test đầu tiên được sinh:  {test_dict[0]}")
+            logger.info(f"  * First generated test sample:  {test_dict[0]}")
         if len(val_dict) > 0:
-            logger.info(f"  * Mẫu Val đầu tiên được sinh:   {val_dict[0]}")
+            logger.info(f"  * First generated val sample:   {val_dict[0]}")
         logger.info("==================================================")
 
         # Automatically save results to the splits directory alongside dataset_path if save_results is True

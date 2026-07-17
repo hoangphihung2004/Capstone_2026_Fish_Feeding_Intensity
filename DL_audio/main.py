@@ -63,9 +63,9 @@ def main():
         splitter_config=config.dataset_splitter
     )
     
-    train_loader = loader_manager.get_dataloader('train', shuffle=True)
-    val_loader = loader_manager.get_dataloader('val', shuffle=False)
-    test_loader = loader_manager.get_dataloader('test', shuffle=False)
+    train_loader = loader_manager.get_dataloader('train', shuffle=True, drop_last=True)
+    val_loader = loader_manager.get_dataloader('val', shuffle=False, drop_last=False)
+    test_loader = loader_manager.get_dataloader('test', shuffle=False, drop_last=False)
 
     # 4. Construct unified AudioModel
     logger.info("Assembling neural network model layers...")

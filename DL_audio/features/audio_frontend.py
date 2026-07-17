@@ -72,12 +72,13 @@ class AudioFrontend(nn.Module):
         )
 
         # 2. Logmel Filterbank Extractor on GPU using torchlibrosa
+        fmax = min(self.config.fmax, self.config.sample_rate // 2)
         self.logmel_extractor = LogmelFilterBank(
             sr=self.config.sample_rate,
             n_fft=self.config.window_size,
             n_mels=self.config.mel_bins,
             fmin=self.config.fmin,
-            fmax=self.config.fmax,
+            fmax=fmax,
             ref=1.0,
             amin=1e-10,
             top_db=None,
@@ -102,6 +103,7 @@ class AudioFrontend(nn.Module):
         logger.info(f"  - Window Size:              {self.config.window_size}")
         logger.info(f"  - Hop Size:                 {self.config.hop_size}")
         logger.info(f"  - Mel Bins:                 {self.config.mel_bins}")
+        logger.info(f"  - Fmin/Fmax:                {self.config.fmin} / {fmax} Hz")
         logger.info(f"  - SpecAugment Time Masking: Width={self.config.time_drop_width}, Stripes={self.config.time_stripes_num}")
         logger.info(f"  - SpecAugment Freq Masking: Width={self.config.freq_drop_width}, Stripes={self.config.freq_stripes_num}")
         logger.info("==================================================")
