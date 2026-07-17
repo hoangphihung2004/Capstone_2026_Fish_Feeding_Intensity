@@ -92,20 +92,31 @@ class FishVoiceDataLoader:
     @staticmethod
     def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
         """
-        Load audio file using librosa, resample to the target sample rate,
+        Load audio file using torchaudio, resample to the target sample rate,
         and force a fixed length of 2 seconds (clipping/padding).
         """
-        import librosa
-        y, _ = librosa.load(path, sr=sr)
+        import torchaudio
+
+        waveform, original_sr = torchaudio.load(path)
+
+        # Convert multi-channel audio to mono while keeping shape [1, num_samples].
+        if waveform.ndim == 2 and waveform.size(0) > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+
+        if original_sr != sr:
+            resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sr)
+            waveform = resampler(waveform)
+
+        y = waveform.squeeze(0).to(torch.float32)
         target_length = sr * 2  # 2 seconds
         
         # Clip if longer, zero-pad if shorter
-        if len(y) > target_length:
+        if y.numel() > target_length:
             y = y[:target_length]
-        elif len(y) < target_length:
-            y = np.pad(y, (0, target_length - len(y)), mode='constant')
+        elif y.numel() < target_length:
+            y = torch.nn.functional.pad(y, (0, target_length - y.numel()))
             
-        return torch.from_numpy(y.astype(np.float32))
+        return y
 
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:

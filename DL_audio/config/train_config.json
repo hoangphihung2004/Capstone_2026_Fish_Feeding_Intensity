@@ -1,15 +1,15 @@
 {
-  "epochs": 500,
+  "epochs": 800,
   "batch_size": 64,
-  "learning_rate": 1e-3,
+  "learning_rate": 1e-4,
   "monitor": "accuracy",
-  "early_stopping": true,
+  "early_stopping": false,
   "patience": 100,
   "delta": 0.0,
   "cache_audio": true,
   "dataset_splitter": {
     "dataset_path": "/marimo/audio",
-    "seed": 25,
+    "seed": 42,
     "test_sample_per_class": 700,
     "save_results": true,
     "include_video": true
@@ -20,7 +20,7 @@
     "hop_size": 1024,
     "mel_bins": 128,
     "fmin": 1,
-    "fmax": 128000,
+    "fmax": 32000,
     "time_drop_width": 64,
     "time_stripes_num": 2,
     "freq_drop_width": 8,
