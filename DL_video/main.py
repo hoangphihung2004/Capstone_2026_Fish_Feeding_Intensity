@@ -56,7 +56,7 @@ def main():
     logger.info("Initializing DataLoaders...")
     loader_manager = FishVideoDataLoader(
         batch_size=config.batch_size,
-        num_workers=-1,
+        num_workers=config.num_workers,
         cache_video=config.cache_video,
         image_size=config.video_features.image_size,
         frames_count=config.video_features.frames,
