@@ -270,6 +270,6 @@ class FishVideoDataLoader:
             drop_last=drop_last,
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             persistent_workers=self.num_workers > 0
         )
