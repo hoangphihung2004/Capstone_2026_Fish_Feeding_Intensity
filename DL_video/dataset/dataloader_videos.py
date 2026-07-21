@@ -1,9 +1,9 @@
 import os
 import sys
+import pickle
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Optional, Dict, Any, List
 
 # Ensure project root is in sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -31,21 +31,113 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _load_video_worker(args: Tuple) -> Tuple[int, Dict[str, Any]]:
+def _get_video_cache_subdir(image_size: int, frames_count: int) -> str:
+    return f"frames_{frames_count}_size_{image_size}"
+
+
+def _resolve_video_cache_dir(
+    video_cache_dir: Optional[str],
+    image_size: int,
+    frames_count: int
+) -> Optional[str]:
+    if not video_cache_dir:
+        return None
+
+    cache_root = os.path.normpath(video_cache_dir)
+    cache_subdir = _get_video_cache_subdir(
+        image_size=image_size,
+        frames_count=frames_count
+    )
+
+    if os.path.basename(cache_root) == cache_subdir:
+        return cache_root
+
+    return os.path.join(cache_root, cache_subdir)
+
+
+def _get_video_cache_path(video_cache_dir: Optional[str], split: str, index: int) -> Optional[str]:
+    if not video_cache_dir:
+        return None
+    return os.path.join(video_cache_dir, split, f"{index}.pkl")
+
+
+def _load_video_from_disk_cache(
+    cache_path: Optional[str],
+    video_path: str,
+    image_size: int,
+    frames_count: int,
+    label: Any
+) -> Optional[Dict[str, Any]]:
     """
-    Module-level worker function for ProcessPoolExecutor.
-    Must be a top-level function (not nested) to be picklable across processes.
-    Uses decord GPU decode (following original author's pattern) for maximum throughput.
-    Falls back to decord CPU decode if GPU context is unavailable.
-
-    Args:
-        args: Tuple of (idx, video_path, label, image_size, frames_count)
-
-    Returns:
-        Tuple of (idx, sample_dict)
+    Load one cached sample from disk if the file matches the active dataset/config.
+    Returns None when cache is missing, stale, or invalid.
     """
-    idx, video_path, label, image_size, frames_count = args
+    if cache_path is None or not os.path.exists(cache_path):
+        return None
 
+    try:
+        with open(cache_path, "rb") as f:
+            sample = pickle.load(f)
+    except Exception as exc:
+        logger.warning(f"Could not read video cache '{cache_path}'. It will be regenerated. Error: {exc}")
+        return None
+
+    video_form = sample.get("video_form")
+    meta = sample.get("_cache_meta", {})
+
+    expected_shape = (frames_count, 3, image_size, image_size)
+    if sample.get("video_name") != video_path:
+        return None
+    if meta.get("image_size") != image_size or meta.get("frames_count") != frames_count:
+        return None
+    if not isinstance(video_form, np.ndarray):
+        return None
+    if video_form.shape != expected_shape or video_form.dtype != np.uint8:
+        return None
+
+    return {
+        "video_name": video_path,
+        "video_form": video_form,
+        "target": label
+    }
+
+
+def _save_video_to_disk_cache(
+    cache_path: Optional[str],
+    sample: Dict[str, Any],
+    image_size: int,
+    frames_count: int
+) -> None:
+    if cache_path is None:
+        return
+
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+    payload = {
+        "video_name": sample["video_name"],
+        "video_form": sample["video_form"],
+        "target": sample["target"],
+        "_cache_meta": {
+            "image_size": image_size,
+            "frames_count": frames_count,
+            "format": "uint8_TCHW",
+        },
+    }
+
+    tmp_path = f"{cache_path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "wb") as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp_path, cache_path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+def _decode_video_sample(video_path: str, label: Any, image_size: int, frames_count: int) -> Dict[str, Any]:
     import numpy as np
     import torch
     from decord import VideoReader, cpu, gpu
@@ -87,37 +179,79 @@ def _load_video_worker(args: Tuple) -> Tuple[int, Dict[str, Any]]:
         # Convert to [T, C, H, W] uint8 matching original format
         vf_uint8 = video_frames.transpose(0, 3, 1, 2).astype(np.uint8)
 
-    return idx, {
-        'video_name': video_path,
-        'video_form': vf_uint8,
-        'target': label
+    return {
+        "video_name": video_path,
+        "video_form": vf_uint8,
+        "target": label
     }
+
+
+def _load_or_create_video_sample(
+    index: int,
+    video_path: str,
+    label: Any,
+    image_size: int,
+    frames_count: int,
+    disk_cache_video: bool,
+    video_cache_dir: Optional[str],
+    split: str
+) -> Dict[str, Any]:
+    cache_path = _get_video_cache_path(video_cache_dir, split, index) if disk_cache_video else None
+
+    cached_sample = _load_video_from_disk_cache(
+        cache_path=cache_path,
+        video_path=video_path,
+        image_size=image_size,
+        frames_count=frames_count,
+        label=label
+    )
+    if cached_sample is not None:
+        return cached_sample
+
+    sample = _decode_video_sample(
+        video_path=video_path,
+        label=label,
+        image_size=image_size,
+        frames_count=frames_count
+    )
+    _save_video_to_disk_cache(
+        cache_path=cache_path,
+        sample=sample,
+        image_size=image_size,
+        frames_count=frames_count
+    )
+    return sample
 
 
 class FishVideoDataLoader:
     """
     Unified manager class for the fish video raw dataset (FishVideoDataLoader).
-    Preloads extracted frames directly into System RAM at startup using Segment-based Sampling,
-    completely bypassing disk pickle creation and eliminating GPU starvation.
+    Supports optional per-sample disk .pkl caching without preloading the dataset into RAM.
+    Disk cache stores decoded/resized uint8 clips before tensor normalization.
     """
     def __init__(
         self,
         batch_size: int = 50,
-        preload_workers: int = 8,
         dataloader_workers: int = 0,
-        prefetch_factor: int = 1,
-        cache_video: bool = True,
+        prefetch_factor: Optional[int] = None,
+        disk_cache_video: bool = False,
+        video_cache_dir: Optional[str] = None,
         image_size: int = 224,
         frames_count: int = 4,
         splitter_config: Optional[SplitterConfig] = None
     ) -> None:
         self.batch_size = batch_size
-        self.preload_workers = preload_workers
         self.dataloader_workers = dataloader_workers
         self.prefetch_factor = prefetch_factor
-        self.cache_video = cache_video
+        self.disk_cache_video = disk_cache_video
         self.image_size = image_size
         self.frames_count = frames_count
+        self.video_cache_root = video_cache_dir
+        self.video_cache_dir = _resolve_video_cache_dir(
+            video_cache_dir=video_cache_dir,
+            image_size=image_size,
+            frames_count=frames_count
+        )
 
         # 1. Load splitter configurations and initialize the data splitter
         if splitter_config is None:
@@ -130,12 +264,19 @@ class FishVideoDataLoader:
         self.train_dict, self.test_dict, self.val_dict = self.splitter.split_data()
 
         logger.info("==================================================")
-        logger.info("Initializing FishVideoDataLoader (Direct In-RAM Pipeline):")
+        logger.info("Initializing FishVideoDataLoader (Video Cache Pipeline):")
         logger.info(f"  - Batch Size:               {self.batch_size}")
-        logger.info(f"  - Preload Workers:          {self.preload_workers}")
         logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
-        logger.info(f"  - DataLoader Prefetch:      {self.prefetch_factor if self.dataloader_workers > 0 else 'disabled'}")
-        logger.info(f"  - Direct RAM Caching:       {self.cache_video}")
+        if self.dataloader_workers <= 0:
+            prefetch_log = "disabled"
+        elif self.prefetch_factor is None:
+            prefetch_log = "PyTorch default"
+        else:
+            prefetch_log = self.prefetch_factor
+        logger.info(f"  - DataLoader Prefetch:      {prefetch_log}")
+        logger.info(f"  - Disk PKL Caching:         {self.disk_cache_video}")
+        logger.info(f"  - Disk PKL Cache Root:      '{self.video_cache_root if self.disk_cache_video else 'disabled'}'")
+        logger.info(f"  - Disk PKL Cache Dir:       '{self.video_cache_dir if self.disk_cache_video else 'disabled'}'")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
         logger.info(f"  - Frames per Video:         {self.frames_count} (Segment-based Sampling)")
         logger.info("==================================================")
@@ -223,13 +364,12 @@ class FishVideoDataLoader:
 
     class _InnerDataset(Dataset):
         """
-        Internal PyTorch Dataset wrapper matching standard API with built-in Direct System RAM caching.
+        Internal PyTorch Dataset wrapper matching the standard PyTorch API.
         """
         def __init__(self, parent: 'FishVideoDataLoader', split: str) -> None:
             self.parent = parent
             self.split = split
-            self.cache_video = parent.cache_video
-            self.video_cache = None
+            self.disk_cache_video = parent.disk_cache_video
 
             if self.split == 'train':
                 self.data_dict = parent.train_dict
@@ -245,70 +385,28 @@ class FishVideoDataLoader:
             self.transform = data_transform[self.split]
             logger.info(f"Initialized '{self.split}' transformation pipeline.")
 
-            if self.cache_video:
-                self._preload_video_to_ram()
-
-        def _preload_video_to_ram(self) -> None:
-            max_workers = self.parent.preload_workers
-
-            logger.info(f"Starting direct MP4 -> RAM preload for split '{self.split}' ({len(self.data_dict)} samples)...")
-            logger.info(f"Using ProcessPoolExecutor with {max_workers} workers ({os.cpu_count()} CPU cores detected).")
-
-            # Build picklable args list for module-level worker function
-            args_list = [
-                (i, self.data_dict[i][1], self.data_dict[i][2],
-                 self.parent.image_size, self.parent.frames_count)
-                for i in range(len(self.data_dict))
-            ]
-
-            cache = {}
-
-            # Safe check for tqdm library import
-            try:
-                from tqdm import tqdm
-                has_tqdm = True
-            except ImportError:
-                has_tqdm = False
-
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(_load_video_worker, args): args[0] for args in args_list}
-
-                if has_tqdm:
-                    pbar = tqdm(total=len(self.data_dict), desc=f"Preloading {self.split} to RAM")
-                    for future in as_completed(futures):
-                        try:
-                            idx, result = future.result()
-                            cache[idx] = result
-                        except Exception as e:
-                            idx = futures[future]
-                            logger.error(f"Error loading video index {idx}: {e}")
-                        pbar.update(1)
-                    pbar.close()
-                else:
-                    for future in as_completed(futures):
-                        try:
-                            idx, result = future.result()
-                            cache[idx] = result
-                        except Exception as e:
-                            idx = futures[future]
-                            logger.error(f"Error loading video index {idx}: {e}")
-
-            self.video_cache = cache
-            logger.info(f"Successfully cached {len(cache)} video samples in System RAM for split '{self.split}'.")
-
         def __len__(self) -> int:
             return len(self.data_dict)
 
         def __getitem__(self, index: int) -> Dict[str, Any]:
-            if self.video_cache is not None:
-                sample = self.video_cache[index]
-                video_name = sample['video_name']
+            item = self.data_dict[index]
+            video_name = item[1]
+            target_val = item[2]
+
+            if self.disk_cache_video:
+                sample = _load_or_create_video_sample(
+                    index=index,
+                    video_path=video_name,
+                    label=target_val,
+                    image_size=self.parent.image_size,
+                    frames_count=self.parent.frames_count,
+                    disk_cache_video=True,
+                    video_cache_dir=self.parent.video_cache_dir,
+                    split=self.split
+                )
                 vf_raw = sample['video_form']
                 target_val = sample['target']
             else:
-                item = self.data_dict[index]
-                video_name = item[1]
-                target_val = item[2]
                 vf_raw = FishVideoDataLoader.extract_video_frames_segment_based(
                     video_path=video_name,
                     image_size=self.parent.image_size,
@@ -346,7 +444,8 @@ class FishVideoDataLoader:
             "pin_memory": True,
             "persistent_workers": self.dataloader_workers > 0,
         }
-        if self.dataloader_workers > 0:
+        if self.dataloader_workers > 0 and self.prefetch_factor is not None:
             dataloader_kwargs["prefetch_factor"] = self.prefetch_factor
 
         return DataLoader(**dataloader_kwargs)
+    
