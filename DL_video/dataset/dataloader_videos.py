@@ -247,16 +247,11 @@ class FishVideoDataLoader:
                 self._preload_video_to_ram()
 
         def _preload_video_to_ram(self) -> None:
-            # Auto-calculate optimal process workers
-            # Leave 2 cores for main process + GPU ops, minimum 1
-            cpu_count = os.cpu_count() or 4
-            if cpu_count <= 2:
-                max_workers = 1
-            else:
-                max_workers = cpu_count - 2  # e.g. 20 cores -> 18 workers
+            # Reuse num_workers already calculated in FishVideoDataLoader.__init__
+            max_workers = self.parent.num_workers
 
             logger.info(f"Starting direct MP4 -> RAM preload for split '{self.split}' ({len(self.data_dict)} samples)...")
-            logger.info(f"Using ProcessPoolExecutor with {max_workers} workers ({cpu_count} CPU cores detected).")
+            logger.info(f"Using ProcessPoolExecutor with {max_workers} workers ({os.cpu_count()} CPU cores detected).")
 
             # Build picklable args list for module-level worker function
             args_list = [
