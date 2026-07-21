@@ -3,7 +3,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Ensure project root is in sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -29,6 +29,63 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _load_video_worker(args: Tuple) -> Tuple[int, Dict[str, Any]]:
+    """
+    Module-level worker function for ProcessPoolExecutor.
+    Must be a top-level function (not nested) to be picklable across processes.
+
+    Args:
+        args: Tuple of (idx, video_path, label, image_size, frames_count)
+
+    Returns:
+        Tuple of (idx, sample_dict)
+    """
+    idx, video_path, label, image_size, frames_count = args
+
+    import cv2
+    import numpy as np
+    import torch
+
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    if cap.isOpened():
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
+        cap.release()
+
+    num_frames = len(frames)
+    if num_frames == 0:
+        vf_uint8 = np.zeros((frames_count, 3, image_size, image_size), dtype=np.uint8)
+    else:
+        actual_count = min(frames_count, num_frames)
+        segment_width = num_frames / actual_count
+        selected_indices = []
+        for i in range(actual_count):
+            start = int(i * segment_width)
+            end = max(start, int((i + 1) * segment_width) - 1)
+            end = min(end, num_frames - 1)
+            if start == end:
+                val = start
+            else:
+                val = int(torch.randint(low=start, high=end + 1, size=(1,)).item())
+            selected_indices.append(val)
+        selected_indices = sorted(selected_indices)
+        selected_frames = [frames[y] for y in selected_indices]
+        while len(selected_frames) < frames_count:
+            selected_frames.append(selected_frames[-1])
+        vf_uint8 = np.stack([f.transpose(2, 0, 1) for f in selected_frames]).astype(np.uint8)
+
+    return idx, {
+        'video_name': video_path,
+        'video_form': vf_uint8,
+        'target': label
+    }
 
 
 class FishVideoDataLoader:
@@ -190,27 +247,25 @@ class FishVideoDataLoader:
                 self._preload_video_to_ram()
 
         def _preload_video_to_ram(self) -> None:
+            # Auto-calculate optimal process workers
+            # Leave 2 cores for main process + GPU ops, minimum 1
+            cpu_count = os.cpu_count() or 4
+            if cpu_count <= 2:
+                max_workers = 1
+            else:
+                max_workers = cpu_count - 2  # e.g. 20 cores -> 18 workers
+
             logger.info(f"Starting direct MP4 -> RAM preload for split '{self.split}' ({len(self.data_dict)} samples)...")
+            logger.info(f"Using ProcessPoolExecutor with {max_workers} workers ({cpu_count} CPU cores detected).")
 
-            def load_single_video(idx: int) -> Dict[str, Any]:
-                item = self.data_dict[idx]
-                video_path = item[1]
-                label = item[2]
-
-                vf_uint8 = FishVideoDataLoader.extract_video_frames_segment_based(
-                    video_path=video_path,
-                    image_size=self.parent.image_size,
-                    frames_count=self.parent.frames_count
-                )
-
-                return {
-                    'video_name': video_path,
-                    'video_form': vf_uint8,
-                    'target': label
-                }
+            # Build picklable args list for module-level worker function
+            args_list = [
+                (i, self.data_dict[i][1], self.data_dict[i][2],
+                 self.parent.image_size, self.parent.frames_count)
+                for i in range(len(self.data_dict))
+            ]
 
             cache = {}
-            max_workers = min(16, (os.cpu_count() or 4) * 2)
 
             # Safe check for tqdm library import
             try:
@@ -219,26 +274,27 @@ class FishVideoDataLoader:
             except ImportError:
                 has_tqdm = False
 
-            from concurrent.futures import as_completed
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(load_single_video, i): i for i in range(len(self.data_dict))}
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_load_video_worker, args): args[0] for args in args_list}
 
                 if has_tqdm:
                     pbar = tqdm(total=len(self.data_dict), desc=f"Preloading {self.split} to RAM")
                     for future in as_completed(futures):
-                        idx = futures[future]
                         try:
-                            cache[idx] = future.result()
+                            idx, result = future.result()
+                            cache[idx] = result
                         except Exception as e:
+                            idx = futures[future]
                             logger.error(f"Error loading video index {idx}: {e}")
                         pbar.update(1)
                     pbar.close()
                 else:
                     for future in as_completed(futures):
-                        idx = futures[future]
                         try:
-                            cache[idx] = future.result()
+                            idx, result = future.result()
+                            cache[idx] = result
                         except Exception as e:
+                            idx = futures[future]
                             logger.error(f"Error loading video index {idx}: {e}")
 
             self.video_cache = cache
