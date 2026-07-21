@@ -211,14 +211,35 @@ class FishVideoDataLoader:
 
             cache = {}
             max_workers = min(16, (os.cpu_count() or 4) * 2)
+
+            # Safe check for tqdm library import
+            try:
+                from tqdm import tqdm
+                has_tqdm = True
+            except ImportError:
+                has_tqdm = False
+
+            from concurrent.futures import as_completed
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_idx = {executor.submit(load_single_video, i): i for i in range(len(self.data_dict))}
-                for future in future_to_idx:
-                    idx = future_to_idx[future]
-                    try:
-                        cache[idx] = future.result()
-                    except Exception as e:
-                        logger.error(f"Error loading video index {idx}: {e}")
+                futures = {executor.submit(load_single_video, i): i for i in range(len(self.data_dict))}
+
+                if has_tqdm:
+                    pbar = tqdm(total=len(self.data_dict), desc=f"Preloading {self.split} to RAM")
+                    for future in as_completed(futures):
+                        idx = futures[future]
+                        try:
+                            cache[idx] = future.result()
+                        except Exception as e:
+                            logger.error(f"Error loading video index {idx}: {e}")
+                        pbar.update(1)
+                    pbar.close()
+                else:
+                    for future in as_completed(futures):
+                        idx = futures[future]
+                        try:
+                            cache[idx] = future.result()
+                        except Exception as e:
+                            logger.error(f"Error loading video index {idx}: {e}")
 
             self.video_cache = cache
             logger.info(f"Successfully cached {len(cache)} video samples in System RAM for split '{self.split}'.")
