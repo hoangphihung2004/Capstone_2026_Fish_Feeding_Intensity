@@ -13,10 +13,9 @@ if project_root not in sys.path:
 import cv2
 import numpy as np
 import torch
-import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
-from video_transform import VideoTransform
+from transforms import get_video_transforms
 
 # Force stdout/stderr to use UTF-8 encoding
 if hasattr(sys.stdout, 'reconfigure'):
@@ -182,29 +181,8 @@ class FishVideoDataLoader:
             else:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
-            # Build transform dictionary (chuẩn torchvision.transforms)
-            img_size = (parent.image_size, parent.image_size)
-            mean, std = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
-
-            data_transform = {
-                "train": VideoTransform(transforms.Compose([
-                    transforms.Resize(img_size),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean, std),
-                ])),
-                "val": VideoTransform(transforms.Compose([
-                    transforms.Resize(img_size),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean, std),
-                ])),
-                "test": VideoTransform(transforms.Compose([
-                    transforms.Resize(img_size),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean, std),
-                ])),
-            }
-
+            # Lấy transform từ transforms/video_transform.py
+            data_transform = get_video_transforms(image_size=parent.image_size)
             self.transform = data_transform[self.split]
             logger.info(f"Initialized '{self.split}' transformation pipeline.")
 
