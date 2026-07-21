@@ -13,10 +13,10 @@ if project_root not in sys.path:
 import cv2
 import numpy as np
 import torch
-import torchvision.transforms.functional as TVF
+import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
-from transforms.augmentations.video import ComposeVideo, ResizeVideo, ToTensorVideo, NormalizeVideo, RandomFlipVideo
+from transforms import VideoTransform
 
 # Force stdout/stderr to use UTF-8 encoding
 if hasattr(sys.stdout, 'reconfigure'):
@@ -182,27 +182,27 @@ class FishVideoDataLoader:
             else:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
-            # Build transform dictionary (giống chuẩn image classification)
-            img_size = parent.image_size
+            # Build transform dictionary (chuẩn torchvision.transforms)
+            img_size = (parent.image_size, parent.image_size)
             mean, std = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
 
             data_transform = {
-                "train": ComposeVideo([
-                    ResizeVideo(img_size),
-                    ToTensorVideo(),
-                    RandomFlipVideo(p=0.5),
-                    NormalizeVideo(mean, std),
-                ]),
-                "val": ComposeVideo([
-                    ResizeVideo(img_size),
-                    ToTensorVideo(),
-                    NormalizeVideo(mean, std),
-                ]),
-                "test": ComposeVideo([
-                    ResizeVideo(img_size),
-                    ToTensorVideo(),
-                    NormalizeVideo(mean, std),
-                ]),
+                "train": VideoTransform(transforms.Compose([
+                    transforms.Resize(img_size),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std),
+                ])),
+                "val": VideoTransform(transforms.Compose([
+                    transforms.Resize(img_size),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std),
+                ])),
+                "test": VideoTransform(transforms.Compose([
+                    transforms.Resize(img_size),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean, std),
+                ])),
             }
 
             self.transform = data_transform[self.split]

@@ -1,19 +1,3 @@
-from .augmentations import (
-    BaseVideoAug,
-    ResizeVideo,
-    ToTensorVideo,
-    NormalizeVideo,
-    RandomFlipVideo,
-    CenterCropVideo,
-    ComposeVideo,
-)
+from .video_transform import VideoTransform
 
-__all__ = [
-    "BaseVideoAug",
-    "ResizeVideo",
-    "ToTensorVideo",
-    "NormalizeVideo",
-    "RandomFlipVideo",
-    "CenterCropVideo",
-    "ComposeVideo",
-]
+__all__ = ["VideoTransform"]
