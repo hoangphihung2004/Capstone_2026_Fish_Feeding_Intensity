@@ -13,6 +13,7 @@ if project_root not in sys.path:
 import cv2
 import numpy as np
 import torch
+import torchvision.transforms.functional as TVF
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
 from transforms.augmentations.video import ComposeVideo, ToTensorVideo, NormalizeVideo, RandomFlipVideo
@@ -102,7 +103,9 @@ class FishVideoDataLoader:
             if not ret:
                 break
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = cv2.resize(frame, (image_size, image_size))
+            frame_tensor = torch.from_numpy(frame).permute(2, 0, 1)  # [H,W,C] -> [C,H,W]
+            frame_tensor = TVF.resize(frame_tensor, [image_size, image_size], antialias=True)
+            frame = frame_tensor.permute(1, 2, 0).numpy()  # [C,H,W] -> [H,W,C]
             frames.append(frame)
         cap.release()
 
