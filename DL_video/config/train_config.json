@@ -1,11 +1,11 @@
 {
-  "epochs": 500,
-  "batch_size": 64,
+  "epochs": 100,
+  "batch_size": 40,
   "learning_rate": 1e-3,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 100,
+  "patience": 50,
   "delta": 0.0,
   "cache_video": true,
   "dataset_splitter": {
