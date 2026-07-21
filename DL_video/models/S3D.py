@@ -33,8 +33,6 @@ class S3D(BaseBackbone):
         )
 
     def forward(self, x):
-        x = x.transpose(2, 1)
-        # y (2, 1024, 1, 6, 6)
         y = self.base(x)
         y1 = y
         B, C, T, H, W = y1.size()
