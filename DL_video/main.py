@@ -11,7 +11,7 @@ if project_root not in sys.path:
 import torch
 from config import VideoTrainConfig
 from dataset import FishVideoDataLoader
-from models import S3D
+from models import S3D, VideoModel
 from tasks import VideoTrainer
 
 # Logging configuration
@@ -47,8 +47,9 @@ def main():
     val_loader = data_manager.get_dataloader(split='val', shuffle=False)
     test_loader = data_manager.get_dataloader(split='test', shuffle=False)
 
-    # 3. Instantiate Video Model (e.g. S3D)
-    model = S3D(classes_num=4)
+    # 3. Instantiate Video Backbone & Unified VideoModel Wrapper
+    backbone = S3D(classes_num=4)
+    model = VideoModel(backbone=backbone)
     model = model.to(device)
 
     # Apply PyTorch 2.0 compiler optimization if supported
