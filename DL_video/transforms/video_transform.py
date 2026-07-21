@@ -6,10 +6,10 @@ import torchvision.transforms as transforms
 
 class VideoTransform:
     """
-    Wrapper duy nhất: nhận standard torchvision.transforms.Compose
-    và áp dụng cho từng frame của video.
+    Unified Video Transform wrapper: receives standard torchvision.transforms.Compose
+    and applies it per frame of the video.
 
-    Input:  np.ndarray [F, H, W, C] hoặc [F, C, H, W] uint8
+    Input:  np.ndarray [F, H, W, C] or [F, C, H, W] uint8, or torch.Tensor
     Output: torch.Tensor [F, C, H, W] float32
     """
     def __init__(self, transform: transforms.Compose) -> None:
@@ -30,8 +30,8 @@ class VideoTransform:
     @staticmethod
     def get_transforms(image_size: int = 224):
         """
-        Trả về dictionary transform cho train / val / test.
-        Muốn thêm augmentation chỉ cần sửa ở đây.
+        Return transform dictionary for train / val / test splits.
+        Additional video augmentations can be added here.
         """
         mean = (0.5, 0.5, 0.5)
         std = (0.5, 0.5, 0.5)

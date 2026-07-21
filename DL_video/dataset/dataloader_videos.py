@@ -181,7 +181,7 @@ class FishVideoDataLoader:
             else:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
-            # Lấy transform từ transforms/video_transform.py
+            # Load video transform dictionary from transforms/video_transform.py
             data_transform = VideoTransform.get_transforms(image_size=parent.image_size)
             self.transform = data_transform[self.split]
             logger.info(f"Initialized '{self.split}' transformation pipeline.")
