@@ -87,7 +87,7 @@ class VideoTransform:
                 ClipResizeIfNeeded(image_size),
                 # Add clip-level augmentations here, before ClipNormalize.
                 # transforms.ColorJitter(brightness=0.15),
-                transforms.RandomHorizontalFlip(p=0.5),
+                # transforms.RandomHorizontalFlip(p=0.5),
                 # transforms.RandomRotation(20),
                 # transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)),
                 ClipNormalize(mean, std),
