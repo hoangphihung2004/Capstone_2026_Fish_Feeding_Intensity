@@ -182,24 +182,31 @@ class FishVideoDataLoader:
             else:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
-            # Build split-specific transformation pipeline:
-            # Resize is always applied. Augmentations ONLY for 'train'.
+            # Build transform dictionary (giống chuẩn image classification)
             img_size = parent.image_size
-            if self.split == 'train':
-                train_aug_list = [ResizeVideo(img_size), ToTensorVideo()]
-                if hasattr(parent, 'augmentation_config') and getattr(parent.augmentation_config, 'enable_flip', False):
-                    flip_p = getattr(parent.augmentation_config, 'flip_probability', 0.5)
-                    train_aug_list.append(RandomFlipVideo(p=flip_p))
-                train_aug_list.append(NormalizeVideo(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
-                self.transform = ComposeVideo(train_aug_list)
-                logger.info(f"Initialized TRAIN transformation pipeline for split '{self.split}'.")
-            else:
-                self.transform = ComposeVideo([
+            mean, std = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+
+            data_transform = {
+                "train": ComposeVideo([
                     ResizeVideo(img_size),
                     ToTensorVideo(),
-                    NormalizeVideo(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
-                ])
-                logger.info(f"Initialized DETERMINISTIC EVALUATION pipeline for split '{self.split}' (No Augmentations).")
+                    RandomFlipVideo(p=0.5),
+                    NormalizeVideo(mean, std),
+                ]),
+                "val": ComposeVideo([
+                    ResizeVideo(img_size),
+                    ToTensorVideo(),
+                    NormalizeVideo(mean, std),
+                ]),
+                "test": ComposeVideo([
+                    ResizeVideo(img_size),
+                    ToTensorVideo(),
+                    NormalizeVideo(mean, std),
+                ]),
+            }
+
+            self.transform = data_transform[self.split]
+            logger.info(f"Initialized '{self.split}' transformation pipeline.")
 
             if self.cache_video:
                 self._preload_video_to_ram()
