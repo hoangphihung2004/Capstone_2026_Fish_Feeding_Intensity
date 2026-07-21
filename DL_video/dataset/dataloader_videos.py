@@ -16,7 +16,7 @@ import torch
 import torchvision.transforms.functional as TVF
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
-from transforms.augmentations.video import ComposeVideo, ToTensorVideo, NormalizeVideo, RandomFlipVideo
+from transforms.augmentations.video import ComposeVideo, ResizeVideo, ToTensorVideo, NormalizeVideo, RandomFlipVideo
 
 # Force stdout/stderr to use UTF-8 encoding
 if hasattr(sys.stdout, 'reconfigure'):
@@ -103,9 +103,6 @@ class FishVideoDataLoader:
             if not ret:
                 break
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_tensor = torch.from_numpy(frame).permute(2, 0, 1)  # [H,W,C] -> [C,H,W]
-            frame_tensor = TVF.resize(frame_tensor, [image_size, image_size], antialias=True)
-            frame = frame_tensor.permute(1, 2, 0).numpy()  # [C,H,W] -> [H,W,C]
             frames.append(frame)
         cap.release()
 
@@ -186,9 +183,10 @@ class FishVideoDataLoader:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
             # Build split-specific transformation pipeline:
-            # Data Augmentations are ONLY applied during 'train'. 'val' and 'test' use strictly deterministic transforms.
+            # Resize is always applied. Augmentations ONLY for 'train'.
+            img_size = parent.image_size
             if self.split == 'train':
-                train_aug_list = [ToTensorVideo()]
+                train_aug_list = [ResizeVideo(img_size), ToTensorVideo()]
                 if hasattr(parent, 'augmentation_config') and getattr(parent.augmentation_config, 'enable_flip', False):
                     flip_p = getattr(parent.augmentation_config, 'flip_probability', 0.5)
                     train_aug_list.append(RandomFlipVideo(p=flip_p))
@@ -197,6 +195,7 @@ class FishVideoDataLoader:
                 logger.info(f"Initialized TRAIN transformation pipeline for split '{self.split}'.")
             else:
                 self.transform = ComposeVideo([
+                    ResizeVideo(img_size),
                     ToTensorVideo(),
                     NormalizeVideo(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
                 ])

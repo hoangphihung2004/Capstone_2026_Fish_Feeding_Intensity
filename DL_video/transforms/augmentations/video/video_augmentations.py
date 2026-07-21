@@ -10,6 +10,25 @@ from .base_augmentation import BaseVideoAug
 logger = logging.getLogger(__name__)
 
 
+class ResizeVideo(BaseVideoAug):
+    """
+    Resize video frames utilizing official torchvision.transforms.functional.resize.
+    """
+    def __init__(self, size: int = 224) -> None:
+        super().__init__()
+        self.size = [size, size]
+        logger.info(f"Initialized ResizeVideo utilizing official torchvision.transforms.functional.resize (size={size}).")
+
+    def forward(self, video: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if isinstance(video, np.ndarray):
+            video = torch.from_numpy(video)
+
+        if video.dim() == 4:
+            if video.shape[-1] == 3:  # [F, H, W, C] -> [F, C, H, W]
+                video = video.permute(0, 3, 1, 2)
+            return torch.stack([TVF.resize(frame, self.size, antialias=True) for frame in video])
+        return TVF.resize(video, self.size, antialias=True)
+
 class ToTensorVideo(BaseVideoAug):
     """
     Convert raw video array/tensor (uint8 [0, 255]) to float32 PyTorch Tensor in range [0.0, 1.0]

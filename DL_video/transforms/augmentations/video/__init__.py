@@ -1,5 +1,6 @@
 from .base_augmentation import BaseVideoAug
 from .video_augmentations import (
+    ResizeVideo,
     ToTensorVideo,
     NormalizeVideo,
     RandomFlipVideo,
@@ -9,6 +10,7 @@ from .video_augmentations import (
 
 __all__ = [
     "BaseVideoAug",
+    "ResizeVideo",
     "ToTensorVideo",
     "NormalizeVideo",
     "RandomFlipVideo",

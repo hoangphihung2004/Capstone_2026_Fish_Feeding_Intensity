@@ -1,5 +1,6 @@
 from .video import (
     BaseVideoAug,
+    ResizeVideo,
     ToTensorVideo,
     NormalizeVideo,
     RandomFlipVideo,
@@ -9,6 +10,7 @@ from .video import (
 
 __all__ = [
     "BaseVideoAug",
+    "ResizeVideo",
     "ToTensorVideo",
     "NormalizeVideo",
     "RandomFlipVideo",
