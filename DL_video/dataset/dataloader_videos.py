@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
-from transforms import get_video_transforms
+from transforms import VideoTransform
 
 # Force stdout/stderr to use UTF-8 encoding
 if hasattr(sys.stdout, 'reconfigure'):
@@ -182,7 +182,7 @@ class FishVideoDataLoader:
                 raise ValueError(f"Invalid split value '{self.split}'. Must be one of ['train', 'test', 'val'].")
 
             # Lấy transform từ transforms/video_transform.py
-            data_transform = get_video_transforms(image_size=parent.image_size)
+            data_transform = VideoTransform.get_transforms(image_size=parent.image_size)
             self.transform = data_transform[self.split]
             logger.info(f"Initialized '{self.split}' transformation pipeline.")
 

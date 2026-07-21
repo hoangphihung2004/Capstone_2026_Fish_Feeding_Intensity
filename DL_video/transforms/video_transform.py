@@ -27,33 +27,33 @@ class VideoTransform:
         transformed = [self.transform(frame) for frame in frames]
         return torch.stack(transformed)
 
+    @staticmethod
+    def get_transforms(image_size: int = 224):
+        """
+        Trả về dictionary transform cho train / val / test.
+        Muốn thêm augmentation chỉ cần sửa ở đây.
+        """
+        mean = (0.5, 0.5, 0.5)
+        std = (0.5, 0.5, 0.5)
+        img_size = (image_size, image_size)
 
-def get_video_transforms(image_size: int = 224):
-    """
-    Trả về dictionary transform cho train / val / test.
-    Muốn thêm augmentation chỉ cần sửa ở đây.
-    """
-    mean = (0.5, 0.5, 0.5)
-    std = (0.5, 0.5, 0.5)
-    img_size = (image_size, image_size)
+        data_transform = {
+            "train": VideoTransform(transforms.Compose([
+                transforms.Resize(img_size),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])),
+            "val": VideoTransform(transforms.Compose([
+                transforms.Resize(img_size),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])),
+            "test": VideoTransform(transforms.Compose([
+                transforms.Resize(img_size),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
+            ])),
+        }
 
-    data_transform = {
-        "train": VideoTransform(transforms.Compose([
-            transforms.Resize(img_size),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])),
-        "val": VideoTransform(transforms.Compose([
-            transforms.Resize(img_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])),
-        "test": VideoTransform(transforms.Compose([
-            transforms.Resize(img_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ])),
-    }
-
-    return data_transform
+        return data_transform
