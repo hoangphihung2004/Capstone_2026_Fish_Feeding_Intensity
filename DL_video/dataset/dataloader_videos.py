@@ -16,7 +16,7 @@ import torch
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 from dataset import SplitterConfig, FishDataSplitter
-from transforms import VideoTransform
+from video_transform import VideoTransform
 
 # Force stdout/stderr to use UTF-8 encoding
 if hasattr(sys.stdout, 'reconfigure'):
