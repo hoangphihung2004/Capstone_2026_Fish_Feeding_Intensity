@@ -63,7 +63,7 @@ def main():
         splitter_config=config.dataset_splitter
     )
 
-    train_loader = loader_manager.get_dataloader(split='train', shuffle=True)
+    train_loader = loader_manager.get_dataloader(split='train', shuffle=True, drop_last=True)
     val_loader = loader_manager.get_dataloader(split='val', shuffle=False)
     test_loader = loader_manager.get_dataloader(split='test', shuffle=False)
 

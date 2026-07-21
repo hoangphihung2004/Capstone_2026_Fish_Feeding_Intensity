@@ -89,7 +89,7 @@ class VideoTrainer:
         # Mixed precision settings
         self.use_amp = torch.cuda.is_available()
         self.amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(self.use_amp and self.amp_dtype == torch.float16))
+        self.scaler = torch.amp.GradScaler("cuda", enabled=(self.use_amp and self.amp_dtype == torch.float16))
 
         logger.info("==================================================")
         logger.info("VideoTrainer successfully initialized:")
@@ -116,7 +116,7 @@ class VideoTrainer:
             self.optimizer.zero_grad()
 
             if self.use_amp:
-                with torch.cuda.amp.autocast(dtype=self.amp_dtype):
+                with torch.amp.autocast("cuda", dtype=self.amp_dtype):
                     outputs = self.model(inputs)
                     if isinstance(outputs, dict):
                         outputs = outputs.get('clipwise_output', outputs)
