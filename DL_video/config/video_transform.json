@@ -1,6 +1,0 @@
-{
-  "enable_flip": false,
-  "flip_probability": 0.5,
-  "enable_crop": false,
-  "crop_size": [196, 196]
-}

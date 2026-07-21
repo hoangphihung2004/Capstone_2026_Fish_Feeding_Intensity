@@ -1,8 +1,7 @@
-from .video_config import VideoTrainConfig, CommonVideoFeaturesConfig, VideoAugmentationConfig, SplitterConfig
+from .video_config import VideoTrainConfig, VideoFeaturesConfig, SplitterConfig
 
 __all__ = [
     "VideoTrainConfig",
-    "CommonVideoFeaturesConfig",
-    "VideoAugmentationConfig",
+    "VideoFeaturesConfig",
     "SplitterConfig",
 ]

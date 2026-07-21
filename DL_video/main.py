@@ -27,12 +27,8 @@ def main():
     logger.info("Launching Video Pipeline Training Sub-Project (DL_video)")
     logger.info("==================================================")
 
-    # 1. Load modular video configuration
-    config = VideoTrainConfig.load_modular(
-        common_path='config/video_common.json',
-        aug_path='config/video_transform.json',
-        model_path='config/models/s3d.json'
-    )
+    # 1. Load unified video configuration
+    config = VideoTrainConfig.from_json('config/video_config.json')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using Device: {device} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")

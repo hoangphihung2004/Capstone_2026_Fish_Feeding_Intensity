@@ -53,7 +53,9 @@ class VideoTrainer:
         self.ckpt_dir = config.ckpt_dir
 
         os.makedirs(self.ckpt_dir, exist_ok=True)
-        self.config.save_merged_checkpoint_config(self.ckpt_dir)
+        config_dest = os.path.join(self.ckpt_dir, 'video_config.json')
+        with open(config_dest, 'w', encoding='utf-8') as f:
+            json.dump(self.config.model_dump(), f, indent=2)
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.AdamW(self.model.parameters(), lr=self.config.learning_rate)
