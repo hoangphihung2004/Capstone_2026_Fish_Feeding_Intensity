@@ -1,10 +1,12 @@
+from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 
 
-class BaseBackbone(nn.Module):
+class BaseBackbone(nn.Module, ABC):
     """
     Abstract Base Class (ABC / Interface) standardizing Video Backbone models.
+    Enforces mandatory inheritance and implementation of abstract methods.
 
     Interface Contract:
       - Input:  5D Video tensor [Batch, Channels (3), Frames (T), Height (H), Width (W)]
@@ -20,8 +22,9 @@ class BaseBackbone(nn.Module):
         """
         return self.model_name
 
+    @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward Pass. Subclasses must override this method.
+        Forward Pass. Subclasses MUST implement this abstract method.
         """
-        raise NotImplementedError("Method 'forward' must be implemented in subclasses.")
+        pass
