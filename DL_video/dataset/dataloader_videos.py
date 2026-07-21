@@ -35,6 +35,8 @@ def _load_video_worker(args: Tuple) -> Tuple[int, Dict[str, Any]]:
     """
     Module-level worker function for ProcessPoolExecutor.
     Must be a top-level function (not nested) to be picklable across processes.
+    Uses decord GPU decode (following original author's pattern) for maximum throughput.
+    Falls back to decord CPU decode if GPU context is unavailable.
 
     Args:
         args: Tuple of (idx, video_path, label, image_size, frames_count)
@@ -44,42 +46,46 @@ def _load_video_worker(args: Tuple) -> Tuple[int, Dict[str, Any]]:
     """
     idx, video_path, label, image_size, frames_count = args
 
-    import cv2
     import numpy as np
     import torch
+    from decord import VideoReader, cpu, gpu
 
-    cap = cv2.VideoCapture(video_path)
-    frames = []
-    if cap.isOpened():
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame)
-        cap.release()
+    # Attempt GPU decode first (following original author's approach), fallback to CPU
+    try:
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=gpu(0))
+    except Exception:
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0))
 
-    num_frames = len(frames)
-    if num_frames == 0:
+    full_vid_length = len(vr)
+
+    if full_vid_length == 0:
         vf_uint8 = np.zeros((frames_count, 3, image_size, image_size), dtype=np.uint8)
     else:
-        actual_count = min(frames_count, num_frames)
-        segment_width = num_frames / actual_count
+        # Segment-based sampling: divide video into frames_count equal segments,
+        # pick 1 random frame per segment (identical logic to original cv2 implementation)
+        actual_count = min(frames_count, full_vid_length)
+        segment_width = full_vid_length / actual_count
         selected_indices = []
         for i in range(actual_count):
             start = int(i * segment_width)
             end = max(start, int((i + 1) * segment_width) - 1)
-            end = min(end, num_frames - 1)
+            end = min(end, full_vid_length - 1)
             if start == end:
                 val = start
             else:
                 val = int(torch.randint(low=start, high=end + 1, size=(1,)).item())
             selected_indices.append(val)
         selected_indices = sorted(selected_indices)
-        selected_frames = [frames[y] for y in selected_indices]
-        while len(selected_frames) < frames_count:
-            selected_frames.append(selected_frames[-1])
-        vf_uint8 = np.stack([f.transpose(2, 0, 1) for f in selected_frames]).astype(np.uint8)
+
+        # Pad if fewer frames than required
+        while len(selected_indices) < frames_count:
+            selected_indices.append(selected_indices[-1])
+
+        # decord get_batch: returns NDArray shape [T, H, W, C] in RGB
+        video_frames = vr.get_batch(selected_indices).asnumpy()  # [T, H, W, C]
+
+        # Convert to [T, C, H, W] uint8 matching original format
+        vf_uint8 = video_frames.transpose(0, 3, 1, 2).astype(np.uint8)
 
     return idx, {
         'video_name': video_path,
