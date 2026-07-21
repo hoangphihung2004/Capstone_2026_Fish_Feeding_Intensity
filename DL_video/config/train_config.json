@@ -1,6 +1,9 @@
 {
   "epochs": 100,
   "batch_size": 40,
+  "preload_workers": 16,
+  "dataloader_workers": 5,
+  "prefetch_factor": 2,
   "learning_rate": 1e-3,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",

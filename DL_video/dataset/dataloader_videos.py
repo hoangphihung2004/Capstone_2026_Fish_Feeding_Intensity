@@ -103,27 +103,21 @@ class FishVideoDataLoader:
     def __init__(
         self,
         batch_size: int = 50,
-        num_workers: int = -1,
+        preload_workers: int = 8,
+        dataloader_workers: int = 0,
+        prefetch_factor: int = 1,
         cache_video: bool = True,
         image_size: int = 224,
         frames_count: int = 4,
         splitter_config: Optional[SplitterConfig] = None
     ) -> None:
         self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.preload_workers = preload_workers
+        self.dataloader_workers = dataloader_workers
+        self.prefetch_factor = prefetch_factor
         self.cache_video = cache_video
         self.image_size = image_size
         self.frames_count = frames_count
-
-        # Auto-detect optimal CPU worker threads if set to -1
-        if self.num_workers == -1:
-            max_cpu = os.cpu_count()
-            if max_cpu is None or max_cpu <= 0:
-                self.num_workers = 0
-            elif max_cpu == 2:
-                self.num_workers = max_cpu // 2
-            else:
-                self.num_workers = (max_cpu // 2) + 1
 
         # 1. Load splitter configurations and initialize the data splitter
         if splitter_config is None:
@@ -138,7 +132,9 @@ class FishVideoDataLoader:
         logger.info("==================================================")
         logger.info("Initializing FishVideoDataLoader (Direct In-RAM Pipeline):")
         logger.info(f"  - Batch Size:               {self.batch_size}")
-        logger.info(f"  - Num Workers:              {self.num_workers} (Auto-calculated from {os.cpu_count()} CPU cores)")
+        logger.info(f"  - Preload Workers:          {self.preload_workers}")
+        logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
+        logger.info(f"  - DataLoader Prefetch:      {self.prefetch_factor if self.dataloader_workers > 0 else 'disabled'}")
         logger.info(f"  - Direct RAM Caching:       {self.cache_video}")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
         logger.info(f"  - Frames per Video:         {self.frames_count} (Segment-based Sampling)")
@@ -253,8 +249,7 @@ class FishVideoDataLoader:
                 self._preload_video_to_ram()
 
         def _preload_video_to_ram(self) -> None:
-            # Reuse num_workers already calculated in FishVideoDataLoader.__init__
-            max_workers = self.parent.num_workers
+            max_workers = self.parent.preload_workers
 
             logger.info(f"Starting direct MP4 -> RAM preload for split '{self.split}' ({len(self.data_dict)} samples)...")
             logger.info(f"Using ProcessPoolExecutor with {max_workers} workers ({os.cpu_count()} CPU cores detected).")
@@ -341,15 +336,17 @@ class FishVideoDataLoader:
     ) -> DataLoader:
         dataset = self._InnerDataset(parent=self, split=split)
 
-        return DataLoader(
-            dataset=dataset,
-            batch_size=self.batch_size,
-            shuffle=shuffle,
-            drop_last=drop_last,
-            num_workers=self.num_workers,
-            collate_fn=self.collate_fn,
-            pin_memory=True,
-            persistent_workers=self.num_workers > 0,
-            prefetch_factor=1 if self.num_workers > 0 else None
+        dataloader_kwargs = {
+            "dataset": dataset,
+            "batch_size": self.batch_size,
+            "shuffle": shuffle,
+            "drop_last": drop_last,
+            "num_workers": self.dataloader_workers,
+            "collate_fn": self.collate_fn,
+            "pin_memory": True,
+            "persistent_workers": self.dataloader_workers > 0,
+        }
+        if self.dataloader_workers > 0:
+            dataloader_kwargs["prefetch_factor"] = self.prefetch_factor
 
-        )
+        return DataLoader(**dataloader_kwargs)
