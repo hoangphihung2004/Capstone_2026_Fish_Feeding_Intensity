@@ -37,10 +37,11 @@ class VideoModel(nn.Module):
         """
         super(VideoModel, self).__init__()
 
-        if isinstance(backbone, BaseBackbone):
-            logger.info(f"Verified backbone model '{backbone.get_name()}' inherits from BaseBackbone.")
+        # Type safety validation to enforce compliance with BaseBackbone interface contract
+        assert isinstance(backbone, BaseBackbone), "Error: Provided backbone model must inherit from BaseBackbone!"
 
         self.backbone = backbone
+        logger.info(f"Verified backbone model '{self.backbone.get_name()}' inherits from BaseBackbone.")
 
         logger.info("==================================================")
         logger.info("Initialized unified VideoModel wrapper:")
