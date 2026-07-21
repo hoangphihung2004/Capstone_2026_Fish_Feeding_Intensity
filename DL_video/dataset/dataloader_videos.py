@@ -349,5 +349,7 @@ class FishVideoDataLoader:
             num_workers=self.num_workers,
             collate_fn=self.collate_fn,
             pin_memory=True,
-            persistent_workers=self.num_workers > 0
+            persistent_workers=self.num_workers > 0,
+            prefetch_factor=1 if self.num_workers > 0 else None
+
         )
