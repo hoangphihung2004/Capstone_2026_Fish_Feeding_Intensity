@@ -83,13 +83,16 @@ class VideoTrainer:
         else:
             self.early_stopper = None
 
-        self.history_logger = HistoryLogger(log_dir=self.ckpt_dir)
-        self.evaluator = VideoEvaluator(model=self.model)
-
         # Mixed precision settings
         self.use_amp = torch.cuda.is_available()
         self.amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
         self.scaler = torch.amp.GradScaler("cuda", enabled=(self.use_amp and self.amp_dtype == torch.float16))
+        self.history_logger = HistoryLogger(log_dir=self.ckpt_dir)
+        self.evaluator = VideoEvaluator(
+            model=self.model,
+            use_amp=self.use_amp,
+            amp_dtype=self.amp_dtype
+        )
 
         logger.info("==================================================")
         logger.info("VideoTrainer successfully initialized:")
@@ -201,11 +204,20 @@ class VideoTrainer:
                 for val_batch in self.val_loader:
                     val_inputs = val_batch['video_form'].to(self.device)
                     val_targets = val_batch['target'].to(self.device)
-                    val_outputs = self.model(val_inputs)
-                    if isinstance(val_outputs, dict):
-                        val_outputs = val_outputs.get('clipwise_output', val_outputs)
-                    val_targ_labels = val_targets.argmax(dim=1) if val_targets.dim() > 1 else val_targets
-                    val_loss_sum += self.criterion(val_outputs, val_targ_labels).item()
+                    if self.use_amp:
+                        with torch.amp.autocast("cuda", dtype=self.amp_dtype):
+                            val_outputs = self.model(val_inputs)
+                            if isinstance(val_outputs, dict):
+                                val_outputs = val_outputs.get('clipwise_output', val_outputs)
+                            val_targ_labels = val_targets.argmax(dim=1) if val_targets.dim() > 1 else val_targets
+                            val_loss = self.criterion(val_outputs, val_targ_labels)
+                    else:
+                        val_outputs = self.model(val_inputs)
+                        if isinstance(val_outputs, dict):
+                            val_outputs = val_outputs.get('clipwise_output', val_outputs)
+                        val_targ_labels = val_targets.argmax(dim=1) if val_targets.dim() > 1 else val_targets
+                        val_loss = self.criterion(val_outputs, val_targ_labels)
+                    val_loss_sum += val_loss.item()
             val_loss = val_loss_sum / len(self.val_loader)
 
             logger.info(

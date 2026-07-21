@@ -1,7 +1,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Ensure project root is in sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -27,13 +27,20 @@ class BaseEvaluator:
     Abstract Base Class (ABC / Interface) standardizing evaluation metrics computation.
     Complies with OOP design guidelines.
     """
-    def __init__(self, model: nn.Module) -> None:
+    def __init__(
+        self,
+        model: nn.Module,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None
+    ) -> None:
         """
         Initialize base evaluator.
         """
         self.model = model
         # Dynamically retrieve execution device (CPU/GPU) from model parameters
         self.device = next(model.parameters()).device
+        self.use_amp = use_amp and self.device.type == "cuda"
+        self.amp_dtype = amp_dtype if amp_dtype is not None else torch.float16
 
     def evaluate(self, data_loader: Any) -> Dict[str, Any]:
         """
@@ -47,8 +54,17 @@ class VideoEvaluator(BaseEvaluator):
     Specialized VideoEvaluator class, inheriting from BaseEvaluator.
     Encapsulates raw video model inference, postprocessing, and classification metrics calculation.
     """
-    def __init__(self, model: nn.Module) -> None:
-        super(VideoEvaluator, self).__init__(model)
+    def __init__(
+        self,
+        model: nn.Module,
+        use_amp: bool = False,
+        amp_dtype: Optional[torch.dtype] = None
+    ) -> None:
+        super(VideoEvaluator, self).__init__(
+            model=model,
+            use_amp=use_amp,
+            amp_dtype=amp_dtype
+        )
 
     def _move_data_to_device(self, x: Any) -> torch.Tensor:
         """
@@ -84,7 +100,11 @@ class VideoEvaluator(BaseEvaluator):
             
             with torch.no_grad():
                 self.model.eval()
-                batch_output = self.model(batch_video)
+                if self.use_amp:
+                    with torch.amp.autocast("cuda", dtype=self.amp_dtype):
+                        batch_output = self.model(batch_video)
+                else:
+                    batch_output = self.model(batch_video)
                 if isinstance(batch_output, dict):
                     batch_logits = batch_output.get('clipwise_output', batch_output)
                 else:
