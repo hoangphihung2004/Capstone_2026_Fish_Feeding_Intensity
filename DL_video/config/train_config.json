@@ -10,7 +10,7 @@
   "cache_video": true,
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
-    "seed": 25,
+    "seed":42,
     "test_sample_per_class": 700,
     "save_results": true,
     "include_video": true
