@@ -3,10 +3,13 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from models.base_backbone import BaseBackbone
 
-class S3D(nn.Module):
-    def __init__(self, classes_num):
+
+class S3D(BaseBackbone):
+    def __init__(self, classes_num=4):
         super(S3D, self).__init__()
+        self.model_name = "s3d"
         self.base = nn.Sequential(
             SepConv3d(3, 64, kernel_size=7, stride=2, padding=3),
             nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1)),

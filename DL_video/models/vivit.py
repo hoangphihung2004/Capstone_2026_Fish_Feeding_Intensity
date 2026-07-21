@@ -85,20 +85,23 @@ class Transformer(nn.Module):
         return x
 
 
-class ViViT(nn.Module):
+from models.base_backbone import BaseBackbone
+
+
+class ViViT(BaseBackbone):
     def __init__(
         self,
         *,
-        image_size,
-        image_patch_size,
-        frames,
-        frame_patch_size,
-        num_classes,
-        dim,
-        spatial_depth,
-        temporal_depth,
-        heads,
-        mlp_dim,
+        image_size=224,
+        image_patch_size=16,
+        frames=4,
+        frame_patch_size=1,
+        num_classes=4,
+        dim=768,
+        spatial_depth=6,
+        temporal_depth=6,
+        heads=8,
+        mlp_dim=1024,
         pool = 'cls',
         channels = 3,
         dim_head = 64,
@@ -106,6 +109,7 @@ class ViViT(nn.Module):
         emb_dropout = 0.
     ):
         super().__init__()
+        self.model_name = "vivit"
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(image_patch_size)
 

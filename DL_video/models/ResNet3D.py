@@ -99,8 +99,10 @@ class Bottleneck(nn.Module):
         return out
 
 
-class ResNet(nn.Module):
+from models.base_backbone import BaseBackbone
 
+
+class ResNet(BaseBackbone):
     def __init__(self,
                  block,
                  layers,
@@ -113,6 +115,7 @@ class ResNet(nn.Module):
                  widen_factor=1.0,
                  n_classes=4):
         super().__init__()
+        self.model_name = "resnet3d"
 
         block_inplanes = [int(x * widen_factor) for x in block_inplanes]
 

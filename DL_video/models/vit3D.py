@@ -79,9 +79,13 @@ class Transformer(nn.Module):
             x = ff(x) + x
         return x
 
-class ViT3D(nn.Module):
-    def __init__(self, *, image_size, image_patch_size, frames, frame_patch_size, num_classes, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
+from models.base_backbone import BaseBackbone
+
+
+class ViT3D(BaseBackbone):
+    def __init__(self, *, image_size=224, image_patch_size=16, frames=4, frame_patch_size=1, num_classes=4, dim=768, depth=6, heads=8, mlp_dim=1024, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
         super().__init__()
+        self.model_name = "vit3d"
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(image_patch_size)
 

@@ -189,9 +189,13 @@ model_cfg = {
 }
 
 
-class MobileViT(nn.Module):
+from models.base_backbone import BaseBackbone
+
+
+class MobileViT(BaseBackbone):
     def __init__(self, img_size, features_list, d_list, transformer_depth, expansion, classes_num = 4):
         super(MobileViT, self).__init__()
+        self.model_name = "mobilevit"
 
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=features_list[0], kernel_size=3, stride=2, padding=1),
