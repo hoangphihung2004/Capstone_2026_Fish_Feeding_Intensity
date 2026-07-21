@@ -52,13 +52,6 @@ def main():
     model = VideoModel(backbone=backbone)
     model = model.to(device)
 
-    # Apply PyTorch 2.0 compiler optimization if supported
-    if hasattr(torch, 'compile') and torch.cuda.is_available():
-        try:
-            logger.info("Applying torch.compile() model acceleration for Blackwell GPU...")
-            model = torch.compile(model)
-        except Exception as e:
-            logger.warning(f"Could not compile model with torch.compile: {e}")
 
     # 4. Instantiate and run VideoTrainer
     trainer = VideoTrainer(
