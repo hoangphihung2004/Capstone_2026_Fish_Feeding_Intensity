@@ -1,7 +1,7 @@
 {
   "epochs": 100,
   "batch_size": 40,
-  "dataloader_workers": 5,
+  "dataloader_workers": 10,
   "learning_rate": 1e-3,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
