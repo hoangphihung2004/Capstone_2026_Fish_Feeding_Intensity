@@ -42,7 +42,8 @@ class VideoTrainer:
         val_loader: Any,
         test_loader: Any,
         config: VideoTrainConfig,
-        device: torch.device
+        device: torch.device,
+        optimizer: Optional[optim.Optimizer] = None
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -58,7 +59,10 @@ class VideoTrainer:
             json.dump(self.config.model_dump(), f, indent=2)
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=self.config.learning_rate)
+        if optimizer is not None:
+            self.optimizer = optimizer
+        else:
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
 
         # Early stopping & History logger
         self.early_stopping = config.early_stopping
@@ -69,9 +73,10 @@ class VideoTrainer:
 
         self.history_logger = HistoryLogger(log_dir=self.ckpt_dir)
 
-        # Mixed precision scaler for CUDA
+        # Mixed precision settings
         self.use_amp = torch.cuda.is_available()
-        self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        self.amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
+        self.scaler = torch.cuda.amp.GradScaler(enabled=(self.use_amp and self.amp_dtype == torch.float16))
 
         logger.info(f"Initialized VideoTrainer (AMP={self.use_amp}, dtype={self.amp_dtype}, device={self.device})")
 
@@ -100,8 +105,13 @@ class VideoTrainer:
                         target_labels = targets
                     loss = self.criterion(outputs, target_labels)
 
-                loss.backward()
-                self.optimizer.step()
+                if self.scaler.is_enabled():
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    self.optimizer.step()
             else:
                 outputs = self.model(inputs)
                 if isinstance(outputs, dict):
