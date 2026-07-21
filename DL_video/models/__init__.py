@@ -4,7 +4,15 @@ from .S3D import S3D
 from .vit3D import ViT3D
 from .vivit import ViViT
 from .ResNet3D import generate_model as generate_resnet3d
-from .MobileVitV1 import mobilevit_xxs, mobilevit_xs, mobilevit_s
+from .MobileVitV1 import (
+    MobileViT,
+    MobileViT_XXS,
+    MobileViT_XS,
+    MobileViT_S,
+    mobilevit_xxs,
+    mobilevit_xs,
+    mobilevit_s,
+)
 
 __all__ = [
     "BaseBackbone",
@@ -13,6 +21,10 @@ __all__ = [
     "ViT3D",
     "ViViT",
     "generate_resnet3d",
+    "MobileViT",
+    "MobileViT_XXS",
+    "MobileViT_XS",
+    "MobileViT_S",
     "mobilevit_xxs",
     "mobilevit_xs",
     "mobilevit_s",

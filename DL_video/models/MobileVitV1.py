@@ -246,22 +246,28 @@ class MobileViT(BaseBackbone):
         return x
 
 
-def MobileViT_XXS(img_size=128, classes_num=4):
+def MobileViT_XXS(img_size=224, classes_num=4):
     cfg_xxs = model_cfg["xxs"]
     model_xxs = MobileViT(img_size, cfg_xxs["features"], cfg_xxs["d"], cfg_xxs["layers"], cfg_xxs["expansion_ratio"], classes_num)
     return model_xxs
 
 
-def MobileViT_XS(img_size=256, classes_num=1000):
+def MobileViT_XS(img_size=224, classes_num=4):
     cfg_xs = model_cfg["xs"]
     model_xs = MobileViT(img_size, cfg_xs["features"], cfg_xs["d"], cfg_xs["layers"], cfg_xs["expansion_ratio"], classes_num)
     return model_xs
 
 
-def MobileViT_S(img_size=256, classes_num=1000):
+def MobileViT_S(img_size=224, classes_num=4):
     cfg_s = model_cfg["s"]
     model_s = MobileViT(img_size, cfg_s["features"], cfg_s["d"], cfg_s["layers"], cfg_s["expansion_ratio"], classes_num)
     return model_s
+
+
+# Aliases for lowercase function names
+mobilevit_xxs = MobileViT_XXS
+mobilevit_xs = MobileViT_XS
+mobilevit_s = MobileViT_S
 
 
 if __name__ == "__main__":
