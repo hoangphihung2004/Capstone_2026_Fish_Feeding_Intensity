@@ -5,7 +5,7 @@
   "ckpt_dir": "video_checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 30,
+  "patience": 100,
   "delta": 0.0,
   "cache_video": true,
   "dataset_splitter": {
