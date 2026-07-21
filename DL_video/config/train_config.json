@@ -3,7 +3,7 @@
   "batch_size": 40,
   "preload_workers": 16,
   "dataloader_workers": 5,
-  "prefetch_factor": 2,
+  "prefetch_factor": 1,
   "learning_rate": 1e-3,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
