@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from config import VideoTrainConfig
 from dataset import FishVideoDataLoader
-from utils import EarlyStopping, HistoryLogger, VideoEvaluator
+from utils import EarlyStopping, HistoryLogger, VideoEvaluator, InferenceTimer
 
 # Logging configuration
 logging.basicConfig(
@@ -33,7 +33,7 @@ class VideoTrainer:
     """
     Unified Trainer class for Fish Video Intensity Classification.
     Identical OOP structure with AudioTrainer: supports AMP bfloat16 mixed precision,
-    HistoryLogger, EarlyStopping, and automatic experiment checkpointing.
+    HistoryLogger, EarlyStopping, InferenceTimer, and automatic experiment checkpointing.
     """
     def __init__(
         self,
@@ -72,6 +72,7 @@ class VideoTrainer:
             self.early_stopper = None
 
         self.history_logger = HistoryLogger(log_dir=self.ckpt_dir)
+        self.evaluator = VideoEvaluator(model=self.model)
 
         # Mixed precision settings
         self.use_amp = torch.cuda.is_available()
@@ -88,11 +89,11 @@ class VideoTrainer:
         logger.info(f"  - Early Stopping:              {self.early_stopping} (Patience={self.config.patience})")
         logger.info("==================================================")
 
-    def train_epoch(self, epoch: int) -> Tuple[float, float]:
+    def train_epoch(self, epoch: int) -> Tuple[float, float, float]:
         self.model.train()
         total_loss = 0.0
-        correct = 0
-        total = 0
+        train_preds = []
+        train_targets = []
 
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch:03d}/{self.config.epochs:03d} [Train]")
         for batch in pbar:
@@ -134,79 +135,73 @@ class VideoTrainer:
                 self.optimizer.step()
 
             total_loss += loss.item() * inputs.size(0)
-            preds = outputs.argmax(dim=1)
-            correct += (preds == target_labels).sum().item()
-            total += inputs.size(0)
+            train_preds.append(outputs.detach().cpu().numpy())
+            train_targets.append(targets.cpu().numpy())
 
-            pbar.set_postfix({'loss': f"{loss.item():.4f}", 'acc': f"{correct / total:.4f}"})
+            pbar.set_postfix({'loss': f"{loss.item():.4f}"})
 
-        epoch_loss = total_loss / total
-        epoch_acc = correct / total
-        return epoch_loss, epoch_acc
+        epoch_loss = total_loss / len(self.train_loader.dataset)
+        train_preds = np.concatenate(train_preds, axis=0)
+        train_targets = np.concatenate(train_targets, axis=0)
 
-    @torch.no_grad()
-    def evaluate(self, dataloader: Any, split_name: str = "Val") -> Tuple[float, float]:
-        self.model.eval()
-        total_loss = 0.0
-        correct = 0
-        total = 0
+        target_acc_labels = np.argmax(train_targets, axis=1) if train_targets.ndim > 1 else train_targets
+        pred_acc_labels = np.argmax(train_preds, axis=1)
+        train_acc = np.mean(target_acc_labels == pred_acc_labels)
 
-        for batch in dataloader:
-            inputs = batch['video_form'].to(self.device)
-            targets = batch['target'].to(self.device)
+        from sklearn import metrics as sklearn_metrics
+        train_mAP = np.mean(sklearn_metrics.average_precision_score(train_targets, train_preds, average=None))
 
-            if self.use_amp:
-                with torch.cuda.amp.autocast(dtype=self.amp_dtype):
-                    outputs = self.model(inputs)
-                    if isinstance(outputs, dict):
-                        outputs = outputs.get('clipwise_output', outputs)
-                    if targets.dim() > 1:
-                        target_labels = targets.argmax(dim=1)
-                    else:
-                        target_labels = targets
-                    loss = self.criterion(outputs, target_labels)
-            else:
-                outputs = self.model(inputs)
-                if isinstance(outputs, dict):
-                    outputs = outputs.get('clipwise_output', outputs)
-                if targets.dim() > 1:
-                    target_labels = targets.argmax(dim=1)
-                else:
-                    target_labels = targets
-                loss = self.criterion(outputs, target_labels)
-
-            total_loss += loss.item() * inputs.size(0)
-            preds = outputs.argmax(dim=1)
-            correct += (preds == target_labels).sum().item()
-            total += inputs.size(0)
-
-        eval_loss = total_loss / total
-        eval_acc = correct / total
-        logger.info(f"[{split_name} Evaluation] Loss: {eval_loss:.4f} | Accuracy: {eval_acc:.4f}")
-        return eval_loss, eval_acc
+        return epoch_loss, train_acc, train_mAP
 
     def fit(self) -> None:
-        best_metric = -1.0 if self.config.monitor == 'accuracy' else float('inf')
+        best_val_metric = -1.0 if self.config.monitor == 'accuracy' else float('inf')
+        best_epoch = 0
+        best_val_statistics = None
+        train_start_time = time.perf_counter()
 
         for epoch in range(1, self.config.epochs + 1):
-            train_loss, train_acc = self.train_epoch(epoch)
-            val_loss, val_acc = self.evaluate(self.val_loader, split_name="Val")
+            train_loss, train_acc, train_mAP = self.train_epoch(epoch)
+            
+            # Evaluate on validation set
+            self.model.eval()
+            val_statistics = self.evaluator.evaluate(self.val_loader)
+            val_acc = val_statistics['accuracy']
+            val_mAP = np.mean(val_statistics['average_precision'])
 
-            # Log history to CSV & dictionary
-            self.history_logger.log(
-                epoch=epoch,
-                train_loss=train_loss,
-                train_acc=train_acc,
-                val_loss=val_loss,
-                val_acc=val_acc
+            # Compute validation loss
+            val_loss_sum = 0.0
+            with torch.no_grad():
+                for val_batch in self.val_loader:
+                    val_inputs = val_batch['video_form'].to(self.device)
+                    val_targets = val_batch['target'].to(self.device)
+                    val_outputs = self.model(val_inputs)
+                    if isinstance(val_outputs, dict):
+                        val_outputs = val_outputs.get('clipwise_output', val_outputs)
+                    val_targ_labels = val_targets.argmax(dim=1) if val_targets.dim() > 1 else val_targets
+                    val_loss_sum += self.criterion(val_outputs, val_targ_labels).item() * val_inputs.size(0)
+            val_loss = val_loss_sum / len(self.val_loader.dataset)
+
+            logger.info(
+                f"Epoch {epoch:03d}: "
+                f"Train Loss = {train_loss:.5f} | Train Acc = {train_acc:.4f} | Train mAP = {train_mAP:.4f} | "
+                f"Val Loss = {val_loss:.5f} | Val Acc = {val_acc:.4f} | Val mAP = {val_mAP:.4f}"
             )
 
+            is_best = False
             current_metric = val_acc if self.config.monitor == 'accuracy' else val_loss
-            is_better = (current_metric > best_metric) if self.config.monitor == 'accuracy' else (current_metric < best_metric)
+            if self.config.monitor == 'accuracy':
+                if val_acc > best_val_metric:
+                    best_val_metric = val_acc
+                    is_best = True
+            else:
+                if val_loss < best_val_metric:
+                    best_val_metric = val_loss
+                    is_best = True
 
-            if is_better:
-                best_metric = current_metric
-                save_path = os.path.join(self.ckpt_dir, "best_video_model.pt")
+            if is_best:
+                best_epoch = epoch
+                best_val_statistics = val_statistics
+                save_path = os.path.join(self.ckpt_dir, "video_best.pt")
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
@@ -214,24 +209,62 @@ class VideoTrainer:
                     'val_acc': val_acc,
                     'val_loss': val_loss
                 }, save_path)
-                logger.info(f"--> Improved {self.config.monitor}! Saved Best Model to '{save_path}' (Val Acc: {val_acc:.4f})")
+                logger.info(f"--> Saved Best Model to '{save_path}' (Val Acc: {val_acc:.4f} | Val mAP: {val_mAP:.4f})")
+
+            # Log epoch metrics to CSV
+            self.history_logger.log_epoch(
+                epoch=epoch,
+                train_loss=train_loss,
+                train_acc=train_acc,
+                train_mAP=train_mAP,
+                val_loss=val_loss,
+                val_statistics=val_statistics,
+                is_best=is_best
+            )
 
             # Early stopping check
             if self.early_stopping and self.early_stopper is not None:
-                self.early_stopper(val_loss if self.config.monitor == 'loss' else val_acc)
-                if self.early_stopper.early_stop:
+                score = val_acc if self.config.monitor == 'accuracy' else -val_loss
+                if self.early_stopper.step(score):
                     logger.info(f"Early stopping triggered at epoch {epoch}!")
                     break
 
+        training_time = time.perf_counter() - train_start_time
+
+        # Generate learning curve plots
+        try:
+            self.history_logger.plot_history()
+        except Exception as e:
+            logger.warning(f"Warning: Failed to generate learning curves plot: {e}")
+
+        # Final evaluation on Test dataset
         logger.info("==================================================")
-        logger.info("Evaluating Best Model on Test Dataset...")
-        best_ckpt = os.path.join(self.ckpt_dir, "best_video_model.pt")
+        logger.info("Training complete. Starting evaluation on Test split...")
+        best_ckpt = os.path.join(self.ckpt_dir, "video_best.pt")
         if os.path.exists(best_ckpt):
             checkpoint = torch.load(best_ckpt, map_location=self.device)
             self.model.load_state_dict(checkpoint['model_state_dict'])
+            logger.info(f"Reloaded best checkpoint model from Epoch {checkpoint['epoch']}...")
 
-        evaluator = VideoEvaluator(model=self.model)
-        test_metrics = evaluator.evaluate(self.test_loader)
-        logger.info(f"Final Test Accuracy: {test_metrics['accuracy']:.4f} | mAP: {np.mean(test_metrics['average_precision']):.4f}")
-        logger.info(f"Detailed Classification Report:{test_metrics['message']}")
+        test_statistics = self.evaluator.evaluate(self.test_loader)
+        test_mAP = np.mean(test_statistics['average_precision'])
+        test_acc = test_statistics['accuracy']
+        logger.info(f"TEST Results -> Accuracy: {test_acc:.4f} | mAP: {test_mAP:.4f}")
+        logger.info(f"Detailed Classification Report:{test_statistics['message']}")
+
+        # Measure model inference latency
+        logger.info("Measuring model Inference Latency on device...")
+        timer = InferenceTimer(model=self.model, device=self.device)
+        img_size = self.config.video_features.image_size
+        frames = self.config.video_features.frames
+        latency_ms = timer.measure_latency_per_sample(
+            input_shape=(1, 3, frames, img_size, img_size),
+            warm_up_steps=10,
+            num_steps=50
+        )
+
+        # Save performance and timing summary to summary.csv
+        if best_val_statistics is not None:
+            self.history_logger.save_summary(training_time, latency_ms, best_val_statistics, test_statistics)
+
         logger.info("==================================================")

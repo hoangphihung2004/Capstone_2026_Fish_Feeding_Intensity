@@ -9,6 +9,7 @@ if project_root not in sys.path:
 
 import time
 import logging
+from typing import Tuple
 import torch
 import torch.nn as nn
 
@@ -38,23 +39,23 @@ class InferenceTimer:
 
     def measure_latency_per_sample(
         self,
-        sample_length: int = 128000,
+        input_shape: Tuple[int, ...] = (1, 3, 4, 224, 224),
         warm_up_steps: int = 10,
         num_steps: int = 50
     ) -> float:
         """
-        Measure average inference latency per single sample.
+        Measure average inference latency per single video sample.
 
         Args:
-            sample_length (int): Length of raw input audio waveform (Default: 128000 - equivalent to 2s at 64kHz).
+            input_shape (Tuple[int, ...]): Shape of input video tensor [Batch, Channels, Frames, Height, Width]. Default: (1, 3, 4, 224, 224).
             warm_up_steps (int): Number of warm-up dummy runs to cache CUDA. Default: 10.
             num_steps (int): Number of iterations for average measurement. Default: 50.
 
         Returns:
             float: Average inference latency per sample in milliseconds (ms).
         """
-        # Create a single dummy waveform sample [1, sample_length]
-        dummy_input = torch.randn(1, sample_length).to(self.device)
+        # Create a single dummy video tensor sample
+        dummy_input = torch.randn(*input_shape).to(self.device)
         self.model.eval()
         
         # Check if CUDA device is active
