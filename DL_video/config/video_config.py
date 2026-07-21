@@ -73,7 +73,6 @@ class VideoTrainConfig(BaseModel):
     # Nested configurations
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Video feature extraction configuration.")
-    model_config: Dict[str, Any] = Field(default_factory=dict, description="Model-specific hyperparameter dictionary.")
 
     @classmethod
     def from_json(cls, path: str = 'config/video_config.json') -> 'VideoTrainConfig':

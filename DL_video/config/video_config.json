@@ -18,8 +18,5 @@
   "video_features": {
     "image_size": 224,
     "frames": 4
-  },
-  "model_config": {
-    "classes_num": 4
   }
 }

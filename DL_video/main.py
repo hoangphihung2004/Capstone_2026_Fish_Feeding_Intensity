@@ -48,8 +48,7 @@ def main():
     test_loader = data_manager.get_dataloader(split='test', shuffle=False)
 
     # 3. Instantiate Video Model (e.g. S3D)
-    model_classes = config.model_config.get("classes_num", 4)
-    model = S3D(classes_num=model_classes)
+    model = S3D(classes_num=4)
     model = model.to(device)
 
     # Apply PyTorch 2.0 compiler optimization if supported
