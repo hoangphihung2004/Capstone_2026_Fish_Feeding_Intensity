@@ -49,9 +49,16 @@ class VideoTrainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
-        self.config = config
-        self.device = device
-        self.ckpt_dir = config.ckpt_dir
+        # Determine model name for the checkpoint subfolder (matching AudioTrainer)
+        model_name = "video_model"
+        if hasattr(model, 'backbone') and hasattr(model.backbone, 'get_name'):
+            model_name = model.backbone.get_name()
+
+        base_dir = config.ckpt_dir if config.ckpt_dir else "video_checkpoint"
+        if not base_dir.rstrip('/\\').endswith(model_name):
+            self.ckpt_dir = os.path.join(base_dir, model_name)
+        else:
+            self.ckpt_dir = base_dir
 
         os.makedirs(self.ckpt_dir, exist_ok=True)
         config_dest = os.path.join(self.ckpt_dir, 'video_config.json')
