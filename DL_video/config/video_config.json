@@ -2,7 +2,7 @@
   "epochs": 500,
   "batch_size": 64,
   "learning_rate": 1e-3,
-  "ckpt_dir": "video_checkpoint/",
+  "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
   "patience": 100,

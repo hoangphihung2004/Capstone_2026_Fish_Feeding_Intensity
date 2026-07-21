@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Checkpoints and experiment logs
+checkpoint/
 video_checkpoint/
 *.pt
 *.pth

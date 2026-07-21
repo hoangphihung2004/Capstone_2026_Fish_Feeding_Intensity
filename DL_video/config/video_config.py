@@ -63,7 +63,7 @@ class VideoTrainConfig(BaseModel):
     epochs: int = Field(default=500, description="Maximum training epochs.")
     batch_size: int = Field(default=50, description="Mini-batch size.")
     learning_rate: float = Field(default=1e-3, description="Optimizer learning rate.")
-    ckpt_dir: str = Field(default='video_checkpoint/', description="Directory to save checkpoints and CSV logs.")
+    ckpt_dir: str = Field(default='checkpoint/', description="Directory to save checkpoints and CSV logs.")
     monitor: str = Field(default='accuracy', description="Metric to monitor for best model saving ('accuracy' or 'loss').")
     early_stopping: bool = Field(default=True, description="Enable/disable early stopping mechanism.")
     patience: int = Field(default=30, description="Early stopping patience epochs.")
