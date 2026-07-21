@@ -75,7 +75,7 @@ class VideoTrainConfig(BaseModel):
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Video feature extraction configuration.")
 
     @classmethod
-    def from_json(cls, path: str = 'config/video_config.json') -> 'VideoTrainConfig':
+    def from_json(cls, path: str = 'config/train_config.json') -> 'VideoTrainConfig':
         """
         Load single unified video training configuration from a JSON file.
         """

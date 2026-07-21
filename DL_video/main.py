@@ -28,7 +28,7 @@ def main():
     logger.info("==================================================")
 
     # 1. Load unified video configuration
-    config = VideoTrainConfig.from_json('config/video_config.json')
+    config = VideoTrainConfig.from_json('config/train_config.json')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Execution Device: '{device}' ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'})")

@@ -61,7 +61,7 @@ class VideoTrainer:
             self.ckpt_dir = base_dir
 
         os.makedirs(self.ckpt_dir, exist_ok=True)
-        config_dest = os.path.join(self.ckpt_dir, 'video_config.json')
+        config_dest = os.path.join(self.ckpt_dir, 'train_config.json')
         with open(config_dest, 'w', encoding='utf-8') as f:
             json.dump(self.config.model_dump(), f, indent=2)
 
