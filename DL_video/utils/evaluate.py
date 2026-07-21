@@ -42,13 +42,13 @@ class BaseEvaluator:
         raise NotImplementedError("Method 'evaluate' must be implemented in subclasses.")
 
 
-class AudioEvaluator(BaseEvaluator):
+class VideoEvaluator(BaseEvaluator):
     """
-    Specialized AudioEvaluator class, inheriting from BaseEvaluator.
-    Encapsulates raw model inference, postprocessing, and classification metrics calculation.
+    Specialized VideoEvaluator class, inheriting from BaseEvaluator.
+    Encapsulates raw video model inference, postprocessing, and classification metrics calculation.
     """
     def __init__(self, model: nn.Module) -> None:
-        super(AudioEvaluator, self).__init__(model)
+        super(VideoEvaluator, self).__init__(model)
 
     def _move_data_to_device(self, x: Any) -> torch.Tensor:
         """
@@ -71,26 +71,30 @@ class AudioEvaluator(BaseEvaluator):
         else:
             data_dict[key] = [value]
 
-    def _forward_audio(self, data_loader: Any) -> Dict[str, np.ndarray]:
+    def _forward_video(self, data_loader: Any) -> Dict[str, np.ndarray]:
         """
-        Private Method to run model inference across the entire dataset.
+        Private Method to run video model inference across the entire dataset.
         Returns accumulated predictions and ground truth labels as NumPy arrays.
         """
         output_dict = {}
-        pbar = tqdm(data_loader, desc="Running model evaluation...")
+        pbar = tqdm(data_loader, desc="Running video model evaluation...")
 
         for batch_data_dict in pbar:
-            batch_waveform = self._move_data_to_device(batch_data_dict['waveform'])
+            batch_video = self._move_data_to_device(batch_data_dict['video_form'])
             
             with torch.no_grad():
                 self.model.eval()
-                batch_output = self.model(batch_waveform)
+                batch_output = self.model(batch_video)
+                if isinstance(batch_output, dict):
+                    batch_logits = batch_output.get('clipwise_output', batch_output)
+                else:
+                    batch_logits = batch_output
 
-            self._append_to_dict(output_dict, 'audio_name', batch_data_dict['audio_name'])
+            self._append_to_dict(output_dict, 'video_name', batch_data_dict['video_name'])
             self._append_to_dict(
                 output_dict, 
                 'clipwise_output', 
-                batch_output['clipwise_output'].data.cpu().numpy()
+                batch_logits.data.cpu().numpy()
             )
             
             if 'target' in batch_data_dict:
@@ -104,14 +108,14 @@ class AudioEvaluator(BaseEvaluator):
 
     def evaluate(self, data_loader: Any) -> Dict[str, Any]:
         """
-        Evaluate model on the entire dataset and compute metrics (Accuracy, AP, AUC, Confusion Matrix).
+        Evaluate video model on the entire dataset and compute metrics (Accuracy, AP, AUC, Confusion Matrix).
         Overrides abstract evaluate method from BaseEvaluator.
         """
         # 1. Run inference to collect predictions
-        output_dict = self._forward_audio(data_loader)
+        output_dict = self._forward_video(data_loader)
 
-        clipwise_output = output_dict['clipwise_output']  # Shape: [audios_num, classes_num]
-        target = output_dict['target']                    # Shape: [audios_num, classes_num]
+        clipwise_output = output_dict['clipwise_output']  # Shape: [videos_num, classes_num]
+        target = output_dict['target']                    # Shape: [videos_num, classes_num]
 
         # 2. Compute Average Precision (AP) for each class
         average_precision = metrics.average_precision_score(
@@ -122,7 +126,7 @@ class AudioEvaluator(BaseEvaluator):
         auc = metrics.roc_auc_score(target, clipwise_output, average=None)
 
         # 4. Compute overall accuracy
-        target_acc = np.argmax(target, axis=1)
+        target_acc = np.argmax(target, axis=1) if target.ndim > 1 else target
         clipwise_output_acc = np.argmax(clipwise_output, axis=1)
         acc = accuracy_score(target_acc, clipwise_output_acc)
 

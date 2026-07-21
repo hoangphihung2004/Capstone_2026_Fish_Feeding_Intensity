@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from config import VideoTrainConfig
 from dataset import FishVideoDataLoader
-from utils import EarlyStopping, HistoryLogger, calculate_metrics
+from utils import EarlyStopping, HistoryLogger, VideoEvaluator
 
 # Logging configuration
 logging.basicConfig(
