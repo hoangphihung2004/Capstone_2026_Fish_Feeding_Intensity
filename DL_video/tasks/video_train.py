@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from config import VideoTrainConfig
 from dataset import FishVideoDataLoader
+from utils import EarlyStopping, HistoryLogger, calculate_metrics
 
 # Logging configuration
 logging.basicConfig(
@@ -31,8 +32,8 @@ logger = logging.getLogger(__name__)
 class VideoTrainer:
     """
     Unified Trainer class for Fish Video Intensity Classification.
-    Supports AMP bfloat16 mixed precision on NVIDIA Blackwell GPUs,
-    early stopping, history logging, and automatic checkpointing.
+    Identical OOP structure with AudioTrainer: supports AMP bfloat16 mixed precision,
+    HistoryLogger, EarlyStopping, and automatic experiment checkpointing.
     """
     def __init__(
         self,
@@ -56,6 +57,15 @@ class VideoTrainer:
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.AdamW(self.model.parameters(), lr=self.config.learning_rate)
+
+        # Early stopping & History logger
+        self.early_stopping = config.early_stopping
+        if self.early_stopping:
+            self.early_stopper = EarlyStopping(patience=config.patience, delta=config.delta, verbose=True)
+        else:
+            self.early_stopper = None
+
+        self.history_logger = HistoryLogger(log_dir=self.ckpt_dir)
 
         # Mixed precision scaler for CUDA
         self.use_amp = torch.cuda.is_available()
@@ -157,18 +167,25 @@ class VideoTrainer:
 
     def fit(self) -> None:
         best_metric = -1.0 if self.config.monitor == 'accuracy' else float('inf')
-        patience_counter = 0
 
         for epoch in range(1, self.config.epochs + 1):
             train_loss, train_acc = self.train_epoch(epoch)
             val_loss, val_acc = self.evaluate(self.val_loader, split_name="Val")
+
+            # Log history to CSV & dictionary
+            self.history_logger.log(
+                epoch=epoch,
+                train_loss=train_loss,
+                train_acc=train_acc,
+                val_loss=val_loss,
+                val_acc=val_acc
+            )
 
             current_metric = val_acc if self.config.monitor == 'accuracy' else val_loss
             is_better = (current_metric > best_metric) if self.config.monitor == 'accuracy' else (current_metric < best_metric)
 
             if is_better:
                 best_metric = current_metric
-                patience_counter = 0
                 save_path = os.path.join(self.ckpt_dir, "best_video_model.pt")
                 torch.save({
                     'epoch': epoch,
@@ -178,9 +195,11 @@ class VideoTrainer:
                     'val_loss': val_loss
                 }, save_path)
                 logger.info(f"--> Saved Best Model to '{save_path}' (Val Acc: {val_acc:.4f})")
-            else:
-                patience_counter += 1
-                if self.config.early_stopping and patience_counter >= self.config.patience:
+
+            # Early stopping check
+            if self.early_stopping and self.early_stopper is not None:
+                self.early_stopper(val_loss if self.config.monitor == 'loss' else val_acc)
+                if self.early_stopper.early_stop:
                     logger.info(f"Early stopping triggered at epoch {epoch}!")
                     break
 
