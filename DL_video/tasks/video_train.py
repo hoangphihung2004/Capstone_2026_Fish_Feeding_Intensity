@@ -149,8 +149,8 @@ class VideoTrainer:
 
             loss_val = loss.item()
             total_loss += loss_val
-            train_preds.append(outputs.detach().cpu().numpy())
-            train_targets.append(targets.cpu().numpy())
+            train_preds.append(outputs.detach().float().cpu().numpy())
+            train_targets.append(targets.detach().float().cpu().numpy())
 
             pbar.set_postfix({"Loss": f"{loss_val:.4f}"})
 

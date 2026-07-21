@@ -24,7 +24,7 @@ class VideoFeaturesConfig(BaseModel):
     Video frame extraction parameters.
     """
     image_size: int = Field(default=224, description="Target width and height to resize video frames.")
-    frames: int = Field(default=4, description="Number of frames to sample per video clip using Segment-based Sampling.")
+    frames: int = Field(default=20, description="Number of frames to sample per video clip using Segment-based Sampling.")
 
 
 class SplitterConfig(BaseModel):

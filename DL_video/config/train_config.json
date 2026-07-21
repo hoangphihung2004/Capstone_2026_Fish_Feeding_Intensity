@@ -17,6 +17,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frames": 4
+    "frames": 20
   }
 }

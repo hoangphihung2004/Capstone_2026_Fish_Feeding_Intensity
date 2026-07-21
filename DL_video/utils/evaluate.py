@@ -94,7 +94,7 @@ class VideoEvaluator(BaseEvaluator):
             self._append_to_dict(
                 output_dict, 
                 'clipwise_output', 
-                batch_logits.data.cpu().numpy()
+                batch_logits.detach().float().cpu().numpy()
             )
             
             if 'target' in batch_data_dict:
