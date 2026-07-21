@@ -78,7 +78,15 @@ class VideoTrainer:
         self.amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
         self.scaler = torch.cuda.amp.GradScaler(enabled=(self.use_amp and self.amp_dtype == torch.float16))
 
-        logger.info(f"Initialized VideoTrainer (AMP={self.use_amp}, dtype={self.amp_dtype}, device={self.device})")
+        logger.info("==================================================")
+        logger.info("Initialized VideoTrainer:")
+        logger.info(f"  - Optimizer:                   {self.optimizer.__class__.__name__} (LR={self.config.learning_rate})")
+        logger.info(f"  - Loss Function:               {self.criterion.__class__.__name__}")
+        logger.info(f"  - AMP Precision:               AMP={self.use_amp} ({self.amp_dtype})")
+        logger.info(f"  - Checkpoint Dir:              '{self.ckpt_dir}'")
+        logger.info(f"  - Monitor Metric:              '{self.config.monitor}'")
+        logger.info(f"  - Early Stopping:              {self.early_stopping} (Patience={self.config.patience})")
+        logger.info("==================================================")
 
     def train_epoch(self, epoch: int) -> Tuple[float, float]:
         self.model.train()
@@ -86,7 +94,7 @@ class VideoTrainer:
         correct = 0
         total = 0
 
-        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch}/{self.config.epochs} [Train]")
+        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch:03d}/{self.config.epochs:03d} [Train]")
         for batch in pbar:
             inputs = batch['video_form'].to(self.device)
             targets = batch['target'].to(self.device)
@@ -174,7 +182,7 @@ class VideoTrainer:
 
         eval_loss = total_loss / total
         eval_acc = correct / total
-        logger.info(f"[{split_name}] Loss: {eval_loss:.4f} | Acc: {eval_acc:.4f}")
+        logger.info(f"[{split_name} Evaluation] Loss: {eval_loss:.4f} | Accuracy: {eval_acc:.4f}")
         return eval_loss, eval_acc
 
     def fit(self) -> None:
@@ -206,7 +214,7 @@ class VideoTrainer:
                     'val_acc': val_acc,
                     'val_loss': val_loss
                 }, save_path)
-                logger.info(f"--> Saved Best Model to '{save_path}' (Val Acc: {val_acc:.4f})")
+                logger.info(f"--> Improved {self.config.monitor}! Saved Best Model to '{save_path}' (Val Acc: {val_acc:.4f})")
 
             # Early stopping check
             if self.early_stopping and self.early_stopper is not None:
@@ -215,10 +223,15 @@ class VideoTrainer:
                     logger.info(f"Early stopping triggered at epoch {epoch}!")
                     break
 
+        logger.info("==================================================")
         logger.info("Evaluating Best Model on Test Dataset...")
         best_ckpt = os.path.join(self.ckpt_dir, "best_video_model.pt")
         if os.path.exists(best_ckpt):
             checkpoint = torch.load(best_ckpt, map_location=self.device)
             self.model.load_state_dict(checkpoint['model_state_dict'])
-        test_loss, test_acc = self.evaluate(self.test_loader, split_name="Test")
-        logger.info(f"Final Test Result -> Accuracy: {test_acc:.4f} | Loss: {test_loss:.4f}")
+
+        evaluator = VideoEvaluator(model=self.model)
+        test_metrics = evaluator.evaluate(self.test_loader)
+        logger.info(f"Final Test Accuracy: {test_metrics['accuracy']:.4f} | mAP: {np.mean(test_metrics['average_precision']):.4f}")
+        logger.info(f"Detailed Classification Report:{test_metrics['message']}")
+        logger.info("==================================================")
