@@ -72,7 +72,13 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
 
     token = os.environ.get("HF_TOKEN")
     if not token:
-        raise EnvironmentError("HF_TOKEN environment variable must be set when artifact upload is enabled.")
+        try:
+            from huggingface_hub import get_token
+            token = get_token()
+        except ImportError:
+            token = None
+    if not token:
+        raise EnvironmentError("HF_TOKEN environment variable must be set or Hugging Face CLI login must be completed when artifact upload is enabled.")
 
     try:
         from huggingface_hub import create_repo, upload_file
