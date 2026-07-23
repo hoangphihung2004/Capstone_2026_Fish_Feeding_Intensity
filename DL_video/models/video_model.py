@@ -11,7 +11,6 @@ if project_root not in sys.path:
 
 import torch
 import torch.nn as nn
-from models.base_backbone import BaseBackbone
 
 # Logging configuration
 logging.basicConfig(
@@ -23,37 +22,36 @@ logger = logging.getLogger(__name__)
 
 class VideoModel(nn.Module):
     """
-    Unified VideoModel Wrapper class (matching AudioModel architecture).
-    Wraps a 3D Video Backbone model complying with the BaseBackbone contract.
-    Accepts 5D video frame tensor [Batch, Channels (3), Frames (T), Height, Width]
-    and returns a dictionary containing classification logits 'clipwise_output' [Batch, Num_Classes].
+    Thin wrapper around an image classification backbone.
+    Accepts image tensors [Batch, Channels (3), Height, Width] and returns
+    classification logits under the existing 'clipwise_output' key.
     """
     def __init__(self, backbone: nn.Module) -> None:
         """
         Initialize VideoModel wrapper.
 
         Args:
-            backbone (nn.Module): Video backbone model (e.g. S3D, ViT3D, ViViT, ResNet3D, MobileVit).
+            backbone (nn.Module): Torch image classification model.
         """
         super(VideoModel, self).__init__()
 
-        # Type safety validation to enforce compliance with BaseBackbone interface contract
-        assert isinstance(backbone, BaseBackbone), "Error: Provided backbone model must inherit from BaseBackbone!"
-
         self.backbone = backbone
-        logger.info(f"Verified backbone model '{self.backbone.get_name()}' inherits from BaseBackbone.")
+        self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())
 
         logger.info("==================================================")
         logger.info("Initialized unified VideoModel wrapper:")
-        logger.info(f"  - Backbone: {self.backbone.__class__.__name__}")
+        logger.info(f"  - Backbone: {self.model_name}")
         logger.info("==================================================")
+
+    def get_name(self) -> str:
+        return self.model_name
 
     def forward(self, input_tensor: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
         Forward Pass of the unified VideoModel.
 
         Args:
-            input_tensor (torch.Tensor): Video frames tensor [Batch, Channels (3), Frames (T), Height, Width].
+            input_tensor (torch.Tensor): Image tensor [Batch, Channels (3), Height, Width].
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary containing classification logits 'clipwise_output' [Batch, Num_Classes].

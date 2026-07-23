@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
@@ -19,6 +20,12 @@ from tqdm import tqdm
 
 from config import VideoTrainConfig
 from utils import EarlyStopping, HistoryLogger, VideoEvaluator, InferenceTimer
+
+# Ensure stdout/stderr UTF-8 encoding on Windows terminal
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 # Logging configuration
 logging.basicConfig(
@@ -42,7 +49,8 @@ class VideoTrainer:
         test_loader: Any,
         config: VideoTrainConfig,
         device: torch.device,
-        optimizer: Optional[optim.Optimizer] = None
+        optimizer: Optional[optim.Optimizer] = None,
+        train_config_path: str = 'config/train_config.json'
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -53,7 +61,9 @@ class VideoTrainer:
 
         # Determine model name for the checkpoint subfolder (matching AudioTrainer)
         model_name = "video_model"
-        if hasattr(model, 'backbone') and hasattr(model.backbone, 'get_name'):
+        if hasattr(model, 'get_name'):
+            model_name = model.get_name()
+        elif hasattr(model, 'backbone') and hasattr(model.backbone, 'get_name'):
             model_name = model.backbone.get_name()
 
         base_dir = config.ckpt_dir if config.ckpt_dir else "checkpoint"
@@ -64,11 +74,35 @@ class VideoTrainer:
 
         os.makedirs(self.ckpt_dir, exist_ok=True)
 
-        # Backup active train_config.json to checkpoint directory
-        config_dest = os.path.join(self.ckpt_dir, 'train_config.json')
-        with open(config_dest, 'w', encoding='utf-8') as f:
-            json.dump(self.config.model_dump(), f, indent=2)
-        logger.info("Successfully backed up active configurations to checkpoint directory.")
+        try:
+            # 1. Copy the full train_config.json
+            if os.path.exists(train_config_path):
+                shutil.copy(train_config_path, os.path.join(self.ckpt_dir, 'train_config.json'))
+            else:
+                with open(os.path.join(self.ckpt_dir, 'train_config.json'), 'w', encoding='utf-8') as f:
+                    json.dump(self.config.model_dump(), f, indent=2)
+
+            # 2. Extract and save splitter_config.json for compatibility
+            splitter_data = self.config.dataset_splitter.model_dump()
+            with open(os.path.join(self.ckpt_dir, 'splitter_config.json'), 'w', encoding='utf-8') as f:
+                json.dump(splitter_data, f, indent=2)
+
+            dataset_path = Path(self.config.dataset_splitter.dataset_path)
+            local_splits_dir = dataset_path / 'splits'
+            legacy_splits_dir = dataset_path.parent / 'splits'
+            if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
+                splits_dir = legacy_splits_dir
+            else:
+                splits_dir = local_splits_dir
+
+            if splits_dir.exists():
+                shutil.copytree(splits_dir, os.path.join(self.ckpt_dir, 'splits'), dirs_exist_ok=True)
+                logger.info(f"Successfully backed up dataset splits from '{splits_dir}' to checkpoint directory.")
+            else:
+                logger.warning(f"Warning: Dataset splits directory not found, cannot back it up: '{splits_dir}'")
+            logger.info("Successfully backed up active configurations to checkpoint directory.")
+        except Exception as e:
+            logger.warning(f"Warning: Failed to backup configuration files: {str(e)}")
 
         self.criterion = nn.CrossEntropyLoss()
         if optimizer is not None:
@@ -96,6 +130,16 @@ class VideoTrainer:
         logger.info(f"  - Checkpoint Dir:               '{self.ckpt_dir}'")
         logger.info("  - Precision:                    FP32")
         logger.info("==================================================")
+
+    def _save_checkpoint(self, path: str, epoch: int, metric_val: float) -> None:
+        """Private Method to save model weights, optimizer state, and progress metrics."""
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'ave_precision': metric_val,
+        }, path)
+        logger.info(f"Saved best model checkpoint to: '{path}' (Monitor value = {metric_val:.5f})")
 
     def train_epoch(self, epoch: int) -> Tuple[float, float, float]:
         self.model.train()
@@ -210,13 +254,7 @@ class VideoTrainer:
                 best_loss = val_loss
                 best_val_statistics = val_statistics
                 save_path = os.path.join(self.ckpt_dir, "video_best.pt")
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'ave_precision': val_mAP,
-                }, save_path)
-                logger.info(f"Saved best model checkpoint to: '{save_path}' (Monitor value = {best_val_metric:.5f})")
+                self._save_checkpoint(save_path, epoch, val_acc if self.config.monitor == 'accuracy' else val_loss)
 
             # Record metrics and confusion matrix to history CSV
             self.history_logger.log_epoch(
@@ -269,9 +307,8 @@ class VideoTrainer:
             logger.info("Measuring model Inference Latency on device...")
             timer = InferenceTimer(model=self.model, device=self.device)
             img_size = self.config.video_features.image_size
-            frames = self.config.video_features.frames
             latency_ms = timer.measure_latency_per_sample(
-                input_shape=(1, 3, frames, img_size, img_size),
+                input_shape=(1, 3, img_size, img_size),
                 warm_up_steps=10,
                 num_steps=50
             )

@@ -7,5 +7,4 @@ pydantic
 scikit-learn
 tqdm
 matplotlib
-einops
 decord

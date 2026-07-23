@@ -14,7 +14,7 @@ import torch.optim as optim
 # Import refactored OOP components
 from config import TrainConfig
 from dataset import FishVideoDataLoader
-from models import S3D, VideoModel
+from models import MobileNetV2, VideoModel
 from tasks import VideoTrainer
 
 # Ensure stdout/stderr UTF-8 encoding on Windows terminal
@@ -39,7 +39,7 @@ def main():
     config = TrainConfig.from_json(train_config_path)
 
     logger.info("==================================================")
-    logger.info("Launching Video Pipeline Training (Centralized Config):")
+    logger.info("Launching Single-Frame Image Classification Training:")
     logger.info(f"  - Device Name:              {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     logger.info(f"  - Max Epochs:               {config.epochs}")
     logger.info(f"  - Batch Size:               {config.batch_size}")
@@ -61,7 +61,6 @@ def main():
         disk_cache_video=config.disk_cache_video,
         video_cache_dir=config.video_cache_dir,
         image_size=config.video_features.image_size,
-        frames_count=config.video_features.frames,
         splitter_config=config.dataset_splitter
     )
 
@@ -71,7 +70,7 @@ def main():
 
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
-    backbone = S3D(classes_num=4)
+    backbone = MobileNetV2(classes_num=4)
     model = VideoModel(backbone=backbone)
     model = model.to(device)
 
@@ -86,7 +85,8 @@ def main():
         test_loader=test_loader,
         config=config,
         device=device,
-        optimizer=optimizer
+        optimizer=optimizer,
+        train_config_path=train_config_path
     )
 
     # 7. Start Training & Evaluation process

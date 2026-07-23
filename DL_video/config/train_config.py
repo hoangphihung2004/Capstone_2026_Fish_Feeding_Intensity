@@ -21,10 +21,9 @@ logger = logging.getLogger(__name__)
 
 class VideoFeaturesConfig(BaseModel):
     """
-    Video frame extraction parameters.
+    Single image extraction parameters.
     """
-    image_size: int = Field(default=224, description="Target width and height to resize video frames.")
-    frames: int = Field(default=20, description="Number of frames to sample per video clip using Segment-based Sampling.")
+    image_size: int = Field(default=224, description="Target width and height for extracted images.")
 
 
 class SplitterConfig(BaseModel):
@@ -70,12 +69,12 @@ class VideoTrainConfig(BaseModel):
     early_stopping: bool = Field(default=True, description="Enable/disable early stopping mechanism.")
     patience: int = Field(default=30, description="Early stopping patience epochs.")
     delta: float = Field(default=0.0, description="Minimum change in monitored metric to qualify as improvement.")
-    disk_cache_video: bool = Field(default=False, description="Cache decoded uint8 video clips to .pkl files and reuse them on later runs.")
-    video_cache_dir: str = Field(default='video_cache_pkl/', description="Root directory used to store per-sample video .pkl cache files. The loader appends frames_{frames}_size_{image_size}.")
+    disk_cache_video: bool = Field(default=False, description="Cache decoded uint8 images to .pkl files and reuse them on later runs.")
+    video_cache_dir: str = Field(default='video_cache_pkl/', description="Root directory used to store per-sample image .pkl cache files. The loader appends single_frame_size_{image_size}.")
     
     # Nested configurations
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
-    video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Video feature extraction configuration.")
+    video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Image feature extraction configuration.")
 
     @classmethod
     def from_json(cls, path: str = 'config/train_config.json') -> 'VideoTrainConfig':
