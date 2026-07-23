@@ -560,21 +560,3 @@ class FishDataSplitter(BaseDataSplitter):
                 "sample_id": sample_id
             })
         return samples
-
-# Main execution block for standalone usage reference
-if __name__ == '__main__':
-    # Usage example for FishDataSplitter in Python:
-    # 
-    # from config import TrainConfig, SplitterConfig
-    # from dataset import FishDataSplitter
-    # 
-    # 1. Load splitter config from unified train_config.json:
-    # config = TrainConfig.from_json('config/train_config.json')
-    # splitter_cfg = config.dataset_splitter
-    # 
-    # 2. Initialize the data splitter:
-    # splitter = FishDataSplitter(config=splitter_cfg)
-    # 
-    # 3. Split data and receive dataset lists in RAM:
-    # train_data, test_data, val_data = splitter.split_data()
-    pass
