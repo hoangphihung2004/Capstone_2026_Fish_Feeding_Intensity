@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 import zipfile
 
 # Ensure project root is in sys.path
@@ -31,6 +32,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def timestamped_repo_path(path_in_repo: str) -> str:
+    path = Path(path_in_repo)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{path.stem}_{timestamp}{path.suffix}"
+    parent = path.parent
+    if str(parent) == ".":
+        return filename
+    return str(parent / filename).replace("\\", "/")
 
 
 def zip_directory(source_dir: str, zip_path: str) -> Path:
@@ -98,12 +109,13 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
     logger.info("==================================================")
     logger.info(f"Uploading artifact to Hugging Face repo: '{upload_config.repo_id}'")
     logger.info(f"Repo type:                            '{upload_config.repo_type}'")
-    logger.info(f"Path in repo:                         '{upload_config.path_in_repo}'")
+    path_in_repo = timestamped_repo_path(upload_config.path_in_repo)
+    logger.info(f"Path in repo:                         '{path_in_repo}'")
     logger.info("==================================================")
 
     upload_file(
         path_or_fileobj=str(artifact_zip),
-        path_in_repo=upload_config.path_in_repo,
+        path_in_repo=path_in_repo,
         repo_id=upload_config.repo_id,
         repo_type=upload_config.repo_type,
         token=token,
