@@ -8,4 +8,4 @@ scikit-learn
 soundfile
 torchcodec
 matplotlib
-
+huggingface_hub
