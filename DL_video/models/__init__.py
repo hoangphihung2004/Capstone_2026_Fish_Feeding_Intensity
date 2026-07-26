@@ -6,6 +6,7 @@ from .resnet50 import ResNet50
 from .densenet121 import DenseNet121
 from .swin_tiny import SwinTiny
 from .vit_base_16 import ViTBase16
+from .convnext_tiny import ConvNeXtTiny
 
 __all__ = [
     "VideoModel",
@@ -16,4 +17,5 @@ __all__ = [
     "DenseNet121",
     "SwinTiny",
     "ViTBase16",
+    "ConvNeXtTiny",
 ]
