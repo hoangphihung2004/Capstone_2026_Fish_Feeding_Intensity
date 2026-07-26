@@ -55,13 +55,10 @@ class BaseDataSplitter(ABC):
         else:
             self.video_path = None
             self.video_exists = False
-            # If video was requested but no video directory exists, log a warning and auto-fallback
             if self.include_video:
-                logger.warning("==================================================")
-                logger.warning("Warning: Could not find 'video' directory in dataset_path.")
-                logger.warning("Automatically falling back to audio-only RAM output.")
-                logger.warning("==================================================")
-                self.include_video = False
+                raise FileNotFoundError(
+                    f"include_video=True requires a 'video' directory inside dataset_path: '{self.dataset_path}'"
+                )
 
     @abstractmethod
     def get_file_list(self, split_name: str) -> List[str]:
@@ -232,6 +229,65 @@ class FishDataSplitter(BaseDataSplitter):
             return reconstructed_video
         return ""
 
+    def _require_video_path(self, audio_path: str) -> str:
+        """Resolve and require the video file paired with an audio file."""
+        video_path = self._resolve_video_path(audio_path)
+        if video_path:
+            return video_path
+
+        normalized_audio = str(audio_path).replace('\\', '/')
+        parts = list(Path(normalized_audio).parts)
+        expected_video = ""
+        if parts:
+            if "audio" in parts:
+                parts[parts.index("audio")] = "video"
+            filename = parts[-1]
+            if filename.endswith(".wav"):
+                filename = filename[:-4] + ".mp4"
+            if "_audio_" in filename:
+                filename = filename.replace("_audio_", "_video_")
+            parts[-1] = filename
+            if parts[0].endswith('\\') or parts[0].endswith('/'):
+                expected_video = parts[0] + os.path.join(*parts[1:])
+            else:
+                expected_video = os.path.join(*parts)
+
+        raise FileNotFoundError(
+            "Missing paired video file for audio sample.\n"
+            f"  audio_path:    {audio_path}\n"
+            f"  expected_video:{expected_video}"
+        )
+
+    def _make_multimodal_entry(self, audio_path: str, label: int) -> List[Any]:
+        """Create one strict [audio_path, video_path, label] multimodal split entry."""
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Missing audio file while creating split: '{audio_path}'")
+        return [audio_path, self._require_video_path(audio_path), label]
+
+    def _validate_multimodal_entries(self, split_name: str, data_list: List[List]) -> None:
+        """Validate that every split entry has matching audio and video files."""
+        if not self.include_video:
+            return
+
+        for idx, item in enumerate(data_list):
+            if len(item) != 3:
+                raise ValueError(
+                    f"{split_name} split entry #{idx} must be [audio_path, video_path, label], got: {item}"
+                )
+            audio_path, video_path, _ = item
+            if not os.path.exists(audio_path):
+                raise FileNotFoundError(
+                    f"{split_name} split entry #{idx} has missing audio_path: '{audio_path}'"
+                )
+            expected_video = self._require_video_path(audio_path)
+            if os.path.normpath(video_path) != os.path.normpath(expected_video):
+                raise ValueError(
+                    f"{split_name} split entry #{idx} has mismatched video_path.\n"
+                    f"  audio_path:     {audio_path}\n"
+                    f"  video_path:     {video_path}\n"
+                    f"  expected_video: {expected_video}"
+                )
+
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
         # Automatically determine the splits directory. When dataset_path points
         # directly to an audio folder, keep splits inside that folder so the
@@ -314,47 +370,21 @@ class FishDataSplitter(BaseDataSplitter):
                                             primary_checked = candidates[0]
                                             logger.warning(f"{split_name} split: Tried path correction candidates, for example '{primary_checked}', but the file still does not exist on this server.")
                                         missing_count += 1
-                            
-                            # Reconstruct and verify the existence of video_path
-                            video_path_str = row.get("video_path", "")
-                            if video_path_str and not os.path.exists(video_path_str):
-                                # Replace backslashes with forward slashes to ensure cross-platform compatibility
-                                normalized_video = video_path_str.replace('\\', '/')
-                                parts_v = Path(normalized_video).parts
-                                if len(parts_v) >= 4:
-                                    candidates_v = [
-                                        os.path.join(self.dataset_path, 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
-                                        os.path.join(self.dataset_path, parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
-                                        os.path.join(self.dataset_path, 'U_FFIA', 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'video', parts_v[-4], parts_v[-3], parts_v[-2], parts_v[-1]),
-                                    ]
-                                    fixed_video = None
-                                    for cand in candidates_v:
-                                        if os.path.exists(cand):
-                                            fixed_video = cand
-                                            break
-                                            
-                                    if fixed_video is not None:
-                                        if video_fix_example is None:
-                                            video_fix_example = (video_path_str, fixed_video)
-                                        video_path_str = fixed_video
-                                        need_rewrite_files = True
-                                    else:
-                                        # Attempt to re-resolve the video path from the audio file
-                                        video_path_str = self._resolve_video_path(raw_audio_path)
-                            elif not video_path_str:
-                                # Case where legacy split files have no video_path (empty "") but video folder now exists
-                                resolved_v = self._resolve_video_path(raw_audio_path)
-                                if resolved_v:
-                                    if video_fix_example is None:
-                                        video_fix_example = ("", resolved_v)
-                                    video_path_str = resolved_v
-                                    video_updated_count += 1
-                                    need_rewrite_files = True
 
+                            if self.include_video and not os.path.exists(raw_audio_path):
+                                raise FileNotFoundError(
+                                    f"{split_name} split has a missing audio file that could not be corrected: '{raw_audio_path}'"
+                                )
+                            
                             # Return format depends on the include_video configuration
                             if self.include_video:
+                                original_video_path = row.get("video_path", "")
+                                video_path_str = self._require_video_path(raw_audio_path)
+                                if os.path.normpath(original_video_path) != os.path.normpath(video_path_str):
+                                    if video_fix_example is None:
+                                        video_fix_example = (original_video_path, video_path_str)
+                                    video_updated_count += 1
+                                    need_rewrite_files = True
                                 loaded_data.append([raw_audio_path, video_path_str, label])
                             else:
                                 loaded_data.append([raw_audio_path, label])
@@ -376,6 +406,10 @@ class FishDataSplitter(BaseDataSplitter):
                 train_dict = load_and_fix_csv(train_csv, "Train")
                 test_dict = load_and_fix_csv(test_csv, "Test")
                 val_dict = load_and_fix_csv(val_csv, "Validation")
+
+                self._validate_multimodal_entries("Train", train_dict)
+                self._validate_multimodal_entries("Test", test_dict)
+                self._validate_multimodal_entries("Validation", val_dict)
 
                 logger.info("Successfully loaded dataset splits from files:")
                 logger.info(f"- Train samples: {len(train_dict)}")
@@ -466,22 +500,22 @@ class FishDataSplitter(BaseDataSplitter):
         logger.info("Mapping integer labels and building dataset lists...")
         if self.include_video:
             train_dict = (
-                [[wav, self._resolve_video_path(wav), 1] for wav in strong_train] +
-                [[wav, self._resolve_video_path(wav), 2] for wav in medium_train] +
-                [[wav, self._resolve_video_path(wav), 3] for wav in weak_train] +
-                [[wav, self._resolve_video_path(wav), 0] for wav in none_train]
+                [self._make_multimodal_entry(wav, 1) for wav in strong_train] +
+                [self._make_multimodal_entry(wav, 2) for wav in medium_train] +
+                [self._make_multimodal_entry(wav, 3) for wav in weak_train] +
+                [self._make_multimodal_entry(wav, 0) for wav in none_train]
             )
             test_dict = (
-                [[wav, self._resolve_video_path(wav), 1] for wav in strong_test] +
-                [[wav, self._resolve_video_path(wav), 2] for wav in medium_test] +
-                [[wav, self._resolve_video_path(wav), 3] for wav in weak_test] +
-                [[wav, self._resolve_video_path(wav), 0] for wav in none_test]
+                [self._make_multimodal_entry(wav, 1) for wav in strong_test] +
+                [self._make_multimodal_entry(wav, 2) for wav in medium_test] +
+                [self._make_multimodal_entry(wav, 3) for wav in weak_test] +
+                [self._make_multimodal_entry(wav, 0) for wav in none_test]
             )
             val_dict = (
-                [[wav, self._resolve_video_path(wav), 1] for wav in strong_val] +
-                [[wav, self._resolve_video_path(wav), 2] for wav in medium_val] +
-                [[wav, self._resolve_video_path(wav), 3] for wav in weak_val] +
-                [[wav, self._resolve_video_path(wav), 0] for wav in none_val]
+                [self._make_multimodal_entry(wav, 1) for wav in strong_val] +
+                [self._make_multimodal_entry(wav, 2) for wav in medium_val] +
+                [self._make_multimodal_entry(wav, 3) for wav in weak_val] +
+                [self._make_multimodal_entry(wav, 0) for wav in none_val]
             )
         else:
             train_dict = (
