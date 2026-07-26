@@ -40,7 +40,7 @@ class SplitterConfig(BaseModel):
     Configuration parameters for dataset splitting.
     """
     dataset_path: str = Field(
-        default='C:/Users/manhm/Desktop/Capstone_2026_Fish_Feeding_Intensity_DL/raw_dataset/U_FFIA',
+        default='/marimo/Fish_Feeding_Intensity_Dataset',
         description="Absolute path to the raw U_FFIA dataset directory."
     )
     seed: int = Field(
