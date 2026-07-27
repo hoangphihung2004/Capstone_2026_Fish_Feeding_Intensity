@@ -8,3 +8,4 @@ scikit-learn
 tqdm
 matplotlib
 decord
+huggingface_hub
