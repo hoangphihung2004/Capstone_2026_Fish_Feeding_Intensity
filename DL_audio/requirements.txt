@@ -2,6 +2,7 @@ pydantic
 numpy
 torch
 torchaudio
+torchvision
 tqdm
 torchlibrosa
 scikit-learn
