@@ -19,6 +19,7 @@ from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
 from models import Cnn14MobileV2, AudioModel
 from tasks import AudioTrainer
+from utils import log_model_profile
 
 # Ensure stdout/stderr UTF-8 encoding on Windows terminal
 if hasattr(sys.stdout, 'reconfigure'):
@@ -166,6 +167,10 @@ def main():
     
     model = AudioModel(frontend=frontend, backbone=backbone)
     model = model.to(device)
+
+    dummy_waveform = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
+    model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
+    log_model_profile(model=model, example_input=dummy_waveform, model_name=model_name)
 
     # 5. Initialize Adam optimizer
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
