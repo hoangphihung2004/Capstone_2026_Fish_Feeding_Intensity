@@ -1,6 +1,5 @@
 import logging
 from dataclasses import dataclass
-from typing import Iterable
 
 import torch
 import torch.nn as nn
@@ -10,78 +9,100 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ModelProfile:
-    total_params: int
-    trainable_params: int
+    parameters: int
+    flops: int
     gflops: float
 
 
-def count_parameters(model: nn.Module) -> tuple[int, int]:
-    total_params = sum(param.numel() for param in model.parameters())
-    trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
-    return total_params, trainable_params
+def count_parameters(model: nn.Module) -> int:
+    return sum(param.numel() for param in model.parameters() if param.requires_grad)
 
 
-def _module_flops(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> int:
-    if not inputs or not isinstance(inputs[0], torch.Tensor):
-        return 0
-
-    input_tensor = inputs[0]
-    output_tensor = output[0] if isinstance(output, (tuple, list)) else output
-    if not isinstance(output_tensor, torch.Tensor):
-        return 0
-
-    if isinstance(module, nn.Conv2d):
-        batch_size = output_tensor.shape[0]
-        output_channels = output_tensor.shape[1]
-        output_height = output_tensor.shape[2]
-        output_width = output_tensor.shape[3]
-        kernel_height, kernel_width = module.kernel_size
-        in_channels = module.in_channels
-        groups = module.groups
-        conv_per_position_flops = kernel_height * kernel_width * in_channels * output_channels // groups
-        active_positions = batch_size * output_height * output_width
-        bias_flops = output_channels * active_positions if module.bias is not None else 0
-        return int(2 * conv_per_position_flops * active_positions + bias_flops)
-
-    if isinstance(module, nn.Linear):
-        output_elements = output_tensor.numel()
-        bias_flops = output_elements if module.bias is not None else 0
-        return int(2 * module.in_features * output_elements + bias_flops)
-
-    if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-        return int(2 * input_tensor.numel())
-
-    if isinstance(module, (nn.AvgPool1d, nn.AvgPool2d, nn.AvgPool3d, nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d)):
-        return int(output_tensor.numel())
-
-    return 0
-
-
-def _hook_flops(model: nn.Module, example_input: torch.Tensor) -> int:
+def estimate_flops(model: nn.Module, example_input: torch.Tensor) -> int:
+    """Count FLOPs using the same forward-hook method as the original U-FFIA code."""
+    multiply_adds = True
     handles = []
-    flops = 0
 
-    def hook(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
-        nonlocal flops
-        flops += _module_flops(module, inputs, output)
+    list_conv2d = []
 
-    profiled_types: Iterable[type[nn.Module]] = (
-        nn.Conv2d,
-        nn.Linear,
-        nn.BatchNorm1d,
-        nn.BatchNorm2d,
-        nn.BatchNorm3d,
-        nn.AvgPool1d,
-        nn.AvgPool2d,
-        nn.AvgPool3d,
-        nn.MaxPool1d,
-        nn.MaxPool2d,
-        nn.MaxPool3d,
-    )
+    def conv2d_hook(module: nn.Conv2d, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        batch_size, _, _, _ = inputs[0].size()
+        output_channels, output_height, output_width = output[0].size()
+        kernel_ops = module.kernel_size[0] * module.kernel_size[1] * (module.in_channels / module.groups) * (2 if multiply_adds else 1)
+        bias_ops = 1 if module.bias is not None else 0
+        params = output_channels * (kernel_ops + bias_ops)
+        list_conv2d.append(batch_size * params * output_height * output_width)
 
-    for module in model.modules():
-        if isinstance(module, profiled_types):
-            handles.append(module.register_forward_hook(hook))
+    list_conv1d = []
+
+    def conv1d_hook(module: nn.Conv1d, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        batch_size, _, _ = inputs[0].size()
+        output_channels, output_length = output[0].size()
+        kernel_ops = module.kernel_size[0] * (module.in_channels / module.groups) * (2 if multiply_adds else 1)
+        bias_ops = 1 if module.bias is not None else 0
+        params = output_channels * (kernel_ops + bias_ops)
+        list_conv1d.append(batch_size * params * output_length)
+
+    list_linear = []
+
+    def linear_hook(module: nn.Linear, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        batch_size = inputs[0].size(0) if inputs[0].dim() == 2 else 1
+        weight_ops = module.weight.nelement() * (2 if multiply_adds else 1)
+        bias_ops = module.bias.nelement() if module.bias is not None else 0
+        list_linear.append(batch_size * (weight_ops + bias_ops))
+
+    list_bn = []
+
+    def bn_hook(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        list_bn.append(inputs[0].nelement() * 2)
+
+    list_relu = []
+
+    def relu_hook(module: nn.ReLU, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        list_relu.append(inputs[0].nelement() * 2)
+
+    list_pooling2d = []
+
+    def pooling2d_hook(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        batch_size, _, _, _ = inputs[0].size()
+        output_channels, output_height, output_width = output[0].size()
+        kernel_size = module.kernel_size[0] if isinstance(module.kernel_size, tuple) else module.kernel_size
+        kernel_ops = kernel_size * kernel_size
+        params = output_channels * kernel_ops
+        list_pooling2d.append(batch_size * params * output_height * output_width)
+
+    list_pooling1d = []
+
+    def pooling1d_hook(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+        batch_size, _, _ = inputs[0].size()
+        output_channels, output_length = output[0].size()
+        kernel_size = module.kernel_size[0] if isinstance(module.kernel_size, tuple) else module.kernel_size
+        params = output_channels * kernel_size
+        list_pooling1d.append(batch_size * params * output_length)
+
+    def register_hooks(net: nn.Module) -> None:
+        children = list(net.children())
+        if children:
+            for child in children:
+                register_hooks(child)
+            return
+
+        if isinstance(net, nn.Conv2d):
+            handles.append(net.register_forward_hook(conv2d_hook))
+        elif isinstance(net, nn.Conv1d):
+            handles.append(net.register_forward_hook(conv1d_hook))
+        elif isinstance(net, nn.Linear):
+            handles.append(net.register_forward_hook(linear_hook))
+        elif isinstance(net, (nn.BatchNorm2d, nn.BatchNorm1d)):
+            handles.append(net.register_forward_hook(bn_hook))
+        elif isinstance(net, nn.ReLU):
+            handles.append(net.register_forward_hook(relu_hook))
+        elif isinstance(net, (nn.AvgPool2d, nn.MaxPool2d)):
+            handles.append(net.register_forward_hook(pooling2d_hook))
+        elif isinstance(net, (nn.AvgPool1d, nn.MaxPool1d)):
+            handles.append(net.register_forward_hook(pooling1d_hook))
+
+    register_hooks(model)
 
     try:
         with torch.no_grad():
@@ -90,20 +111,8 @@ def _hook_flops(model: nn.Module, example_input: torch.Tensor) -> int:
         for handle in handles:
             handle.remove()
 
-    return flops
-
-
-def estimate_flops(model: nn.Module, example_input: torch.Tensor) -> int:
-    try:
-        with torch.no_grad(), torch.profiler.profile(with_flops=True) as profiler:
-            model(example_input)
-        profiler_flops = sum(event.flops for event in profiler.key_averages() if event.flops is not None)
-        if profiler_flops > 0:
-            return int(profiler_flops)
-    except Exception as exc:
-        logger.warning(f"torch.profiler FLOPs estimation failed, falling back to module hooks: {exc}")
-
-    return _hook_flops(model, example_input)
+    total_flops = sum(list_conv2d) + sum(list_conv1d) + sum(list_linear) + sum(list_bn) + sum(list_relu) + sum(list_pooling2d) + sum(list_pooling1d)
+    return int(total_flops)
 
 
 def profile_model(model: nn.Module, example_input: torch.Tensor) -> ModelProfile:
@@ -111,14 +120,14 @@ def profile_model(model: nn.Module, example_input: torch.Tensor) -> ModelProfile
     model.eval()
 
     try:
-        total_params, trainable_params = count_parameters(model)
+        parameters = count_parameters(model)
         flops = estimate_flops(model, example_input)
     finally:
         model.train(was_training)
 
     return ModelProfile(
-        total_params=total_params,
-        trainable_params=trainable_params,
+        parameters=parameters,
+        flops=flops,
         gflops=flops / 1e9,
     )
 
@@ -128,8 +137,8 @@ def log_model_profile(model: nn.Module, example_input: torch.Tensor, model_name:
 
     logger.info("==================================================")
     logger.info(f"Model Profile: {model_name}")
-    logger.info(f"  - Total Params:              {profile.total_params:,}")
-    logger.info(f"  - Trainable Params:          {profile.trainable_params:,}")
+    logger.info(f"  - Number of Parameters:      {profile.parameters:,}")
+    logger.info(f"  - FLOPs / Clip:              {profile.flops:,}")
     logger.info(f"  - GFLOPs / Clip:             {profile.gflops:.4f}")
     logger.info("==================================================")
 
