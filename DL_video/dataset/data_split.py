@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 import numpy as np
-from itertools import chain
 from abc import ABC, abstractmethod
 
 # Force stdout/stderr to use UTF-8 encoding to prevent UnicodeEncodeError on Windows terminals
@@ -25,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 from config import SplitterConfig
+
+
+def _stable_path_key(path: str) -> str:
+    """Normalize paths before sorting so split generation is reproducible."""
+    return os.path.normcase(os.path.normpath(str(path)))
 
 
 class BaseDataSplitter(ABC):
@@ -188,20 +192,20 @@ class FishDataSplitter(BaseDataSplitter):
     def get_file_list(self, split_name: str) -> List[str]:
         # Preserve the original get_wav_name logic from U-FFIA source code for raw data scanning
         path = self.audio_path
-        audio = []
-        l1 = os.listdir(path)
+        audio: List[str] = []
+        l1 = sorted(os.listdir(path), key=_stable_path_key)
         for folder_name in l1:
             folder_path = os.path.join(path, folder_name)
             if folder_name == 'splits' or not os.path.isdir(folder_path):
                 continue
-            l2 = os.listdir(folder_path)
+            l2 = sorted(os.listdir(folder_path), key=_stable_path_key)
             for session_folder in l2:
                 session_path = os.path.join(folder_path, session_folder)
                 if not os.path.isdir(session_path):
                     continue
                 wav_dir = os.path.join(session_path, split_name, '*.wav')
-                audio.append(glob.glob(wav_dir))
-        return list(chain.from_iterable(audio))
+                audio.extend(sorted(glob.glob(wav_dir), key=_stable_path_key))
+        return audio
 
     def _resolve_video_path(self, audio_path: str) -> str:
         """Automatically resolve the corresponding video path from an audio path."""
