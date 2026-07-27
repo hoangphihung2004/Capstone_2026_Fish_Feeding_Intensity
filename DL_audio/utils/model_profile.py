@@ -44,15 +44,15 @@ def _module_flops(module: nn.Module, inputs: tuple[torch.Tensor, ...], output: t
         conv_per_position_flops = kernel_height * kernel_width * in_channels * output_channels // groups
         active_positions = batch_size * output_height * output_width
         bias_flops = output_channels * active_positions if module.bias is not None else 0
-        return int(2 * conv_per_position_flops * active_positions + bias_flops)
+        return int(conv_per_position_flops * active_positions + bias_flops)
 
     if isinstance(module, nn.Linear):
         output_elements = output_tensor.numel()
         bias_flops = output_elements if module.bias is not None else 0
-        return int(2 * module.in_features * output_elements + bias_flops)
+        return int(module.in_features * output_elements + bias_flops)
 
     if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-        return int(2 * input_tensor.numel())
+        return int(input_tensor.numel())
 
     if isinstance(module, (nn.AvgPool1d, nn.AvgPool2d, nn.AvgPool3d, nn.MaxPool1d, nn.MaxPool2d, nn.MaxPool3d)):
         return int(output_tensor.numel())
@@ -102,7 +102,7 @@ def estimate_flops(model: nn.Module, example_input: torch.Tensor) -> int:
             model(example_input)
         profiler_flops = sum(event.flops for event in profiler.key_averages() if event.flops is not None)
         if profiler_flops > 0:
-            return int(profiler_flops)
+            return int(profiler_flops / 2)
     except Exception as exc:
         logger.warning(f"torch.profiler FLOPs estimation failed, falling back to module hooks: {exc}")
 
