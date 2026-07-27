@@ -9,15 +9,16 @@ except ImportError:
 
 class EfficientNetB0(nn.Module):
     """
-    EfficientNet-B0 image classifier initialized with ImageNet pretrained weights.
+    EfficientNet-B0 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
         super().__init__()
 
         if EfficientNet_B0_Weights is None:
-            self.model = efficientnet_b0(pretrained=True)
+            self.model = efficientnet_b0(pretrained=pretrained)
         else:
-            self.model = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
+            weights = EfficientNet_B0_Weights.DEFAULT if pretrained else None
+            self.model = efficientnet_b0(weights=weights)
 
         self.model.classifier[1] = nn.Linear(self.model.classifier[1].in_features, classes_num)
         self.model_name = "efficientnet_b0"

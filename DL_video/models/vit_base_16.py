@@ -9,15 +9,16 @@ except ImportError:
 
 class ViTBase16(nn.Module):
     """
-    ViT-Base/16 image classifier initialized with ImageNet pretrained weights.
+    ViT-Base/16 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
         super().__init__()
 
         if ViT_B_16_Weights is None:
-            self.model = vit_b_16(pretrained=True)
+            self.model = vit_b_16(pretrained=pretrained)
         else:
-            self.model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
+            weights = ViT_B_16_Weights.DEFAULT if pretrained else None
+            self.model = vit_b_16(weights=weights)
 
         self.model.heads.head = nn.Linear(self.model.heads.head.in_features, classes_num)
         self.model_name = "vit_base_16"

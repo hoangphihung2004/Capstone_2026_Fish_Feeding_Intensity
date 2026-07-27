@@ -15,9 +15,9 @@ except ImportError:
 
 class ConvNeXtTiny(nn.Module):
     """
-    ConvNeXt-Tiny image classifier initialized with ImageNet pretrained weights.
+    ConvNeXt-Tiny image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
         super().__init__()
 
         if convnext_tiny is None:
@@ -27,9 +27,10 @@ class ConvNeXtTiny(nn.Module):
             ) from _CONVNEXT_IMPORT_ERROR
 
         if ConvNeXt_Tiny_Weights is None:
-            self.model = convnext_tiny(pretrained=True)
+            self.model = convnext_tiny(pretrained=pretrained)
         else:
-            self.model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
+            weights = ConvNeXt_Tiny_Weights.DEFAULT if pretrained else None
+            self.model = convnext_tiny(weights=weights)
 
         self.model.classifier[2] = nn.Linear(self.model.classifier[2].in_features, classes_num)
         self.model_name = "convnext_tiny"

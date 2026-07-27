@@ -9,15 +9,16 @@ except ImportError:
 
 class ResNet18(nn.Module):
     """
-    ResNet18 image classifier initialized with ImageNet pretrained weights.
+    ResNet18 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
         super().__init__()
 
         if ResNet18_Weights is None:
-            self.model = resnet18(pretrained=True)
+            self.model = resnet18(pretrained=pretrained)
         else:
-            self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+            weights = ResNet18_Weights.DEFAULT if pretrained else None
+            self.model = resnet18(weights=weights)
 
         self.model.fc = nn.Linear(self.model.fc.in_features, classes_num)
         self.model_name = "resnet18"
