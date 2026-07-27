@@ -162,7 +162,7 @@ def main():
 
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
-    backbone = MobileNetV2(classes_num=4)
+    backbone = MobileNetV2(classes_num=4, pretrained=True)
     model = VideoModel(backbone=backbone)
     model = model.to(device)
 
