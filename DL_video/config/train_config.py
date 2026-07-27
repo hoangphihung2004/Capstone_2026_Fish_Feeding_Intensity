@@ -3,7 +3,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field
 
 # Ensure project root is in sys.path
@@ -17,6 +17,10 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_IMAGE_CACHE_ROOT = "/marimo/video_cache"
+VALID_CACHE_MODES = ("disk", "ram", "none")
 
 
 class VideoFeaturesConfig(BaseModel):
@@ -61,7 +65,7 @@ class VideoTrainConfig(BaseModel):
     """
     epochs: int = Field(default=500, description="Maximum training epochs.")
     batch_size: int = Field(default=50, description="Mini-batch size.")
-    dataloader_workers: int = Field(default=0, ge=0, description="Number of PyTorch DataLoader workers used during training.")
+    dataloader_workers: int = Field(default=-1, ge=-1, description="Number of PyTorch DataLoader workers used during training. Use -1 for automatic CPU-based selection.")
     prefetch_factor: Optional[int] = Field(default=None, description="Number of batches prefetched by each DataLoader worker. None uses PyTorch default.")
     learning_rate: float = Field(default=1e-3, description="Optimizer learning rate.")
     ckpt_dir: str = Field(default='checkpoint/', description="Directory to save checkpoints and CSV logs.")
@@ -69,8 +73,7 @@ class VideoTrainConfig(BaseModel):
     early_stopping: bool = Field(default=True, description="Enable/disable early stopping mechanism.")
     patience: int = Field(default=30, description="Early stopping patience epochs.")
     delta: float = Field(default=0.0, description="Minimum change in monitored metric to qualify as improvement.")
-    disk_cache_video: bool = Field(default=False, description="Cache decoded uint8 images to .pkl files and reuse them on later runs.")
-    video_cache_dir: str = Field(default='video_cache_pkl/', description="Root directory used to store per-sample image .pkl cache files. The loader appends single_frame_size_{image_size}.")
+    cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' decodes from MP4 on demand.")
     
     # Nested configurations
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")

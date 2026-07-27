@@ -4,6 +4,7 @@ import pickle
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+import concurrent.futures
 
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
@@ -14,6 +15,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from config import DEFAULT_IMAGE_CACHE_ROOT, VALID_CACHE_MODES
 from dataset import SplitterConfig, FishDataSplitter
 from transforms import VideoTransform
 
@@ -33,11 +35,8 @@ def _get_image_cache_subdir(image_size: int) -> str:
     return f"single_frame_size_{image_size}"
 
 
-def _resolve_image_cache_dir(video_cache_dir: Optional[str], image_size: int) -> Optional[str]:
-    if not video_cache_dir:
-        return None
-
-    cache_root = os.path.normpath(video_cache_dir)
+def _resolve_image_cache_dir(video_cache_dir: Optional[str], image_size: int) -> str:
+    cache_root = os.path.normpath(video_cache_dir or DEFAULT_IMAGE_CACHE_ROOT)
     cache_subdir = _get_image_cache_subdir(image_size=image_size)
 
     if os.path.basename(cache_root) == cache_subdir:
@@ -176,11 +175,11 @@ def _load_or_create_image_sample(
     video_path: str,
     label: Any,
     image_size: int,
-    disk_cache_video: bool,
+    use_disk_cache: bool,
     image_cache_dir: Optional[str],
     split: str
 ) -> Dict[str, Any]:
-    cache_path = _get_image_cache_path(image_cache_dir, split, index) if disk_cache_video else None
+    cache_path = _get_image_cache_path(image_cache_dir, split, index) if use_disk_cache else None
 
     cached_sample = _load_image_from_disk_cache(
         cache_path=cache_path,
@@ -213,23 +212,30 @@ class FishVideoDataLoader:
     def __init__(
         self,
         batch_size: int = 50,
-        dataloader_workers: int = 0,
+        dataloader_workers: int = -1,
         prefetch_factor: Optional[int] = None,
-        disk_cache_video: bool = False,
-        video_cache_dir: Optional[str] = None,
+        cache_mode: str = "disk",
         image_size: int = 224,
         splitter_config: Optional[SplitterConfig] = None
     ) -> None:
         self.batch_size = batch_size
         self.dataloader_workers = dataloader_workers
         self.prefetch_factor = prefetch_factor
-        self.disk_cache_video = disk_cache_video
+        self.cache_mode = cache_mode.lower()
+        if self.cache_mode not in VALID_CACHE_MODES:
+            raise ValueError(f"Invalid cache_mode='{cache_mode}'. Expected one of {sorted(VALID_CACHE_MODES)}.")
         self.image_size = image_size
-        self.video_cache_root = video_cache_dir
-        self.image_cache_dir = _resolve_image_cache_dir(
-            video_cache_dir=video_cache_dir,
-            image_size=image_size
-        )
+        self.image_cache_root = DEFAULT_IMAGE_CACHE_ROOT
+        self.image_cache_dir = _resolve_image_cache_dir(video_cache_dir=None, image_size=image_size)
+
+        if self.dataloader_workers == -1:
+            max_cpu = os.cpu_count()
+            if max_cpu is None or max_cpu <= 0:
+                self.dataloader_workers = 0
+            elif max_cpu == 2:
+                self.dataloader_workers = max_cpu // 2
+            else:
+                self.dataloader_workers = (max_cpu // 2) + 1
 
         self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig()
         self.splitter = FishDataSplitter(config=self.splitter_config)
@@ -246,9 +252,9 @@ class FishVideoDataLoader:
         else:
             prefetch_log = self.prefetch_factor
         logger.info(f"  - DataLoader Prefetch:      {prefetch_log}")
-        logger.info(f"  - Disk PKL Caching:         {self.disk_cache_video}")
-        logger.info(f"  - Disk PKL Cache Root:      '{self.video_cache_root if self.disk_cache_video else 'disabled'}'")
-        logger.info(f"  - Disk PKL Cache Dir:       '{self.image_cache_dir if self.disk_cache_video else 'disabled'}'")
+        logger.info(f"  - Cache Mode:               {self.cache_mode}")
+        logger.info(f"  - Disk PKL Cache Root:      '{self.image_cache_root if self.cache_mode == 'disk' else 'disabled'}'")
+        logger.info(f"  - Disk PKL Cache Dir:       '{self.image_cache_dir if self.cache_mode == 'disk' else 'disabled'}'")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
         logger.info("  - Frame Policy:             center frame")
         logger.info("==================================================")
@@ -271,7 +277,9 @@ class FishVideoDataLoader:
         def __init__(self, parent: 'FishVideoDataLoader', split: str) -> None:
             self.parent = parent
             self.split = split
-            self.disk_cache_video = parent.disk_cache_video
+            self.cache_mode = parent.cache_mode
+            self.image_cache = None
+            self.cache_size_mb = 0.0
 
             if self.split == 'train':
                 self.data_dict = parent.train_dict
@@ -286,6 +294,106 @@ class FishVideoDataLoader:
             self.transform = data_transform[self.split]
             logger.info(f"Initialized '{self.split}' image transformation pipeline.")
 
+            if self.cache_mode == "ram":
+                self._preload_images_to_ram()
+
+        def _preload_images_to_ram(self) -> None:
+            """
+            Preload decoded uint8 center-frame images directly into system RAM.
+            Transform/augmentation is still applied lazily in __getitem__.
+            """
+            preload_workers = self.parent.dataloader_workers
+            if preload_workers <= 0:
+                preload_workers = 1
+
+            logger.info(f"Starting MP4 -> RAM image preload for split '{self.split}' ({len(self.data_dict)} samples)...")
+            logger.info(f"Using ThreadPoolExecutor with {preload_workers} workers for RAM preload.")
+
+            def load_single_image(index_and_item: tuple) -> tuple:
+                index, item = index_and_item
+                if len(item) < 3:
+                    raise ValueError("Video training requires split entries in [audio_path, video_path, label] format.")
+
+                video_name = item[1]
+                target_val = item[2]
+                if not video_name:
+                    raise ValueError(f"Missing video path for split='{self.split}', index={index}.")
+
+                try:
+                    sample = _decode_center_image(
+                        video_path=video_name,
+                        label=target_val,
+                        image_size=self.parent.image_size
+                    )
+                except Exception as exc:
+                    logger.warning(f"Decord failed for '{video_name}', falling back to OpenCV. Error: {exc}")
+                    sample = _decode_center_image_cv2(
+                        video_path=video_name,
+                        label=target_val,
+                        image_size=self.parent.image_size
+                    )
+
+                return index, sample
+
+            cache = [None] * len(self.data_dict)
+            total_bytes = 0
+
+            try:
+                from tqdm import tqdm
+                has_tqdm = True
+            except ImportError:
+                has_tqdm = False
+
+            indexed_items = list(enumerate(self.data_dict))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=preload_workers) as executor:
+                futures = {
+                    executor.submit(load_single_image, indexed_item): indexed_item[0]
+                    for indexed_item in indexed_items
+                }
+
+                iterator = concurrent.futures.as_completed(futures)
+                if has_tqdm:
+                    pbar = tqdm(total=len(futures), desc=f"Preloading {self.split} images to RAM")
+                    for future in iterator:
+                        idx = futures[future]
+                        try:
+                            result_idx, sample = future.result()
+                            cache[result_idx] = sample
+                            total_bytes += sample["image_form"].nbytes
+                        except Exception as exc:
+                            logger.error(f"Error preloading image index {idx}: {exc}")
+                            item = self.data_dict[idx]
+                            cache[idx] = _decode_center_image_cv2(
+                                video_path=item[1],
+                                label=item[2],
+                                image_size=self.parent.image_size
+                            )
+                            total_bytes += cache[idx]["image_form"].nbytes
+                        pbar.update(1)
+                    pbar.close()
+                else:
+                    for future in iterator:
+                        idx = futures[future]
+                        try:
+                            result_idx, sample = future.result()
+                            cache[result_idx] = sample
+                            total_bytes += sample["image_form"].nbytes
+                        except Exception as exc:
+                            logger.error(f"Error preloading image index {idx}: {exc}")
+                            item = self.data_dict[idx]
+                            cache[idx] = _decode_center_image_cv2(
+                                video_path=item[1],
+                                label=item[2],
+                                image_size=self.parent.image_size
+                            )
+                            total_bytes += cache[idx]["image_form"].nbytes
+
+            self.image_cache = cache
+            self.cache_size_mb = total_bytes / (1024 ** 2)
+            logger.info(
+                f"Cached {self.split} split to RAM: {len(cache)} images, {self.cache_size_mb:.1f} MB"
+            )
+
         def __len__(self) -> int:
             return len(self.data_dict)
 
@@ -299,15 +407,32 @@ class FishVideoDataLoader:
             if not video_name:
                 raise ValueError(f"Missing video path for split='{self.split}', index={index}.")
 
-            sample = _load_or_create_image_sample(
-                index=index,
-                video_path=video_name,
-                label=target_val,
-                image_size=self.parent.image_size,
-                disk_cache_video=self.disk_cache_video,
-                image_cache_dir=self.parent.image_cache_dir,
-                split=self.split
-            )
+            if self.image_cache is not None:
+                sample = self.image_cache[index]
+            elif self.cache_mode == "disk":
+                sample = _load_or_create_image_sample(
+                    index=index,
+                    video_path=video_name,
+                    label=target_val,
+                    image_size=self.parent.image_size,
+                    use_disk_cache=True,
+                    image_cache_dir=self.parent.image_cache_dir,
+                    split=self.split
+                )
+            else:
+                try:
+                    sample = _decode_center_image(
+                        video_path=video_name,
+                        label=target_val,
+                        image_size=self.parent.image_size
+                    )
+                except Exception as exc:
+                    logger.warning(f"Decord failed for '{video_name}', falling back to OpenCV. Error: {exc}")
+                    sample = _decode_center_image_cv2(
+                        video_path=video_name,
+                        label=target_val,
+                        image_size=self.parent.image_size
+                    )
 
             image = self.transform(sample['image_form'])
             target = np.eye(4)[sample['target']] if isinstance(sample['target'], (int, np.integer)) else sample['target']

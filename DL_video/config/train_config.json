@@ -1,15 +1,13 @@
 {
   "epochs": 100,
   "batch_size": 256,
-  "dataloader_workers": 10,
   "learning_rate": 1e-4,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
   "early_stopping": true,
   "patience": 20,
   "delta": 0.0,
-  "disk_cache_video": true,
-  "video_cache_dir": "/marimo/video_cache",
+  "cache_mode": "ram",
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
     "seed":42,

@@ -1,4 +1,11 @@
-from .train_config import TrainConfig, VideoTrainConfig, VideoFeaturesConfig, SplitterConfig
+from .train_config import (
+    TrainConfig,
+    VideoTrainConfig,
+    VideoFeaturesConfig,
+    SplitterConfig,
+    DEFAULT_IMAGE_CACHE_ROOT,
+    VALID_CACHE_MODES,
+)
 from .artifact_upload_config import ArtifactUploadConfig
 
 __all__ = [
@@ -6,5 +13,7 @@ __all__ = [
     "VideoTrainConfig",
     "VideoFeaturesConfig",
     "SplitterConfig",
+    "DEFAULT_IMAGE_CACHE_ROOT",
+    "VALID_CACHE_MODES",
     "ArtifactUploadConfig",
 ]

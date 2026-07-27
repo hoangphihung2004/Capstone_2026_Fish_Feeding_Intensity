@@ -150,8 +150,7 @@ def main():
         batch_size=config.batch_size,
         dataloader_workers=config.dataloader_workers,
         prefetch_factor=config.prefetch_factor,
-        disk_cache_video=config.disk_cache_video,
-        video_cache_dir=config.video_cache_dir,
+        cache_mode=config.cache_mode,
         image_size=config.video_features.image_size,
         splitter_config=config.dataset_splitter
     )
