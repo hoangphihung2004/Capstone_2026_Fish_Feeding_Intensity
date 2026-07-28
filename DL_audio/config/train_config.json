@@ -12,7 +12,8 @@
     "seed": 42,
     "test_sample_per_class": 700,
     "save_results": true,
-    "include_video": true
+    "include_video": true,
+    "split_strategy": "random_sample"
   },
   "audio_features": {
     "sample_rate": 64000,

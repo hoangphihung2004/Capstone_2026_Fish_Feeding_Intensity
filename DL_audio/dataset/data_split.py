@@ -4,6 +4,8 @@ import glob
 import logging
 import csv
 import json
+import re
+from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
 import numpy as np
@@ -24,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 from config import SplitterConfig
+
+
+LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
+LABEL_ORDER = [0, 1, 2, 3]
+VALID_SPLIT_STRATEGIES = {"random_sample", "time_series"}
 
 
 def _stable_path_key(path: str) -> str:
@@ -53,6 +60,12 @@ class BaseDataSplitter(ABC):
         self.test_sample_per_class = config.test_sample_per_class
         self.save_results = config.save_results
         self.include_video = config.include_video
+        self.split_strategy = getattr(config, "split_strategy", "random_sample")
+        if self.split_strategy not in VALID_SPLIT_STRATEGIES:
+            raise ValueError(
+                f"Invalid split_strategy='{self.split_strategy}'. "
+                f"Expected one of {sorted(VALID_SPLIT_STRATEGIES)}."
+            )
 
         # Automatically resolve the audio directory path (used as the root for sample splitting)
         audio_dir = os.path.join(self.dataset_path, 'audio')
@@ -129,6 +142,146 @@ class BaseDataSplitter(ABC):
             writer.writeheader()
             writer.writerows(samples)
 
+    @staticmethod
+    def _primary_path_from_entry(item: List[Any]) -> str:
+        """Return the path used for temporal sorting and sample identity."""
+        if len(item) >= 3:
+            return str(item[0] or item[1])
+        return str(item[0])
+
+    @staticmethod
+    def _label_from_entry(item: List[Any]) -> int:
+        return int(item[-1])
+
+    @staticmethod
+    def _extract_ints(value: str) -> Tuple[int, ...]:
+        return tuple(int(number) for number in re.findall(r"\d+", str(value)))
+
+    @classmethod
+    def _temporal_path_key(cls, path: str) -> Tuple[Any, ...]:
+        """Sort by date, AM/PM session, session number, then sample id."""
+        normalized = str(path).replace('\\', '/')
+        parts = Path(normalized).parts
+        date_part = parts[-4] if len(parts) >= 4 else ""
+        session_part = parts[-3] if len(parts) >= 3 else ""
+        stem = Path(normalized).stem
+
+        date_numbers = cls._extract_ints(date_part)
+        date_key = date_numbers[:3] if len(date_numbers) >= 3 else date_numbers
+
+        session_upper = session_part.upper()
+        if session_upper.startswith("AM"):
+            day_half = 0
+        elif session_upper.startswith("PM"):
+            day_half = 1
+        else:
+            day_half = 2
+
+        session_numbers = cls._extract_ints(session_part)
+        session_value = session_numbers[0] if session_numbers else -1
+        sample_numbers = cls._extract_ints(stem)
+        sample_value = sample_numbers[-1] if sample_numbers else -1
+
+        return (date_key, day_half, session_value, sample_value, stem)
+
+    def _entry_sample_key(self, item: List[Any]) -> str:
+        return _sample_identity_key(self._primary_path_from_entry(item))
+
+    def _entry_temporal_key(self, item: List[Any]) -> Tuple[Any, ...]:
+        return self._temporal_path_key(self._primary_path_from_entry(item))
+
+    def _count_labels(self, data_list: List[List]) -> Counter:
+        counts = Counter()
+        for item in data_list:
+            counts[self._label_from_entry(item)] += 1
+        return counts
+
+    @staticmethod
+    def _sample_key_set(data_list: List[List], sample_key_fn) -> set:
+        return {sample_key_fn(item) for item in data_list}
+
+    def _time_series_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
+        """Build expected sample-key sets for the time-series split using val/test quotas."""
+        expected_train = set()
+        expected_test = set()
+        expected_val = set()
+
+        for label in LABEL_ORDER:
+            class_entries = [item for item in all_entries if self._label_from_entry(item) == label]
+            class_entries = sorted(class_entries, key=self._entry_temporal_key)
+            required = 2 * self.test_sample_per_class
+            if len(class_entries) < required:
+                raise ValueError(
+                    f"Class '{LABEL_TO_CLASS[label]}' has only {len(class_entries)} samples, "
+                    f"but at least {required} are required for validation and test splits."
+                )
+
+            train_entries = class_entries[:-required]
+            val_entries = class_entries[-required:-self.test_sample_per_class]
+            test_entries = class_entries[-self.test_sample_per_class:]
+
+            expected_train.update(self._entry_sample_key(item) for item in train_entries)
+            expected_val.update(self._entry_sample_key(item) for item in val_entries)
+            expected_test.update(self._entry_sample_key(item) for item in test_entries)
+
+        return expected_train, expected_test, expected_val
+
+    def _validate_split_policy(self, train_dict: List[List], test_dict: List[List], val_dict: List[List]) -> None:
+        """Validate split consistency for the selected strategy."""
+        splits = {"train": train_dict, "test": test_dict, "val": val_dict}
+
+        seen_samples: Dict[str, str] = {}
+        for split_name, data_list in splits.items():
+            for item in data_list:
+                sample_key = self._entry_sample_key(item)
+                if sample_key in seen_samples:
+                    raise ValueError(
+                        f"Duplicate sample detected across splits: '{sample_key}' "
+                        f"appears in both {seen_samples[sample_key]} and {split_name}."
+                    )
+                seen_samples[sample_key] = split_name
+
+        counts_by_split = {name: self._count_labels(data) for name, data in splits.items()}
+        total_counts = Counter()
+        for counts in counts_by_split.values():
+            total_counts.update(counts)
+
+        for split_name in ["test", "val"]:
+            for label in LABEL_ORDER:
+                actual = counts_by_split[split_name][label]
+                if actual != self.test_sample_per_class:
+                    raise ValueError(
+                        f"{split_name} split class '{LABEL_TO_CLASS[label]}' has {actual} samples; "
+                        f"expected exactly {self.test_sample_per_class}."
+                    )
+
+        for label in LABEL_ORDER:
+            expected_train = total_counts[label] - (2 * self.test_sample_per_class)
+            actual_train = counts_by_split["train"][label]
+            if actual_train != expected_train:
+                raise ValueError(
+                    f"train split class '{LABEL_TO_CLASS[label]}' has {actual_train} samples; "
+                    f"expected exactly {expected_train}."
+                )
+
+        if self.split_strategy == "time_series":
+            expected_train, expected_test, expected_val = self._time_series_expected_splits(
+                train_dict + test_dict + val_dict
+            )
+            actual_train = self._sample_key_set(train_dict, self._entry_sample_key)
+            actual_test = self._sample_key_set(test_dict, self._entry_sample_key)
+            actual_val = self._sample_key_set(val_dict, self._entry_sample_key)
+            if actual_train != expected_train or actual_test != expected_test or actual_val != expected_val:
+                raise ValueError("Existing split files do not match the configured time_series split strategy.")
+
+        logger.info(f"Split validation passed for strategy '{self.split_strategy}':")
+        for split_name in ["train", "test", "val"]:
+            counts = counts_by_split[split_name]
+            logger.info(
+                f"  - {split_name}: "
+                f"none={counts[0]}, strong={counts[1]}, medium={counts[2]}, weak={counts[3]}"
+            )
+
     def _save_splits(self, train_dict: List[List], test_dict: List[List], val_dict: List[List], output_dir: Path) -> None:
         """
         Save dataset splits to CSV, JSONL, and a summary JSON file (shared implementation).
@@ -180,7 +333,8 @@ class BaseDataSplitter(ABC):
             "dataset_root": self.dataset_path,
             "output_dir": str(output_path),
             "seed": self.seed,
-            "test_sample_per_class": self.test_sample_per_class
+            "test_sample_per_class": self.test_sample_per_class,
+            "split_strategy": self.split_strategy
         })
 
         with (output_path / "summary.json").open("w", encoding="utf-8") as f:
@@ -397,6 +551,7 @@ class FishDataSplitter(BaseDataSplitter):
                 self._validate_multimodal_entries("Train", train_dict)
                 self._validate_multimodal_entries("Test", test_dict)
                 self._validate_multimodal_entries("Validation", val_dict)
+                self._validate_split_policy(train_dict, test_dict, val_dict)
 
                 logger.info("Successfully loaded dataset splits from files:")
                 logger.info(f"- Train samples: {len(train_dict)}")
@@ -427,6 +582,7 @@ class FishDataSplitter(BaseDataSplitter):
         logger.info(f"Dataset root directory: '{self.dataset_path}'")
         logger.info(f"Random seed: {self.seed}")
         logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
+        logger.info(f"Split strategy: {self.split_strategy}")
         logger.info(f"Save split results: {self.save_results}")
         logger.info("Audio paths are required; video paths are filled only when available.")
         logger.info("==================================================")
@@ -445,30 +601,53 @@ class FishDataSplitter(BaseDataSplitter):
         none_list = self.get_file_list(split_name='none')
         logger.info(f"Class 'none': Found {len(none_list)} files.")
 
-        # Shuffle each class list independently
-        logger.info(f"Shuffling each class list independently with seed={self.seed}...")
         random_state = np.random.RandomState(self.seed)
-        random_state.shuffle(strong_list)
-        random_state.shuffle(medium_list)
-        random_state.shuffle(weak_list)
-        random_state.shuffle(none_list)
+        if self.split_strategy == "time_series":
+            logger.info("Sorting each class chronologically for time_series split...")
+            strong_list = sorted(strong_list, key=self._temporal_path_key)
+            medium_list = sorted(medium_list, key=self._temporal_path_key)
+            weak_list = sorted(weak_list, key=self._temporal_path_key)
+            none_list = sorted(none_list, key=self._temporal_path_key)
+        else:
+            logger.info(f"Shuffling each class list independently with seed={self.seed}...")
+            random_state.shuffle(strong_list)
+            random_state.shuffle(medium_list)
+            random_state.shuffle(weak_list)
+            random_state.shuffle(none_list)
 
         # Perform dataset splitting
         logger.info("Slicing class lists into train, test, and val splits...")
-        strong_test = strong_list[:self.test_sample_per_class]
-        medium_test = medium_list[:self.test_sample_per_class]
-        weak_test = weak_list[:self.test_sample_per_class]
-        none_test = none_list[:self.test_sample_per_class]
+        if self.split_strategy == "time_series":
+            holdout_size = 2 * self.test_sample_per_class
+            strong_train = strong_list[:-holdout_size]
+            medium_train = medium_list[:-holdout_size]
+            weak_train = weak_list[:-holdout_size]
+            none_train = none_list[:-holdout_size]
 
-        strong_val = strong_list[self.test_sample_per_class:2*self.test_sample_per_class]
-        medium_val = medium_list[self.test_sample_per_class:2*self.test_sample_per_class]
-        weak_val = weak_list[self.test_sample_per_class:2*self.test_sample_per_class]
-        none_val = none_list[self.test_sample_per_class:2*self.test_sample_per_class]
+            strong_val = strong_list[-holdout_size:-self.test_sample_per_class]
+            medium_val = medium_list[-holdout_size:-self.test_sample_per_class]
+            weak_val = weak_list[-holdout_size:-self.test_sample_per_class]
+            none_val = none_list[-holdout_size:-self.test_sample_per_class]
 
-        strong_train = strong_list[2*self.test_sample_per_class:]
-        medium_train = medium_list[2*self.test_sample_per_class:]
-        weak_train = weak_list[2*self.test_sample_per_class:]
-        none_train = none_list[2*self.test_sample_per_class:]
+            strong_test = strong_list[-self.test_sample_per_class:]
+            medium_test = medium_list[-self.test_sample_per_class:]
+            weak_test = weak_list[-self.test_sample_per_class:]
+            none_test = none_list[-self.test_sample_per_class:]
+        else:
+            strong_test = strong_list[:self.test_sample_per_class]
+            medium_test = medium_list[:self.test_sample_per_class]
+            weak_test = weak_list[:self.test_sample_per_class]
+            none_test = none_list[:self.test_sample_per_class]
+
+            strong_val = strong_list[self.test_sample_per_class:2*self.test_sample_per_class]
+            medium_val = medium_list[self.test_sample_per_class:2*self.test_sample_per_class]
+            weak_val = weak_list[self.test_sample_per_class:2*self.test_sample_per_class]
+            none_val = none_list[self.test_sample_per_class:2*self.test_sample_per_class]
+
+            strong_train = strong_list[2*self.test_sample_per_class:]
+            medium_train = medium_list[2*self.test_sample_per_class:]
+            weak_train = weak_list[2*self.test_sample_per_class:]
+            none_train = none_list[2*self.test_sample_per_class:]
 
         # Warn if there are insufficient samples for splitting
         for class_name, size in [('strong', len(strong_list)), ('medium', len(medium_list)), ('weak', len(weak_list)), ('none', len(none_list))]:
@@ -524,9 +703,11 @@ class FishDataSplitter(BaseDataSplitter):
                 [[wav, 0] for wav in none_val]
             )
 
-        # Final shuffle of the Train set
-        logger.info("Applying final shuffle to the train split...")
-        random_state.shuffle(train_dict)
+        if self.split_strategy == "random_sample":
+            logger.info("Applying final shuffle to the train split...")
+            random_state.shuffle(train_dict)
+
+        self._validate_split_policy(train_dict, test_dict, val_dict)
 
         logger.info("==================================================")
         logger.info("Dataset splitting completed successfully!")
