@@ -56,6 +56,10 @@ class SplitterConfig(BaseModel):
         default=True,
         description="Whether to return video paths in RAM alongside audio paths."
     )
+    split_strategy: str = Field(
+        default="random_sample",
+        description="Dataset split strategy: 'random_sample' preserves the legacy seeded per-class random split; 'time_series' sorts each class by time while keeping the same per-class val/test quotas."
+    )
 
 
 class VideoTrainConfig(BaseModel):

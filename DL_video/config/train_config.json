@@ -13,7 +13,8 @@
     "seed":42,
     "test_sample_per_class": 700,
     "save_results": true,
-    "include_video": true
+    "include_video": true,
+    "split_strategy": "random_sample"
   },
   "video_features": {
     "image_size": 224
