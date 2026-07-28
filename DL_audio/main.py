@@ -20,7 +20,7 @@ import torch.optim as optim
 from config import ArtifactUploadConfig, TrainConfig
 from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
-from models import Cnn14MobileV2_1P9M, AudioModel
+from models import Cnn14MobileV2, AudioModel
 from tasks import AudioTrainer
 from utils import log_model_profile
 
@@ -225,7 +225,7 @@ def run_audio_training(config: TrainConfig, train_config_path: str, device: torc
     # 4. Construct unified AudioModel
     logger.info("Assembling neural network model layers...")
     frontend = AudioFrontend(config=config.audio_features)
-    backbone = Cnn14MobileV2_1P9M(classes_num=4)
+    backbone = Cnn14MobileV2(classes_num=4)
     
     model = AudioModel(frontend=frontend, backbone=backbone)
     model = model.to(device)
