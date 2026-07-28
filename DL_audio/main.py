@@ -1,5 +1,8 @@
 import os
 import sys
+import copy
+import csv
+import json
 from pathlib import Path
 from datetime import datetime
 import zipfile
@@ -33,6 +36,86 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
+    base_dir = base_ckpt_dir if base_ckpt_dir else "checkpoint"
+    if Path(base_dir).name == model_name:
+        return base_dir
+    return os.path.join(base_dir, model_name)
+
+
+def write_runtime_config(config: TrainConfig, output_path: str) -> str:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(config.model_dump(), f, indent=2)
+    return str(path)
+
+
+def read_single_summary_row(summary_path: Path) -> dict:
+    with summary_path.open("r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        raise ValueError(f"Summary file is empty: {summary_path}")
+    return rows[-1]
+
+
+def aggregate_cv_summaries(model_dir: str, num_folds: int) -> None:
+    import statistics
+
+    output_dir = Path(model_dir)
+    fold_rows = []
+    for fold_index in range(num_folds):
+        fold_dir = output_dir / f"fold_{fold_index:02d}"
+        summary_path = fold_dir / "summary.csv"
+        if not summary_path.exists():
+            raise FileNotFoundError(f"Missing fold summary: {summary_path}")
+        row = read_single_summary_row(summary_path)
+        row = {"fold": str(fold_index), **row}
+        fold_rows.append(row)
+
+    metric_columns = [key for key in fold_rows[0].keys() if key != "fold"]
+    numeric_columns = []
+    for key in metric_columns:
+        try:
+            [float(row[key]) for row in fold_rows]
+            numeric_columns.append(key)
+        except (TypeError, ValueError):
+            pass
+
+    mean_row = {"fold": "mean"}
+    std_row = {"fold": "std"}
+    for key in metric_columns:
+        if key in numeric_columns:
+            values = [float(row[key]) for row in fold_rows]
+            mean_row[key] = f"{statistics.mean(values):.6f}"
+            std_row[key] = f"{statistics.stdev(values) if len(values) > 1 else 0.0:.6f}"
+        else:
+            mean_row[key] = ""
+            std_row[key] = ""
+
+    csv_path = output_dir / "cv_summary.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        fieldnames = ["fold"] + metric_columns
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(fold_rows)
+        writer.writerow(mean_row)
+        writer.writerow(std_row)
+
+    json_path = output_dir / "cv_summary.json"
+    summary_json = {
+        "num_folds": num_folds,
+        "folds": fold_rows,
+        "mean": mean_row,
+        "std": std_row,
+    }
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(summary_json, f, indent=2)
+
+    logger.info(f"Saved cross-validation summary CSV to: '{csv_path}'")
+    logger.info(f"Saved cross-validation summary JSON to: '{json_path}'")
 
 
 def timestamped_repo_path(path_in_repo: str) -> str:
@@ -124,29 +207,8 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
     logger.info("Successfully uploaded artifact to Hugging Face.")
 
 
-def main():
-    # 1. Main configuration file path (override this when running other configs)
-    train_config_path = 'config/train_config.json'
-    artifact_upload_config_path = 'config/artifact_upload_config.json'
-    
-    # Load unified training configurations
-    config = TrainConfig.from_json(train_config_path)
-
-    logger.info("==================================================")
-    logger.info("Launching Audio Pipeline Training (Centralized Config):")
-    logger.info(f"  - Device Name:              {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-    logger.info(f"  - Max Epochs:               {config.epochs}")
-    logger.info(f"  - Batch Size:               {config.batch_size}")
-    logger.info(f"  - Learning Rate (LR):       {config.learning_rate}")
-    logger.info(f"  - Checkpoint Directory:     '{config.ckpt_dir}'")
-    logger.info(f"  - Monitor Metric:           '{config.monitor}'")
-    logger.info("==================================================")
-
-    # 2. Hardware device configuration
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Training will run on device: '{device}'")
-
-    # 3. Initialize FishVoiceDataLoader and fetch splits
+def run_audio_training(config: TrainConfig, train_config_path: str, device: torch.device, fold_index: int = None) -> str:
+    """Run one audio train/val/test cycle and return the model output directory."""
     logger.info("Initializing DataLoaders...")
     loader_manager = FishVoiceDataLoader(
         sample_rate=config.audio_features.sample_rate,
@@ -172,6 +234,11 @@ def main():
     model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
     log_model_profile(model=model, example_input=dummy_waveform, model_name=model_name)
 
+    if config.dataset_splitter.evaluation_mode == "cross_validation":
+        fold_dir = os.path.join(model_cv_dir(config.ckpt_dir, model_name), f"fold_{fold_index:02d}")
+        config.ckpt_dir = fold_dir
+        train_config_path = write_runtime_config(config, os.path.join(fold_dir, "fold_train_config.json"))
+
     # 5. Initialize Adam optimizer
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
@@ -195,6 +262,61 @@ def main():
         test_loader=test_loader,
         max_epoch=config.epochs
     )
+
+    if config.dataset_splitter.evaluation_mode == "cross_validation":
+        return config.ckpt_dir
+    return os.path.join(config.ckpt_dir if config.ckpt_dir else "checkpoint", model_name)
+
+
+def main():
+    # 1. Main configuration file path (override this when running other configs)
+    train_config_path = 'config/train_config.json'
+    artifact_upload_config_path = 'config/artifact_upload_config.json'
+
+    # Load unified training configurations
+    config = TrainConfig.from_json(train_config_path)
+
+    logger.info("==================================================")
+    logger.info("Launching Audio Pipeline Training (Centralized Config):")
+    logger.info(f"  - Device Name:              {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+    logger.info(f"  - Max Epochs:               {config.epochs}")
+    logger.info(f"  - Batch Size:               {config.batch_size}")
+    logger.info(f"  - Learning Rate (LR):       {config.learning_rate}")
+    logger.info(f"  - Checkpoint Directory:     '{config.ckpt_dir}'")
+    logger.info(f"  - Monitor Metric:           '{config.monitor}'")
+    logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
+    logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
+    logger.info("==================================================")
+
+    # 2. Hardware device configuration
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f"Training will run on device: '{device}'")
+
+    if config.dataset_splitter.evaluation_mode == "cross_validation":
+        model_dir = None
+        for fold_index in range(config.dataset_splitter.num_folds):
+            logger.info("==================================================")
+            logger.info(f"Starting cross-validation fold {fold_index + 1}/{config.dataset_splitter.num_folds}")
+            logger.info("==================================================")
+            fold_config = copy.deepcopy(config)
+            fold_config.dataset_splitter.fold_index = fold_index
+            fold_output_dir = run_audio_training(
+                config=fold_config,
+                train_config_path=train_config_path,
+                device=device,
+                fold_index=fold_index,
+            )
+            model_dir = str(Path(fold_output_dir).parent)
+
+        if model_dir is not None:
+            aggregate_cv_summaries(model_dir, config.dataset_splitter.num_folds)
+    else:
+        run_audio_training(
+            config=config,
+            train_config_path=train_config_path,
+            device=device,
+            fold_index=None,
+        )
 
     artifact_upload_config = ArtifactUploadConfig.from_json(artifact_upload_config_path)
     upload_artifact_if_enabled(artifact_upload_config)

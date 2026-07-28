@@ -31,6 +31,7 @@ from config import SplitterConfig
 LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
 LABEL_ORDER = [0, 1, 2, 3]
 VALID_SPLIT_STRATEGIES = {"random_sample", "time_series"}
+VALID_EVALUATION_MODES = {"holdout", "cross_validation"}
 
 
 def _stable_path_key(path: str) -> str:
@@ -61,11 +62,25 @@ class BaseDataSplitter(ABC):
         self.save_results = config.save_results
         self.include_video = config.include_video
         self.split_strategy = getattr(config, "split_strategy", "random_sample")
+        self.evaluation_mode = getattr(config, "evaluation_mode", "holdout")
+        self.num_folds = int(getattr(config, "num_folds", 5))
+        self.fold_index = getattr(config, "fold_index", None)
+        self.cv_val_ratio = float(getattr(config, "cv_val_ratio", 0.2))
         if self.split_strategy not in VALID_SPLIT_STRATEGIES:
             raise ValueError(
                 f"Invalid split_strategy='{self.split_strategy}'. "
                 f"Expected one of {sorted(VALID_SPLIT_STRATEGIES)}."
             )
+        if self.evaluation_mode not in VALID_EVALUATION_MODES:
+            raise ValueError(
+                f"Invalid evaluation_mode='{self.evaluation_mode}'. "
+                f"Expected one of {sorted(VALID_EVALUATION_MODES)}."
+            )
+        if self.evaluation_mode == "cross_validation":
+            if self.fold_index is None:
+                raise ValueError("fold_index must be set when evaluation_mode='cross_validation'.")
+            if not 0 <= int(self.fold_index) < self.num_folds:
+                raise ValueError(f"fold_index={self.fold_index} is outside [0, {self.num_folds}).")
 
         # Automatically resolve the audio directory path (used as the root for sample splitting)
         audio_dir = os.path.join(self.dataset_path, 'audio')
@@ -226,6 +241,81 @@ class BaseDataSplitter(ABC):
 
         return expected_train, expected_test, expected_val
 
+    def _ordered_class_entries(self, entries: List[List], label: int, seed_offset: int = 0) -> List[List]:
+        """Return class entries in deterministic order for the configured split strategy."""
+        class_entries = [item for item in entries if self._label_from_entry(item) == label]
+        if self.split_strategy == "time_series":
+            return sorted(class_entries, key=self._entry_temporal_key)
+
+        class_entries = sorted(class_entries, key=self._entry_sample_key)
+        rng = np.random.RandomState(self.seed + seed_offset + label)
+        rng.shuffle(class_entries)
+        return class_entries
+
+    @staticmethod
+    def _split_into_folds(items: List[List], num_folds: int) -> List[List[List]]:
+        """Split a deterministic list into nearly equal contiguous folds."""
+        indexes = np.array_split(np.arange(len(items)), num_folds)
+        return [[items[int(idx)] for idx in fold_indexes] for fold_indexes in indexes]
+
+    def _cross_validation_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
+        """Build expected sample-key sets for one stratified outer CV fold."""
+        fold_index = int(self.fold_index)
+        train_entries: List[List] = []
+        test_entries: List[List] = []
+        val_entries: List[List] = []
+
+        for label in LABEL_ORDER:
+            class_entries = self._ordered_class_entries(entries=all_entries, label=label, seed_offset=0)
+            outer_folds = self._split_into_folds(class_entries, self.num_folds)
+            test_class_entries = list(outer_folds[fold_index])
+            dev_class_entries = [
+                item
+                for idx, fold_entries in enumerate(outer_folds)
+                if idx != fold_index
+                for item in fold_entries
+            ]
+
+            if self.split_strategy == "time_series":
+                dev_class_entries = sorted(dev_class_entries, key=self._entry_temporal_key)
+            else:
+                dev_class_entries = sorted(dev_class_entries, key=self._entry_sample_key)
+                rng = np.random.RandomState(self.seed + 10000 + fold_index + label)
+                rng.shuffle(dev_class_entries)
+
+            val_count = int(round(len(dev_class_entries) * self.cv_val_ratio))
+            if val_count <= 0 or val_count >= len(dev_class_entries):
+                raise ValueError(
+                    f"Invalid cv_val_ratio={self.cv_val_ratio} for class '{LABEL_TO_CLASS[label]}' "
+                    f"with {len(dev_class_entries)} development samples."
+                )
+
+            if self.split_strategy == "time_series":
+                train_class_entries = dev_class_entries[:-val_count]
+                val_class_entries = dev_class_entries[-val_count:]
+            else:
+                val_class_entries = dev_class_entries[:val_count]
+                train_class_entries = dev_class_entries[val_count:]
+
+            train_entries.extend(train_class_entries)
+            val_entries.extend(val_class_entries)
+            test_entries.extend(test_class_entries)
+
+        return (
+            {self._entry_sample_key(item) for item in train_entries},
+            {self._entry_sample_key(item) for item in test_entries},
+            {self._entry_sample_key(item) for item in val_entries},
+        )
+
+    def _split_entries_cross_validation(self, all_entries: List[List]) -> Tuple[List[List], List[List], List[List]]:
+        expected_train, expected_test, expected_val = self._cross_validation_expected_splits(all_entries)
+        train_dict = [item for item in all_entries if self._entry_sample_key(item) in expected_train]
+        test_dict = [item for item in all_entries if self._entry_sample_key(item) in expected_test]
+        val_dict = [item for item in all_entries if self._entry_sample_key(item) in expected_val]
+
+        self._validate_split_policy(train_dict, test_dict, val_dict)
+        return train_dict, test_dict, val_dict
+
     def _validate_split_policy(self, train_dict: List[List], test_dict: List[List], val_dict: List[List]) -> None:
         """Validate split consistency for the selected strategy."""
         splits = {"train": train_dict, "test": test_dict, "val": val_dict}
@@ -246,25 +336,26 @@ class BaseDataSplitter(ABC):
         for counts in counts_by_split.values():
             total_counts.update(counts)
 
-        for split_name in ["test", "val"]:
+        if self.evaluation_mode == "holdout":
+            for split_name in ["test", "val"]:
+                for label in LABEL_ORDER:
+                    actual = counts_by_split[split_name][label]
+                    if actual != self.test_sample_per_class:
+                        raise ValueError(
+                            f"{split_name} split class '{LABEL_TO_CLASS[label]}' has {actual} samples; "
+                            f"expected exactly {self.test_sample_per_class}."
+                        )
+
             for label in LABEL_ORDER:
-                actual = counts_by_split[split_name][label]
-                if actual != self.test_sample_per_class:
+                expected_train = total_counts[label] - (2 * self.test_sample_per_class)
+                actual_train = counts_by_split["train"][label]
+                if actual_train != expected_train:
                     raise ValueError(
-                        f"{split_name} split class '{LABEL_TO_CLASS[label]}' has {actual} samples; "
-                        f"expected exactly {self.test_sample_per_class}."
+                        f"train split class '{LABEL_TO_CLASS[label]}' has {actual_train} samples; "
+                        f"expected exactly {expected_train}."
                     )
 
-        for label in LABEL_ORDER:
-            expected_train = total_counts[label] - (2 * self.test_sample_per_class)
-            actual_train = counts_by_split["train"][label]
-            if actual_train != expected_train:
-                raise ValueError(
-                    f"train split class '{LABEL_TO_CLASS[label]}' has {actual_train} samples; "
-                    f"expected exactly {expected_train}."
-                )
-
-        if self.split_strategy == "time_series":
+        if self.evaluation_mode == "holdout" and self.split_strategy == "time_series":
             expected_train, expected_test, expected_val = self._time_series_expected_splits(
                 train_dict + test_dict + val_dict
             )
@@ -274,7 +365,17 @@ class BaseDataSplitter(ABC):
             if actual_train != expected_train or actual_test != expected_test or actual_val != expected_val:
                 raise ValueError("Existing split files do not match the configured time_series split strategy.")
 
-        logger.info(f"Split validation passed for strategy '{self.split_strategy}':")
+        if self.evaluation_mode == "cross_validation":
+            expected_train, expected_test, expected_val = self._cross_validation_expected_splits(
+                train_dict + test_dict + val_dict
+            )
+            actual_train = self._sample_key_set(train_dict, self._entry_sample_key)
+            actual_test = self._sample_key_set(test_dict, self._entry_sample_key)
+            actual_val = self._sample_key_set(val_dict, self._entry_sample_key)
+            if actual_train != expected_train or actual_test != expected_test or actual_val != expected_val:
+                raise ValueError("Existing split files do not match the configured cross-validation fold.")
+
+        logger.info(f"Split validation passed for mode='{self.evaluation_mode}', strategy='{self.split_strategy}':")
         for split_name in ["train", "test", "val"]:
             counts = counts_by_split[split_name]
             logger.info(
@@ -334,7 +435,11 @@ class BaseDataSplitter(ABC):
             "output_dir": str(output_path),
             "seed": self.seed,
             "test_sample_per_class": self.test_sample_per_class,
-            "split_strategy": self.split_strategy
+            "split_strategy": self.split_strategy,
+            "evaluation_mode": self.evaluation_mode,
+            "num_folds": self.num_folds,
+            "fold_index": self.fold_index,
+            "cv_val_ratio": self.cv_val_ratio
         })
 
         with (output_path / "summary.json").open("w", encoding="utf-8") as f:
@@ -438,9 +543,14 @@ class FishDataSplitter(BaseDataSplitter):
         legacy_splits_dir = dataset_path.parent / 'splits'
 
         if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
-            splits_dir = legacy_splits_dir
+            base_splits_dir = legacy_splits_dir
         else:
-            splits_dir = local_splits_dir
+            base_splits_dir = local_splits_dir
+
+        if self.evaluation_mode == "cross_validation":
+            splits_dir = base_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
+        else:
+            splits_dir = base_splits_dir
 
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
@@ -582,7 +692,10 @@ class FishDataSplitter(BaseDataSplitter):
         logger.info(f"Dataset root directory: '{self.dataset_path}'")
         logger.info(f"Random seed: {self.seed}")
         logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
+        logger.info(f"Evaluation mode: {self.evaluation_mode}")
         logger.info(f"Split strategy: {self.split_strategy}")
+        if self.evaluation_mode == "cross_validation":
+            logger.info(f"CV folds: {self.num_folds} | Fold index: {self.fold_index} | CV val ratio: {self.cv_val_ratio}")
         logger.info(f"Save split results: {self.save_results}")
         logger.info("Audio paths are required; video paths are filled only when available.")
         logger.info("==================================================")
@@ -600,6 +713,43 @@ class FishDataSplitter(BaseDataSplitter):
         
         none_list = self.get_file_list(split_name='none')
         logger.info(f"Class 'none': Found {len(none_list)} files.")
+
+        def build_entries() -> List[List]:
+            if self.include_video:
+                return (
+                    [self._make_multimodal_entry(wav, 1) for wav in strong_list] +
+                    [self._make_multimodal_entry(wav, 2) for wav in medium_list] +
+                    [self._make_multimodal_entry(wav, 3) for wav in weak_list] +
+                    [self._make_multimodal_entry(wav, 0) for wav in none_list]
+                )
+            return (
+                [[wav, 1] for wav in strong_list] +
+                [[wav, 2] for wav in medium_list] +
+                [[wav, 3] for wav in weak_list] +
+                [[wav, 0] for wav in none_list]
+            )
+
+        if self.evaluation_mode == "cross_validation":
+            logger.info("Building stratified cross-validation fold split...")
+            train_dict, test_dict, val_dict = self._split_entries_cross_validation(build_entries())
+
+            logger.info("==================================================")
+            logger.info("Cross-validation dataset splitting completed successfully!")
+            logger.info(f"- Train samples: {len(train_dict)}")
+            logger.info(f"- Test samples:  {len(test_dict)}")
+            logger.info(f"- Val samples:   {len(val_dict)}")
+            if len(train_dict) > 0:
+                logger.info(f"  * First generated train sample: {train_dict[0]}")
+            if len(test_dict) > 0:
+                logger.info(f"  * First generated test sample:  {test_dict[0]}")
+            if len(val_dict) > 0:
+                logger.info(f"  * First generated val sample:   {val_dict[0]}")
+            logger.info("==================================================")
+
+            if self.save_results:
+                self._save_splits(train_dict, test_dict, val_dict, splits_dir)
+
+            return train_dict, test_dict, val_dict
 
         random_state = np.random.RandomState(self.seed)
         if self.split_strategy == "time_series":

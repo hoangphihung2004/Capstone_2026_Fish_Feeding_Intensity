@@ -53,8 +53,12 @@ class BaseTrainer:
         # Ensure base directory is not empty
         base_dir = ckpt_dir if ckpt_dir else "checkpoint"
         
-        # Append model name as a folder inside base_dir if not already ending with it
-        if not base_dir.rstrip('/\\').endswith(model_name):
+        base_path = Path(base_dir)
+
+        # CV runs pass checkpoint/<model_name>/fold_xx and should not append model_name again.
+        if base_path.name.startswith("fold_") and base_path.parent.name == model_name:
+            self.ckpt_dir = base_dir
+        elif not base_dir.rstrip('/\\').endswith(model_name):
             self.ckpt_dir = os.path.join(base_dir, model_name)
         else:
             self.ckpt_dir = base_dir
@@ -122,9 +126,15 @@ class AudioTrainer(BaseTrainer):
             local_splits_dir = dataset_path / 'splits'
             legacy_splits_dir = dataset_path.parent / 'splits'
             if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
-                splits_dir = legacy_splits_dir
+                base_splits_dir = legacy_splits_dir
             else:
-                splits_dir = local_splits_dir
+                base_splits_dir = local_splits_dir
+
+            if getattr(config_obj.dataset_splitter, "evaluation_mode", "holdout") == "cross_validation":
+                fold_index = int(config_obj.dataset_splitter.fold_index)
+                splits_dir = base_splits_dir / "cv" / f"fold_{fold_index:02d}"
+            else:
+                splits_dir = base_splits_dir
 
             if splits_dir.exists():
                 shutil.copytree(splits_dir, os.path.join(self.ckpt_dir, 'splits'), dirs_exist_ok=True)

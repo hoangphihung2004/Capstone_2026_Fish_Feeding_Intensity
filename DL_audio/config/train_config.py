@@ -9,6 +9,7 @@ if project_root not in sys.path:
 
 import json
 import logging
+from typing import Optional
 from pydantic import BaseModel, Field
 
 # Logging configuration
@@ -64,6 +65,25 @@ class SplitterConfig(BaseModel):
     split_strategy: str = Field(
         default="random_sample",
         description="Dataset split strategy: 'random_sample' preserves the legacy seeded per-class random split; 'time_series' sorts each class by time while keeping the same per-class val/test quotas."
+    )
+    evaluation_mode: str = Field(
+        default="holdout",
+        description="Evaluation mode: 'holdout' uses one train/val/test split; 'cross_validation' runs stratified K-fold CV."
+    )
+    num_folds: int = Field(
+        default=5,
+        gt=1,
+        description="Number of outer folds for evaluation_mode='cross_validation'."
+    )
+    fold_index: Optional[int] = Field(
+        default=None,
+        description="Current outer fold index for cross-validation. Set automatically by main.py during CV runs."
+    )
+    cv_val_ratio: float = Field(
+        default=0.2,
+        gt=0.0,
+        lt=1.0,
+        description="Stratified validation ratio split from the non-test development folds during cross-validation."
     )
 
 
