@@ -167,14 +167,39 @@ def aggregate_cv_summaries(model_dir: str, num_folds: int) -> None:
     logger.info(f"Saved cross-validation summary JSON to: '{json_path}'")
 
 
-def timestamped_repo_path(path_in_repo: str) -> str:
+def safe_filename_part(value: str) -> str:
+    safe_chars = []
+    for char in str(value):
+        if char.isascii() and (char.isalnum() or char in ("-", "_", ".")):
+            safe_chars.append(char)
+        else:
+            safe_chars.append("_")
+    safe_value = "".join(safe_chars).strip("._-")
+    return safe_value or "unknown"
+
+
+def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = ".zip") -> str:
+    suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    filename_parts = [
+        config.model.backbone,
+        config.dataset_splitter.evaluation_mode,
+        config.dataset_splitter.split_strategy,
+        timestamp,
+    ]
+    safe_stem = "_".join(safe_filename_part(part) for part in filename_parts)
+    return f"{safe_stem}{suffix}"
+
+
+def artifact_zip_path(zip_path: str, artifact_filename: str) -> Path:
+    return Path(zip_path).with_name(artifact_filename)
+
+
+def artifact_repo_path(path_in_repo: str, artifact_filename: str) -> str:
     path = Path(path_in_repo)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{path.stem}_{timestamp}{path.suffix}"
     parent = path.parent
     if str(parent) == ".":
-        return filename
-    return str(parent / filename).replace("\\", "/")
+        return artifact_filename
+    return str(parent / artifact_filename).replace("\\", "/")
 
 
 def zip_directory(source_dir: str, zip_path: str) -> Path:
@@ -206,7 +231,7 @@ def zip_directory(source_dir: str, zip_path: str) -> Path:
     return output_path
 
 
-def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
+def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: TrainConfig) -> None:
     if not upload_config.enabled:
         logger.info("Artifact upload is disabled. Skipping Hugging Face upload.")
         return
@@ -229,7 +254,11 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
     except ImportError as exc:
         raise ImportError("huggingface_hub is required for artifact upload. Install it with requirements.txt.") from exc
 
-    artifact_zip = zip_directory(upload_config.source_dir, upload_config.zip_path)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = Path(upload_config.path_in_repo).suffix or ".zip"
+    artifact_filename = build_artifact_filename(config, timestamp, suffix=suffix)
+    output_zip_path = artifact_zip_path(upload_config.zip_path, artifact_filename)
+    artifact_zip = zip_directory(upload_config.source_dir, str(output_zip_path))
 
     if upload_config.create_repo:
         create_repo(
@@ -242,7 +271,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig) -> None:
     logger.info("==================================================")
     logger.info(f"Uploading artifact to Hugging Face repo: '{upload_config.repo_id}'")
     logger.info(f"Repo type:                            '{upload_config.repo_type}'")
-    path_in_repo = timestamped_repo_path(upload_config.path_in_repo)
+    path_in_repo = artifact_repo_path(upload_config.path_in_repo, artifact_filename)
     logger.info(f"Path in repo:                         '{path_in_repo}'")
     logger.info("==================================================")
 
@@ -371,7 +400,7 @@ def main():
         )
 
     artifact_upload_config = ArtifactUploadConfig.from_json(artifact_upload_config_path)
-    upload_artifact_if_enabled(artifact_upload_config)
+    upload_artifact_if_enabled(artifact_upload_config, config)
 
     logger.info("Training pipeline finished successfully!")
 
