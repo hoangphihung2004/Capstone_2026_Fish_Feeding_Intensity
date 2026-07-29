@@ -1,6 +1,7 @@
 from .base_backbone import BaseBackbone
 from .cnn14_mobilev2 import Cnn14MobileV2
 from .cnn14_mobilev2_1p9m import Cnn14MobileV2_1P9M
+from .mobilenet_v1 import MobileNetV1
 from .mobilenet_v2 import MobileNetV2
 from .resnet22 import ResNet22
 from .efficientnet_b0 import EfficientNetB0
@@ -13,6 +14,7 @@ __all__ = [
     "BaseBackbone",
     "Cnn14MobileV2",
     "Cnn14MobileV2_1P9M",
+    "MobileNetV1",
     "MobileNetV2",
     "ResNet22",
     "EfficientNetB0",

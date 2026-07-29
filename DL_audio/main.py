@@ -25,6 +25,7 @@ from models import (
     Cnn14MobileV2,
     Cnn14MobileV2_1P9M,
     EfficientNetB0,
+    MobileNetV1,
     MobileNetV2,
     PANNS_Cnn10,
     PANNS_Cnn14,
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 MODEL_REGISTRY = {
     "Cnn14MobileV2": Cnn14MobileV2,
     "Cnn14MobileV2_1P9M": Cnn14MobileV2_1P9M,
+    "MobileNetV1": MobileNetV1,
     "MobileNetV2": MobileNetV2,
     "ResNet22": ResNet22,
     "EfficientNetB0": EfficientNetB0,

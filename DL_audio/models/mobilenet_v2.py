@@ -150,5 +150,4 @@ class MobileNetV2(BaseBackbone):
         x = x1 + x2
 
         x = F.relu_(self.fc1(x))
-        x = F.dropout(x, p=0.2, training=self.training)
         return self.fc_audioset(x)
