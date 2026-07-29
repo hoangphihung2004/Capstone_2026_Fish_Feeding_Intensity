@@ -7,6 +7,10 @@
   "patience": 100,
   "delta": 0.0,
   "cache_audio": true,
+  "model": {
+    "backbone": "Cnn14MobileV2",
+    "pretrained": false
+  },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
     "seed": 42,

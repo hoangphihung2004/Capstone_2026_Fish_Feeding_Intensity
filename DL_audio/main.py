@@ -20,7 +20,17 @@ import torch.optim as optim
 from config import ArtifactUploadConfig, TrainConfig
 from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
-from models import Cnn14MobileV2, AudioModel
+from models import (
+    AudioModel,
+    Cnn14MobileV2,
+    Cnn14MobileV2_1P9M,
+    EfficientNetB0,
+    MobileNetV2,
+    PANNS_Cnn10,
+    PANNS_Cnn14,
+    PANNS_Cnn6,
+    ResNet22,
+)
 from tasks import AudioTrainer
 from utils import log_model_profile
 
@@ -36,6 +46,45 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+MODEL_REGISTRY = {
+    "Cnn14MobileV2": Cnn14MobileV2,
+    "Cnn14MobileV2_1P9M": Cnn14MobileV2_1P9M,
+    "MobileNetV2": MobileNetV2,
+    "ResNet22": ResNet22,
+    "EfficientNetB0": EfficientNetB0,
+    "PANNS_Cnn6": PANNS_Cnn6,
+    "PANNS_Cnn10": PANNS_Cnn10,
+    "PANNS_Cnn14": PANNS_Cnn14,
+}
+
+PRETRAINED_BACKBONES = {"EfficientNetB0"}
+
+
+def validate_backbone_config(config: TrainConfig) -> None:
+    backbone_name = config.model.backbone
+    if backbone_name not in MODEL_REGISTRY:
+        available = ", ".join(sorted(MODEL_REGISTRY))
+        raise ValueError(f"Unknown audio backbone '{backbone_name}'. Available backbones: {available}.")
+
+    if config.model.pretrained and backbone_name not in PRETRAINED_BACKBONES:
+        logger.warning(
+            f"Backbone '{backbone_name}' does not support pretrained weights in this codebase. "
+            "Ignoring model.pretrained=true."
+        )
+
+
+def build_backbone(config: TrainConfig):
+    backbone_name = config.model.backbone
+    validate_backbone_config(config)
+
+    backbone_cls = MODEL_REGISTRY[backbone_name]
+    kwargs = {"classes_num": 4}
+    if backbone_name in PRETRAINED_BACKBONES:
+        kwargs["pretrained"] = config.model.pretrained
+
+    return backbone_cls(**kwargs)
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
@@ -225,7 +274,7 @@ def run_audio_training(config: TrainConfig, train_config_path: str, device: torc
     # 4. Construct unified AudioModel
     logger.info("Assembling neural network model layers...")
     frontend = AudioFrontend(config=config.audio_features)
-    backbone = Cnn14MobileV2(classes_num=4)
+    backbone = build_backbone(config)
     
     model = AudioModel(frontend=frontend, backbone=backbone)
     model = model.to(device)
@@ -275,6 +324,7 @@ def main():
 
     # Load unified training configurations
     config = TrainConfig.from_json(train_config_path)
+    validate_backbone_config(config)
 
     logger.info("==================================================")
     logger.info("Launching Audio Pipeline Training (Centralized Config):")
@@ -284,6 +334,8 @@ def main():
     logger.info(f"  - Learning Rate (LR):       {config.learning_rate}")
     logger.info(f"  - Checkpoint Directory:     '{config.ckpt_dir}'")
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
+    logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
+    logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     logger.info("==================================================")

@@ -36,6 +36,20 @@ class AudioFeaturesConfig(BaseModel):
     freq_stripes_num: int = Field(default=2, description="Number of masked frequency stripes.")
 
 
+class ModelConfig(BaseModel):
+    """
+    Configuration for selecting the audio backbone without editing main.py.
+    """
+    backbone: str = Field(
+        default="Cnn14MobileV2",
+        description="Backbone class name exported by DL_audio.models."
+    )
+    pretrained: bool = Field(
+        default=False,
+        description="Whether to request pretrained weights for backbones that support them."
+    )
+
+
 class SplitterConfig(BaseModel):
     """
     Configuration parameters for dataset splitting.
@@ -103,6 +117,7 @@ class TrainConfig(BaseModel):
     cache_audio: bool = Field(default=True, description="Preload entire audio dataset to RAM cache.")
     
     # Nested configurations
+    model: ModelConfig = Field(default_factory=ModelConfig, description="Audio backbone model configuration.")
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig, description="Mel-spectrogram extractor configuration.")
 
