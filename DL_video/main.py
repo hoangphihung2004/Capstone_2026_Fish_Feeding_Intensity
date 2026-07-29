@@ -19,7 +19,17 @@ import torch.optim as optim
 # Import refactored OOP components
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishVideoDataLoader
-from models import MobileNetV2, VideoModel
+from models import (
+    ConvNeXtTiny,
+    DenseNet121,
+    EfficientNetB0,
+    MobileNetV2,
+    ResNet18,
+    ResNet50,
+    SwinTiny,
+    VideoModel,
+    ViTBase16,
+)
 from tasks import VideoTrainer
 
 # Ensure stdout/stderr UTF-8 encoding on Windows terminal
@@ -34,6 +44,31 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+MODEL_REGISTRY = {
+    "MobileNetV2": MobileNetV2,
+    "EfficientNetB0": EfficientNetB0,
+    "ResNet18": ResNet18,
+    "ResNet50": ResNet50,
+    "DenseNet121": DenseNet121,
+    "SwinTiny": SwinTiny,
+    "ViTBase16": ViTBase16,
+    "ConvNeXtTiny": ConvNeXtTiny,
+}
+
+
+def validate_backbone_config(config: TrainConfig) -> None:
+    backbone_name = config.model.backbone
+    if backbone_name not in MODEL_REGISTRY:
+        available = ", ".join(sorted(MODEL_REGISTRY))
+        raise ValueError(f"Unknown video backbone '{backbone_name}'. Available backbones: {available}.")
+
+
+def build_backbone(config: TrainConfig):
+    validate_backbone_config(config)
+    backbone_cls = MODEL_REGISTRY[config.model.backbone]
+    return backbone_cls(classes_num=4, pretrained=config.model.pretrained)
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
@@ -223,7 +258,7 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
 
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
-    backbone = MobileNetV2(classes_num=4, pretrained=True)
+    backbone = build_backbone(config)
     model = VideoModel(backbone=backbone)
     model = model.to(device)
 
@@ -263,6 +298,7 @@ def main():
 
     # Load unified training configurations
     config = TrainConfig.from_json(train_config_path)
+    validate_backbone_config(config)
 
     logger.info("==================================================")
     logger.info("Launching Single-Frame Image Classification Training:")
@@ -272,6 +308,8 @@ def main():
     logger.info(f"  - Learning Rate (LR):       {config.learning_rate}")
     logger.info(f"  - Checkpoint Directory:     '{config.ckpt_dir}'")
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
+    logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
+    logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     logger.info("==================================================")

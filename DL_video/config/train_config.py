@@ -30,6 +30,20 @@ class VideoFeaturesConfig(BaseModel):
     image_size: int = Field(default=224, description="Target width and height for extracted images.")
 
 
+class ModelConfig(BaseModel):
+    """
+    Configuration for selecting the video backbone without editing main.py.
+    """
+    backbone: str = Field(
+        default="MobileNetV2",
+        description="Backbone class name exported by DL_video.models."
+    )
+    pretrained: bool = Field(
+        default=True,
+        description="Whether to request pretrained weights for supported torchvision backbones."
+    )
+
+
 class SplitterConfig(BaseModel):
     """
     Configuration parameters for dataset splitting.
@@ -99,6 +113,7 @@ class VideoTrainConfig(BaseModel):
     cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' decodes from MP4 on demand.")
     
     # Nested configurations
+    model: ModelConfig = Field(default_factory=ModelConfig, description="Video backbone model configuration.")
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Image feature extraction configuration.")
 

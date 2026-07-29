@@ -8,6 +8,10 @@
   "patience": 20,
   "delta": 0.0,
   "cache_mode": "ram",
+  "model": {
+    "backbone": "MobileNetV2",
+    "pretrained": true
+  },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
     "seed":42,
