@@ -5,6 +5,7 @@ import logging
 import csv
 import json
 import re
+import shutil
 from collections import Counter
 from pathlib import Path
 from typing import List, Dict, Tuple, Any
@@ -591,6 +592,20 @@ class FishDataSplitter(BaseDataSplitter):
                     f"  expected_audio: {expected_audio}"
                 )
 
+    def _clear_existing_splits(self, splits_root: Path) -> None:
+        dataset_path = Path(self.dataset_path).resolve()
+        splits_root = Path(splits_root).resolve()
+        allowed_roots = {(dataset_path / 'splits').resolve()}
+        if dataset_path.name.lower() in ['audio', 'video']:
+            allowed_roots.add((dataset_path.parent / 'splits').resolve())
+
+        if splits_root.name != 'splits' or splits_root not in allowed_roots:
+            raise ValueError(f"Refusing to delete unexpected split path: '{splits_root}'")
+
+        if splits_root.exists():
+            logger.info(f"Removing existing split files before generating a fresh split: '{splits_root}'")
+            shutil.rmtree(splits_root)
+
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
         # Automatically determine the splits directory. When dataset_path points
         # directly to an audio folder, keep splits inside that folder so the
@@ -608,6 +623,8 @@ class FishDataSplitter(BaseDataSplitter):
             splits_dir = base_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
         else:
             splits_dir = base_splits_dir
+
+        self._clear_existing_splits(base_splits_dir)
 
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
