@@ -2,6 +2,7 @@ import csv
 import glob
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -112,6 +113,8 @@ class BaseDataSplitter(ABC):
         self.dataset_path = config.dataset_path
         self.seed = config.seed
         self.test_sample_per_class = config.test_sample_per_class
+        self.holdout_val_ratio = float(getattr(config, "holdout_val_ratio", 0.1))
+        self.holdout_test_ratio = float(getattr(config, "holdout_test_ratio", 0.1))
         self.save_results = config.save_results
         self.include_video = config.include_video
         self.split_strategy = getattr(config, "split_strategy", "random_sample")
@@ -130,6 +133,10 @@ class BaseDataSplitter(ABC):
                 f"Invalid evaluation_mode='{self.evaluation_mode}'. "
                 f"Expected one of {sorted(VALID_EVALUATION_MODES)}."
             )
+        if self.holdout_val_ratio <= 0 or self.holdout_test_ratio <= 0:
+            raise ValueError("holdout_val_ratio and holdout_test_ratio must be positive.")
+        if self.holdout_val_ratio + self.holdout_test_ratio >= 1:
+            raise ValueError("holdout_val_ratio + holdout_test_ratio must be less than 1.")
         if self.evaluation_mode == "cross_validation":
             if self.fold_index is None:
                 raise ValueError("fold_index must be set when evaluation_mode='cross_validation'.")
@@ -196,6 +203,18 @@ class BaseDataSplitter(ABC):
     def _sample_key_set(data_list: List[List], sample_key_fn) -> set:
         return {sample_key_fn(item) for item in data_list}
 
+    def _holdout_counts_for_class(self, class_count: int) -> Tuple[int, int, int]:
+        """Return train/val/test counts for MMFFIA holdout using per-class 8:1:1 ratios."""
+        val_count = int(math.ceil(class_count * self.holdout_val_ratio))
+        test_count = int(math.ceil(class_count * self.holdout_test_ratio))
+        train_count = class_count - val_count - test_count
+        if train_count <= 0:
+            raise ValueError(
+                f"Class has only {class_count} samples; holdout ratios "
+                f"val={self.holdout_val_ratio}, test={self.holdout_test_ratio} leave no training samples."
+            )
+        return train_count, val_count, test_count
+
     def _time_series_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
         expected_train = set()
         expected_test = set()
@@ -204,16 +223,11 @@ class BaseDataSplitter(ABC):
         for label in LABEL_ORDER:
             class_entries = [item for item in all_entries if self._label_from_entry(item) == label]
             class_entries = sorted(class_entries, key=self._entry_temporal_key)
-            required = 2 * self.test_sample_per_class
-            if len(class_entries) < required:
-                raise ValueError(
-                    f"Class '{LABEL_TO_CLASS[label]}' has only {len(class_entries)} samples, "
-                    f"but at least {required} are required for validation and test splits."
-                )
+            train_count, val_count, test_count = self._holdout_counts_for_class(len(class_entries))
 
-            train_entries = class_entries[:-required]
-            val_entries = class_entries[-required:-self.test_sample_per_class]
-            test_entries = class_entries[-self.test_sample_per_class:]
+            train_entries = class_entries[:train_count]
+            val_entries = class_entries[train_count:train_count + val_count]
+            test_entries = class_entries[train_count + val_count:train_count + val_count + test_count]
 
             expected_train.update(self._entry_sample_key(item) for item in train_entries)
             expected_val.update(self._entry_sample_key(item) for item in val_entries)
@@ -315,15 +329,17 @@ class BaseDataSplitter(ABC):
         if self.evaluation_mode == "holdout":
             for split_name in ["test", "val"]:
                 for label in LABEL_ORDER:
+                    _, expected_val, expected_test = self._holdout_counts_for_class(total_counts[label])
+                    expected = expected_test if split_name == "test" else expected_val
                     actual = counts_by_split[split_name][label]
-                    if actual != self.test_sample_per_class:
+                    if actual != expected:
                         raise ValueError(
                             f"{split_name} split class '{LABEL_TO_CLASS[label]}' has {actual} samples; "
-                            f"expected exactly {self.test_sample_per_class}."
+                            f"expected exactly {expected}."
                         )
 
             for label in LABEL_ORDER:
-                expected_train = total_counts[label] - (2 * self.test_sample_per_class)
+                expected_train, _, _ = self._holdout_counts_for_class(total_counts[label])
                 actual_train = counts_by_split["train"][label]
                 if actual_train != expected_train:
                     raise ValueError(
@@ -399,6 +415,8 @@ class BaseDataSplitter(ABC):
             "output_dir": str(output_path),
             "seed": self.seed,
             "test_sample_per_class": self.test_sample_per_class,
+            "holdout_val_ratio": self.holdout_val_ratio,
+            "holdout_test_ratio": self.holdout_test_ratio,
             "split_strategy": self.split_strategy,
             "evaluation_mode": self.evaluation_mode,
             "num_folds": self.num_folds,
@@ -616,7 +634,7 @@ class FishDataSplitter(BaseDataSplitter):
         logger.info(f"Image root: '{self.image_path}'")
         logger.info(f"Wave root:  '{self.wave_path}'")
         logger.info(f"Random seed: {self.seed}")
-        logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
+        logger.info(f"Holdout val/test ratios: {self.holdout_val_ratio:.3f}/{self.holdout_test_ratio:.3f}")
         logger.info(f"Evaluation mode: {self.evaluation_mode}")
         logger.info(f"Split strategy: {self.split_strategy}")
         if self.evaluation_mode == "cross_validation":
@@ -665,21 +683,16 @@ class FishDataSplitter(BaseDataSplitter):
 
         for label in LABEL_ORDER:
             file_list = ordered_lists[label]
-            required = 2 * self.test_sample_per_class
-            if len(file_list) < required:
-                logger.warning(
-                    f"Class '{LABEL_TO_CLASS[label]}' has only {len(file_list)} files, "
-                    f"but at least {required} samples are required for Test and Val splits."
-                )
+            train_count, val_count, test_count = self._holdout_counts_for_class(len(file_list))
 
             if self.split_strategy == "time_series":
-                train_by_label[label] = file_list[:-required]
-                val_by_label[label] = file_list[-required:-self.test_sample_per_class]
-                test_by_label[label] = file_list[-self.test_sample_per_class:]
+                train_by_label[label] = file_list[:train_count]
+                val_by_label[label] = file_list[train_count:train_count + val_count]
+                test_by_label[label] = file_list[train_count + val_count:train_count + val_count + test_count]
             else:
-                test_by_label[label] = file_list[:self.test_sample_per_class]
-                val_by_label[label] = file_list[self.test_sample_per_class:required]
-                train_by_label[label] = file_list[required:]
+                test_by_label[label] = file_list[:test_count]
+                val_by_label[label] = file_list[test_count:test_count + val_count]
+                train_by_label[label] = file_list[test_count + val_count:]
 
         logger.info("Per-class split details:")
         for label in LABEL_ORDER:
