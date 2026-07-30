@@ -34,31 +34,32 @@ class HistoryLogger:
         self.log_dir = log_dir
         os.makedirs(self.log_dir, exist_ok=True)
         self.history_csv_path = os.path.join(self.log_dir, 'history.csv')
+        self._write_history_header()
 
-        # Create history.csv and write headers if the file does not exist
-        if not os.path.exists(self.history_csv_path):
-            with open(self.history_csv_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                
-                # Column headers including flattened confusion matrix elements
-                headers = [
-                    'epoch', 
-                    'train_loss',
-                    'train_accuracy',
-                    'train_mAP',
-                    'val_loss', 
-                    'val_accuracy', 
-                    'val_mAP',
-                    'val_auc_class_none', 'val_auc_class_strong', 'val_auc_class_medium', 'val_auc_class_weak',
-                    'val_ap_class_none', 'val_ap_class_strong', 'val_ap_class_medium', 'val_ap_class_weak',
-                    
-                    # 16 flattened confusion matrix columns (Actual vs Predicted)
-                    'cm_none_none', 'cm_none_strong', 'cm_none_medium', 'cm_none_weak',
-                    'cm_strong_none', 'cm_strong_strong', 'cm_strong_medium', 'cm_strong_weak',
-                    'cm_medium_none', 'cm_medium_strong', 'cm_medium_medium', 'cm_medium_weak',
-                    'cm_weak_none', 'cm_weak_strong', 'cm_weak_medium', 'cm_weak_weak'
-                ]
-                writer.writerow(headers)
+    def _history_headers(self) -> list:
+        return [
+            'epoch',
+            'train_loss',
+            'train_accuracy',
+            'train_mAP',
+            'val_loss',
+            'val_accuracy',
+            'val_mAP',
+            'val_auc_class_none', 'val_auc_class_strong', 'val_auc_class_medium', 'val_auc_class_weak',
+            'val_ap_class_none', 'val_ap_class_strong', 'val_ap_class_medium', 'val_ap_class_weak',
+
+            # 16 flattened confusion matrix columns (Actual vs Predicted)
+            'cm_none_none', 'cm_none_strong', 'cm_none_medium', 'cm_none_weak',
+            'cm_strong_none', 'cm_strong_strong', 'cm_strong_medium', 'cm_strong_weak',
+            'cm_medium_none', 'cm_medium_strong', 'cm_medium_medium', 'cm_medium_weak',
+            'cm_weak_none', 'cm_weak_strong', 'cm_weak_medium', 'cm_weak_weak'
+        ]
+
+    def _write_history_header(self) -> None:
+        # A new trainer instance represents a new run, so do not append epochs from previous runs.
+        with open(self.history_csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(self._history_headers())
 
     def _save_confusion_matrix_csv(self, path: str, matrix: np.ndarray) -> None:
         """
@@ -201,6 +202,20 @@ class HistoryLogger:
         if not epochs:
             logger.warning("Warning: No epoch data found to plot.")
             return
+
+        # If an older history.csv contains multiple runs, keep only the latest epoch sequence.
+        start_idx = 0
+        for idx in range(1, len(epochs)):
+            if epochs[idx] <= epochs[idx - 1]:
+                start_idx = idx
+        if start_idx:
+            epochs = epochs[start_idx:]
+            train_losses = train_losses[start_idx:]
+            val_losses = val_losses[start_idx:]
+            train_accs = train_accs[start_idx:]
+            val_accs = val_accs[start_idx:]
+            train_maps = train_maps[start_idx:]
+            val_maps = val_maps[start_idx:]
 
         # Setup headless matplotlib backend for remote/docker compatibility
         import matplotlib
