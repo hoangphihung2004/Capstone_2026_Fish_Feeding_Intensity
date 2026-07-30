@@ -35,31 +35,32 @@ class HistoryLogger:
         self.class_labels = class_labels or ['none', 'strong', 'weak']
         os.makedirs(self.log_dir, exist_ok=True)
         self.history_csv_path = os.path.join(self.log_dir, 'history.csv')
+        self._write_history_header()
 
-        # Create history.csv and write headers if the file does not exist
-        if not os.path.exists(self.history_csv_path):
-            with open(self.history_csv_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                
-                auc_headers = [f'val_auc_class_{label}' for label in self.class_labels]
-                ap_headers = [f'val_ap_class_{label}' for label in self.class_labels]
-                cm_headers = [
-                    f'cm_{actual}_{predicted}'
-                    for actual in self.class_labels
-                    for predicted in self.class_labels
-                ]
+    def _history_headers(self) -> list:
+        auc_headers = [f'val_auc_class_{label}' for label in self.class_labels]
+        ap_headers = [f'val_ap_class_{label}' for label in self.class_labels]
+        cm_headers = [
+            f'cm_{actual}_{predicted}'
+            for actual in self.class_labels
+            for predicted in self.class_labels
+        ]
 
-                # Column headers including flattened confusion matrix elements
-                headers = [
-                    'epoch', 
-                    'train_loss',
-                    'train_accuracy',
-                    'train_mAP',
-                    'val_loss', 
-                    'val_accuracy',
-                    'val_mAP',
-                ] + auc_headers + ap_headers + cm_headers
-                writer.writerow(headers)
+        return [
+            'epoch',
+            'train_loss',
+            'train_accuracy',
+            'train_mAP',
+            'val_loss',
+            'val_accuracy',
+            'val_mAP',
+        ] + auc_headers + ap_headers + cm_headers
+
+    def _write_history_header(self) -> None:
+        # A new trainer instance represents a new run, so do not append epochs from previous runs.
+        with open(self.history_csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(self._history_headers())
 
     def _save_confusion_matrix_csv(self, path: str, matrix: np.ndarray) -> None:
         """
@@ -200,6 +201,20 @@ class HistoryLogger:
         if not epochs:
             logger.warning("Warning: No epoch data found to plot.")
             return
+
+        # If an older history.csv contains multiple runs, keep only the latest epoch sequence.
+        start_idx = 0
+        for idx in range(1, len(epochs)):
+            if epochs[idx] <= epochs[idx - 1]:
+                start_idx = idx
+        if start_idx:
+            epochs = epochs[start_idx:]
+            train_losses = train_losses[start_idx:]
+            val_losses = val_losses[start_idx:]
+            train_accs = train_accs[start_idx:]
+            val_accs = val_accs[start_idx:]
+            train_maps = train_maps[start_idx:]
+            val_maps = val_maps[start_idx:]
 
         # Setup headless matplotlib backend for remote/docker compatibility
         import matplotlib
