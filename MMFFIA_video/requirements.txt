@@ -1,0 +1,11 @@
+torch
+torchvision
+opencv-python
+numpy
+pillow
+pydantic
+scikit-learn
+tqdm
+matplotlib
+decord
+huggingface_hub
