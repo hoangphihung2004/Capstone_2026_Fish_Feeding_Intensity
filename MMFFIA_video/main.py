@@ -68,7 +68,7 @@ def validate_backbone_config(config: TrainConfig) -> None:
 def build_backbone(config: TrainConfig):
     validate_backbone_config(config)
     backbone_cls = MODEL_REGISTRY[config.model.backbone]
-    return backbone_cls(classes_num=4, pretrained=config.model.pretrained)
+    return backbone_cls(classes_num=config.model.classes_num, pretrained=config.model.pretrained)
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:

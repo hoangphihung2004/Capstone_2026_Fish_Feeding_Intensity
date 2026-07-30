@@ -11,7 +11,7 @@ class MobileNetV2(nn.Module):
     """
     MobileNetV2 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, classes_num: int = 3, pretrained: bool = True) -> None:
         super().__init__()
 
         if MobileNet_V2_Weights is None:

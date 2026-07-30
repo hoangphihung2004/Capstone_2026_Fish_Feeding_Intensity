@@ -11,7 +11,7 @@ class ResNet18(nn.Module):
     """
     ResNet18 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, classes_num: int = 3, pretrained: bool = True) -> None:
         super().__init__()
 
         if ResNet18_Weights is None:

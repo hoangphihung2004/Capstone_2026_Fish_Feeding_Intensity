@@ -11,7 +11,7 @@ class ResNet50(nn.Module):
     """
     ResNet50 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, classes_num: int = 3, pretrained: bool = True) -> None:
         super().__init__()
 
         if ResNet50_Weights is None:

@@ -11,7 +11,7 @@ class SwinTiny(nn.Module):
     """
     Swin-Tiny image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, classes_num: int = 3, pretrained: bool = True) -> None:
         super().__init__()
 
         if Swin_T_Weights is None:

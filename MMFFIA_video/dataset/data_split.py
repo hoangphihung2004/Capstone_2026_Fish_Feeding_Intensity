@@ -1,59 +1,112 @@
-import os
-import sys
-import glob
-import logging
 import csv
+import glob
 import json
+import logging
+import os
 import re
+import sys
+from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
-from typing import List, Dict, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
-from abc import ABC, abstractmethod
 
-# Force stdout/stderr to use UTF-8 encoding to prevent UnicodeEncodeError on Windows terminals
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
-# Configure Python logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
 
 from config import SplitterConfig
 
 
-LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
-LABEL_ORDER = [0, 1, 2, 3]
+LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "weak"}
+CLASS_TO_LABEL = {class_name: label for label, class_name in LABEL_TO_CLASS.items()}
+LABEL_ORDER = [0, 1, 2]
 VALID_SPLIT_STRATEGIES = {"random_sample", "time_series"}
 VALID_EVALUATION_MODES = {"holdout", "cross_validation"}
+MODALITY_DIRS = {
+    "audio": "Audio",
+    "image": "Image",
+    "wave": "Wave",
+}
+FILE_PREFIX = {
+    "audio": "audio",
+    "image": "image",
+    "wave": "wave",
+}
+FILE_EXTENSIONS = {
+    "audio": [".wav"],
+    "image": [".jpg", ".jpeg", ".png", ".bmp", ".webp"],
+    "wave": [".csv"],
+}
 
 
 def _stable_path_key(path: str) -> str:
-    """Normalize paths before sorting so split generation is reproducible."""
     return os.path.normcase(os.path.normpath(str(path)))
 
 
+def _extract_sample_id(path: str) -> str:
+    stem = Path(path).stem
+    numbers = re.findall(r"\d+", stem)
+    return numbers[-1] if numbers else stem
+
+
+def _sample_id_sort_key(path: str) -> Tuple[int, str]:
+    sample_id = _extract_sample_id(path)
+    return (int(sample_id), sample_id) if sample_id.isdigit() else (10**18, sample_id)
+
+
 def _sample_identity_key(path: str) -> str:
-    """Sort by sample identity so video-only and multimodal scans split identically."""
-    normalized = str(path).replace('\\', '/').lower()
-    stem = Path(normalized).stem.replace("_audio_", "_sample_").replace("_video_", "_sample_")
-    parts = list(Path(normalized).parts)
-    if len(parts) >= 4:
-        return "/".join([parts[-4], parts[-3], parts[-2], stem])
-    return stem
+    path_obj = Path(path)
+    class_name = path_obj.parent.name.lower()
+    return f"{class_name}/{_extract_sample_id(str(path_obj))}"
+
+
+def _case_insensitive_child(parent: Path, child_name: str) -> Optional[Path]:
+    if not parent.exists() or not parent.is_dir():
+        return None
+    direct = parent / child_name
+    if direct.is_dir():
+        return direct
+    expected = child_name.lower()
+    for child in parent.iterdir():
+        if child.is_dir() and child.name.lower() == expected:
+            return child
+    return None
+
+
+def _resolve_modality_root(dataset_path: str, modality_key: str, required: bool = True) -> Optional[Path]:
+    root = Path(dataset_path)
+    canonical = MODALITY_DIRS[modality_key]
+    if root.name.lower() == canonical.lower():
+        return root
+    modality_root = _case_insensitive_child(root, canonical)
+    if modality_root is not None:
+        return modality_root
+    if required:
+        raise FileNotFoundError(
+            f"MMFFIA dataset requires '{canonical}' inside dataset_path='{dataset_path}'."
+        )
+    return None
+
+
+def _class_dir(root: Path, class_name: str) -> Optional[Path]:
+    return _case_insensitive_child(root, class_name)
 
 
 class BaseDataSplitter(ABC):
     """
-    Abstract base class defining the dataset splitting interface and shared utilities.
-    Handles common split export logic (CSV, JSONL, summary JSON) for all splitter implementations.
+    Shared split/export logic for MMFFIA. The dataset contains paired
+    Audio/Image/Wave samples, and sample ids in filenames define temporal order.
     """
+
     def __init__(self, config: SplitterConfig) -> None:
         self.config = config
         self.dataset_path = config.dataset_path
@@ -66,6 +119,7 @@ class BaseDataSplitter(ABC):
         self.num_folds = int(getattr(config, "num_folds", 5))
         self.fold_index = getattr(config, "fold_index", None)
         self.cv_val_ratio = float(getattr(config, "cv_val_ratio", 0.2))
+
         if self.split_strategy not in VALID_SPLIT_STRATEGIES:
             raise ValueError(
                 f"Invalid split_strategy='{self.split_strategy}'. "
@@ -82,84 +136,31 @@ class BaseDataSplitter(ABC):
             if not 0 <= int(self.fold_index) < self.num_folds:
                 raise ValueError(f"fold_index={self.fold_index} is outside [0, {self.num_folds}).")
 
-        # Automatically resolve the optional audio directory path.
-        audio_dir = os.path.join(self.dataset_path, 'audio')
-        if os.path.isdir(audio_dir):
-            self.audio_path = audio_dir
-        elif Path(self.dataset_path).name.lower() == 'audio':
-            self.audio_path = self.dataset_path
-        else:
-            self.audio_path = None
-
-        # Automatically resolve the video directory path (used as the root for sample splitting).
-        video_dir = os.path.join(self.dataset_path, 'video')
-        if os.path.isdir(video_dir):
-            self.video_path = video_dir
-            self.video_exists = True
-        elif Path(self.dataset_path).name.lower() == 'video':
-            self.video_path = self.dataset_path
-            self.video_exists = True
-        else:
-            self.video_path = None
-            self.video_exists = False
-            raise FileNotFoundError(
-                f"MMFFIA_video splitting requires a 'video' directory inside dataset_path or dataset_path pointing to a video root: '{self.dataset_path}'"
-            )
+        self.audio_path = str(_resolve_modality_root(self.dataset_path, "audio", required=True))
+        self.image_path = str(_resolve_modality_root(self.dataset_path, "image", required=True))
+        self.wave_path = str(_resolve_modality_root(self.dataset_path, "wave", required=True))
+        self.num_classes = len(LABEL_ORDER)
 
     @abstractmethod
     def get_file_list(self, split_name: str) -> List[str]:
-        """
-        Scan the directory and return a list of file paths.
-        Must be implemented by subclasses.
-
-        Args:
-            split_name (str): The feeding intensity class name to scan.
-                Example: 'strong', 'medium', 'weak', 'none'
-
-        Returns:
-            List[str]: A list of absolute paths of all scanned files.
-        """
         pass
 
     @abstractmethod
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
-        """
-        Split the file lists into Train, Test, and Validation sets.
-        Must be implemented by subclasses.
-
-        Args:
-            None (parameters are derived from class attributes).
-
-        Returns:
-            Tuple[List[List], List[List], List[List]]: A tuple containing three lists (Train, Test, Val).
-        """
         pass
 
     @abstractmethod
     def _format_samples(self, split_name: str, data_list: List[List]) -> List[Dict[str, Any]]:
-        """
-        Format raw data lists into standardized dictionaries for file export.
-        Must be implemented by subclasses.
-
-        Args:
-            split_name (str): The dataset split name ('train', 'test', or 'val').
-            data_list (List[List]): A list of label-paired data entries in [path, numeric_label] format.
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries containing detailed metadata for each sample.
-        """
         pass
 
     @staticmethod
     def _write_jsonl(samples: List[Dict[str, Any]], path: Path) -> None:
-        """Write a list of data samples to a JSONL-formatted file."""
         with path.open("w", encoding="utf-8") as f:
             for sample in samples:
                 f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
     @staticmethod
     def _write_csv(samples: List[Dict[str, Any]], path: Path, fieldnames: List[str]) -> None:
-        """Write a list of data samples to a CSV-formatted file."""
         with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -167,9 +168,8 @@ class BaseDataSplitter(ABC):
 
     @staticmethod
     def _primary_path_from_entry(item: List[Any]) -> str:
-        """Return the path used for temporal sorting and sample identity."""
-        if len(item) >= 3:
-            return str(item[1] or item[0])
+        if len(item) == 4:
+            return str(item[1])
         return str(item[0])
 
     @staticmethod
@@ -177,40 +177,13 @@ class BaseDataSplitter(ABC):
         return int(item[-1])
 
     @staticmethod
-    def _extract_ints(value: str) -> Tuple[int, ...]:
-        return tuple(int(number) for number in re.findall(r"\d+", str(value)))
-
-    @classmethod
-    def _temporal_path_key(cls, path: str) -> Tuple[Any, ...]:
-        """Sort by date, AM/PM session, session number, then sample id."""
-        normalized = str(path).replace('\\', '/')
-        parts = Path(normalized).parts
-        date_part = parts[-4] if len(parts) >= 4 else ""
-        session_part = parts[-3] if len(parts) >= 3 else ""
-        stem = Path(normalized).stem
-
-        date_numbers = cls._extract_ints(date_part)
-        date_key = date_numbers[:3] if len(date_numbers) >= 3 else date_numbers
-
-        session_upper = session_part.upper()
-        if session_upper.startswith("AM"):
-            day_half = 0
-        elif session_upper.startswith("PM"):
-            day_half = 1
-        else:
-            day_half = 2
-
-        session_numbers = cls._extract_ints(session_part)
-        session_value = session_numbers[0] if session_numbers else -1
-        sample_numbers = cls._extract_ints(stem)
-        sample_value = sample_numbers[-1] if sample_numbers else -1
-
-        return (date_key, day_half, session_value, sample_value, stem)
+    def _temporal_path_key(path: str) -> Tuple[int, str]:
+        return _sample_id_sort_key(path)
 
     def _entry_sample_key(self, item: List[Any]) -> str:
         return _sample_identity_key(self._primary_path_from_entry(item))
 
-    def _entry_temporal_key(self, item: List[Any]) -> Tuple[Any, ...]:
+    def _entry_temporal_key(self, item: List[Any]) -> Tuple[int, str]:
         return self._temporal_path_key(self._primary_path_from_entry(item))
 
     def _count_labels(self, data_list: List[List]) -> Counter:
@@ -224,7 +197,6 @@ class BaseDataSplitter(ABC):
         return {sample_key_fn(item) for item in data_list}
 
     def _time_series_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
-        """Build expected sample-key sets for the time-series split using val/test quotas."""
         expected_train = set()
         expected_test = set()
         expected_val = set()
@@ -250,7 +222,6 @@ class BaseDataSplitter(ABC):
         return expected_train, expected_test, expected_val
 
     def _ordered_class_entries(self, entries: List[List], label: int, seed_offset: int = 0) -> List[List]:
-        """Return class entries in deterministic order for the configured split strategy."""
         class_entries = [item for item in entries if self._label_from_entry(item) == label]
         if self.split_strategy == "time_series":
             return sorted(class_entries, key=self._entry_temporal_key)
@@ -262,12 +233,10 @@ class BaseDataSplitter(ABC):
 
     @staticmethod
     def _split_into_folds(items: List[List], num_folds: int) -> List[List[List]]:
-        """Split a deterministic list into nearly equal contiguous folds."""
         indexes = np.array_split(np.arange(len(items)), num_folds)
         return [[items[int(idx)] for idx in fold_indexes] for fold_indexes in indexes]
 
     def _cross_validation_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
-        """Build expected sample-key sets for one stratified outer CV fold."""
         fold_index = int(self.fold_index)
         train_entries: List[List] = []
         test_entries: List[List] = []
@@ -325,7 +294,6 @@ class BaseDataSplitter(ABC):
         return train_dict, test_dict, val_dict
 
     def _validate_split_policy(self, train_dict: List[List], test_dict: List[List], val_dict: List[List]) -> None:
-        """Validate split consistency for the selected strategy."""
         splits = {"train": train_dict, "test": test_dict, "val": val_dict}
 
         seen_samples: Dict[str, str] = {}
@@ -386,60 +354,48 @@ class BaseDataSplitter(ABC):
         logger.info(f"Split validation passed for mode='{self.evaluation_mode}', strategy='{self.split_strategy}':")
         for split_name in ["train", "test", "val"]:
             counts = counts_by_split[split_name]
-            logger.info(
-                f"  - {split_name}: "
-                f"none={counts[0]}, strong={counts[1]}, medium={counts[2]}, weak={counts[3]}"
-            )
+            details = ", ".join(f"{LABEL_TO_CLASS[label]}={counts[label]}" for label in LABEL_ORDER)
+            logger.info(f"  - {split_name}: {details}")
 
     def _save_splits(self, train_dict: List[List], test_dict: List[List], val_dict: List[List], output_dir: Path) -> None:
-        """
-        Save dataset splits to CSV, JSONL, and a summary JSON file (shared implementation).
-        """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         splits = {
             "train": train_dict,
             "test": test_dict,
-            "val": val_dict
+            "val": val_dict,
         }
-
         formatted_splits: Dict[str, List[Dict[str, Any]]] = {}
+        fieldnames = ["audio_path", "image_path", "wave_path", "label", "class_name", "sample_id"]
 
-        # 1. Format data and save CSV/JSONL for each split using the subclass implementation
         for split_name, data_list in splits.items():
             samples = self._format_samples(split_name, data_list)
             formatted_splits[split_name] = samples
-
-            # Proceed to write output files
-            fieldnames = ["video_path", "audio_path", "label", "class_name", "date", "session", "sample_id"]
             self._write_jsonl(samples, output_path / f"{split_name}.jsonl")
             self._write_csv(samples, output_path / f"{split_name}.csv", fieldnames=fieldnames)
             logger.info(f"Successfully saved split files to {output_path}")
 
-        # 2. Generate and save the summary.json file
+        label_map = {class_name: label for label, class_name in LABEL_TO_CLASS.items()}
         summary: Dict[str, Any] = {
-            "label_map": {
-                "none": 0,
-                "strong": 1,
-                "medium": 2,
-                "weak": 3
-              },
-            "splits": {}
+            "label_map": label_map,
+            "splits": {},
         }
-        
+
         for split_name, samples in formatted_splits.items():
-            counts = {"none": 0, "strong": 0, "medium": 0, "weak": 0}
-            for s in samples:
-                counts[str(s["class_name"])] += 1
+            counts = {class_name: 0 for class_name in CLASS_TO_LABEL}
+            for sample in samples:
+                counts[str(sample["class_name"])] += 1
             summary["splits"][split_name] = {
                 "total": len(samples),
-                "by_class": counts
+                "by_class": counts,
             }
 
-        # Append configuration metadata
         summary.update({
             "dataset_root": self.dataset_path,
+            "audio_root": self.audio_path,
+            "image_root": self.image_path,
+            "wave_root": self.wave_path,
             "output_dir": str(output_path),
             "seed": self.seed,
             "test_sample_per_class": self.test_sample_per_class,
@@ -447,7 +403,7 @@ class BaseDataSplitter(ABC):
             "evaluation_mode": self.evaluation_mode,
             "num_folds": self.num_folds,
             "fold_index": self.fold_index,
-            "cv_val_ratio": self.cv_val_ratio
+            "cv_val_ratio": self.cv_val_ratio,
         })
 
         with (output_path / "summary.json").open("w", encoding="utf-8") as f:
@@ -457,294 +413,208 @@ class BaseDataSplitter(ABC):
 
 class FishDataSplitter(BaseDataSplitter):
     """
-    Concrete implementation for multimodal fish data splitting (Audio + Video).
-    Preserves the original file scanning and splitting logic from U-FFIA's fish_audio_dataset.py.
-    Automatically links video to audio and applies path-fixing fallback for cross-machine transfers.
+    MMFFIA image splitter. Image is the training anchor; paired Audio and Wave
+    paths are resolved and stored so every split is synchronized across modalities.
     """
-    # noinspection DuplicatedCode
+
     def get_file_list(self, split_name: str) -> List[str]:
-        path = self.video_path
-        video: List[str] = []
-        l1 = sorted(os.listdir(path), key=_stable_path_key)
-        for folder_name in l1:
-            folder_path = os.path.join(path, folder_name)
-            if folder_name == 'splits' or not os.path.isdir(folder_path):
-                continue
-            l2 = sorted(os.listdir(folder_path), key=_stable_path_key)
-            for session_folder in l2:
-                session_path = os.path.join(folder_path, session_folder)
-                if not os.path.isdir(session_path):
-                    continue
-                video_dir = os.path.join(session_path, split_name, '*.mp4')
-                video.extend(sorted(glob.glob(video_dir), key=_sample_identity_key))
-        return video
+        class_root = _class_dir(Path(self.image_path), split_name)
+        if class_root is None:
+            return []
+        files: List[str] = []
+        for ext in FILE_EXTENSIONS["image"]:
+            files.extend(glob.glob(str(class_root / f"*{ext}")))
+        return sorted(files, key=_sample_id_sort_key)
 
-    def _resolve_audio_path(self, video_path: str) -> str:
-        """Automatically resolve the corresponding audio path from a video path when available."""
-        normalized_video = str(video_path).replace('\\', '/')
-        parts = Path(normalized_video).parts
-        parts_list = list(parts)
-        if "video" in parts_list:
-            idx = parts_list.index("video")
-            parts_list[idx] = "audio"
+    def _resolve_paired_path(self, image_path: str, modality_key: str) -> str:
+        image = Path(image_path)
+        class_name = image.parent.name
+        sample_id = _extract_sample_id(str(image))
+        root = Path(getattr(self, f"{modality_key}_path"))
+        class_root = _class_dir(root, class_name)
+        if class_root is None:
+            return ""
 
-        filename = parts_list[-1]
-        if filename.endswith(".mp4"):
-            filename = filename[:-4] + ".wav"
-        if "_video_" in filename:
-            filename = filename.replace("_video_", "_audio_")
-        parts_list[-1] = filename
+        prefix = FILE_PREFIX[modality_key]
+        for ext in FILE_EXTENSIONS[modality_key]:
+            candidate = class_root / f"{prefix}_{sample_id}{ext}"
+            if candidate.exists():
+                return str(candidate)
 
-        if parts_list[0].endswith('\\') or parts_list[0].endswith('/'):
-            reconstructed_audio = parts_list[0] + os.path.join(*parts_list[1:])
-        else:
-            reconstructed_audio = os.path.join(*parts_list)
+        glob_pattern = str(class_root / f"*{sample_id}*")
+        candidates = [
+            candidate
+            for candidate in glob.glob(glob_pattern)
+            if Path(candidate).suffix.lower() in FILE_EXTENSIONS[modality_key]
+        ]
+        return sorted(candidates, key=_stable_path_key)[0] if candidates else ""
 
-        if os.path.exists(reconstructed_audio):
-            return reconstructed_audio
-        return ""
+    def _resolve_image_path_from_row(self, row: Dict[str, str]) -> str:
+        raw_image_path = row.get("image_path", row.get("video_path", ""))
+        if raw_image_path and os.path.exists(raw_image_path):
+            return raw_image_path
 
-    def _resolve_video_path(self, audio_path: str) -> str:
-        """Automatically resolve the corresponding video path from an audio path."""
-        # Replace backslashes with forward slashes to ensure cross-platform compatibility
-        normalized_audio = str(audio_path).replace('\\', '/')
-        parts = Path(normalized_audio).parts
-        parts_list = list(parts)
-        if "audio" in parts_list:
-            idx = parts_list.index("audio")
-            parts_list[idx] = "video"
-        
-        filename = parts_list[-1]
-        if filename.endswith(".wav"):
-            filename = filename[:-4] + ".mp4"
-        if "_audio_" in filename:
-            filename = filename.replace("_audio_", "_video_")
-        parts_list[-1] = filename
-        
-        if parts_list[0].endswith('\\') or parts_list[0].endswith('/'):
-            reconstructed_video = parts_list[0] + os.path.join(*parts_list[1:])
-        else:
-            reconstructed_video = os.path.join(*parts_list)
+        class_name = row.get("class_name", "")
+        sample_id = row.get("sample_id", "")
+        if not class_name or not sample_id:
+            source_path = raw_image_path or row.get("audio_path", "") or row.get("wave_path", "")
+            class_name = Path(source_path).parent.name
+            sample_id = _extract_sample_id(source_path)
 
-        if os.path.exists(reconstructed_video):
-            return reconstructed_video
-        return ""
+        class_root = _class_dir(Path(self.image_path), class_name)
+        if class_root is None:
+            return raw_image_path
 
-    def _require_video_path(self, audio_path: str) -> str:
-        """Resolve and require the video file paired with an audio file."""
-        video_path = self._resolve_video_path(audio_path)
-        if video_path:
-            return video_path
+        for ext in FILE_EXTENSIONS["image"]:
+            candidate = class_root / f"image_{sample_id}{ext}"
+            if candidate.exists():
+                return str(candidate)
+        return raw_image_path
 
-        normalized_audio = str(audio_path).replace('\\', '/')
-        parts = list(Path(normalized_audio).parts)
-        expected_video = ""
-        if parts:
-            if "audio" in parts:
-                parts[parts.index("audio")] = "video"
-            filename = parts[-1]
-            if filename.endswith(".wav"):
-                filename = filename[:-4] + ".mp4"
-            if "_audio_" in filename:
-                filename = filename.replace("_audio_", "_video_")
-            parts[-1] = filename
-            if parts[0].endswith('\\') or parts[0].endswith('/'):
-                expected_video = parts[0] + os.path.join(*parts[1:])
-            else:
-                expected_video = os.path.join(*parts)
+    def _make_multimodal_entry(self, image_path: str, label: int) -> List[Any]:
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Missing image file while creating split: '{image_path}'")
 
-        raise FileNotFoundError(
-            "Missing paired video file for audio sample.\n"
-            f"  audio_path:    {audio_path}\n"
-            f"  expected_video:{expected_video}"
-        )
-
-    def _make_multimodal_entry(self, video_path: str, label: int) -> List[Any]:
-        """Create one [audio_path, video_path, label] entry with optional audio_path."""
-        if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Missing video file while creating split: '{video_path}'")
-        return [self._resolve_audio_path(video_path), video_path, label]
+        audio_path = self._resolve_paired_path(image_path, "audio")
+        wave_path = self._resolve_paired_path(image_path, "wave")
+        if not audio_path:
+            raise FileNotFoundError(f"Missing paired audio file for image sample: '{image_path}'")
+        if not wave_path:
+            raise FileNotFoundError(f"Missing paired wave CSV file for image sample: '{image_path}'")
+        return [audio_path, image_path, wave_path, label]
 
     def _validate_multimodal_entries(self, split_name: str, data_list: List[List]) -> None:
-        """Validate that every split entry has a video file and optional matching audio file."""
-
         for idx, item in enumerate(data_list):
-            if len(item) != 3:
+            if len(item) not in [2, 4]:
                 raise ValueError(
-                    f"{split_name} split entry #{idx} must be [audio_path, video_path, label], got: {item}"
+                    f"{split_name} split entry #{idx} must be [image_path, label] or "
+                    f"[audio_path, image_path, wave_path, label], got: {item}"
                 )
-            audio_path, video_path, _ = item
-            if not video_path or not os.path.exists(video_path):
+            image_path = item[1] if len(item) == 4 else item[0]
+            if not os.path.exists(image_path):
                 raise FileNotFoundError(
-                    f"{split_name} split entry #{idx} has missing video_path: '{video_path}'"
+                    f"{split_name} split entry #{idx} has missing image_path: '{image_path}'"
                 )
-            expected_audio = self._resolve_audio_path(video_path)
-            if audio_path and not os.path.exists(audio_path):
-                raise FileNotFoundError(
-                    f"{split_name} split entry #{idx} has missing audio_path: '{audio_path}'"
-                )
-            if audio_path and expected_audio and os.path.normpath(audio_path) != os.path.normpath(expected_audio):
-                raise ValueError(
-                    f"{split_name} split entry #{idx} has mismatched audio_path.\n"
-                    f"  video_path:     {video_path}\n"
-                    f"  audio_path:     {audio_path}\n"
-                    f"  expected_audio: {expected_audio}"
-                )
+            if len(item) == 4:
+                audio_path, image_path, wave_path = item[0], item[1], item[2]
+                expected_audio = self._resolve_paired_path(image_path, "audio")
+                expected_wave = self._resolve_paired_path(image_path, "wave")
+                if not audio_path or not os.path.exists(audio_path):
+                    raise FileNotFoundError(
+                        f"{split_name} split entry #{idx} has missing audio_path: '{audio_path}'"
+                    )
+                if not wave_path or not os.path.exists(wave_path):
+                    raise FileNotFoundError(
+                        f"{split_name} split entry #{idx} has missing wave_path: '{wave_path}'"
+                    )
+                if os.path.normpath(audio_path) != os.path.normpath(expected_audio):
+                    raise ValueError(
+                        f"{split_name} split entry #{idx} has mismatched audio_path.\n"
+                        f"  image_path:    {image_path}\n"
+                        f"  audio_path:    {audio_path}\n"
+                        f"  expected_audio:{expected_audio}"
+                    )
+                if os.path.normpath(wave_path) != os.path.normpath(expected_wave):
+                    raise ValueError(
+                        f"{split_name} split entry #{idx} has mismatched wave_path.\n"
+                        f"  audio_path:  {audio_path}\n"
+                        f"  wave_path:   {wave_path}\n"
+                        f"  expected_wave:{expected_wave}"
+                    )
 
-    def split_data(self) -> Tuple[List[List], List[List], List[List]]:
-        # Automatically determine the splits directory. When dataset_path points
-        # directly to an audio folder, keep splits inside that folder so the
-        # audio root remains self-contained on marimo.
+    def _splits_dir(self) -> Path:
         dataset_path = Path(self.dataset_path)
-        local_splits_dir = dataset_path / 'splits'
-        legacy_splits_dir = dataset_path.parent / 'splits'
-
-        if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
-            base_splits_dir = legacy_splits_dir
-        else:
-            base_splits_dir = local_splits_dir
-
+        local_splits_dir = dataset_path / "splits"
         if self.evaluation_mode == "cross_validation":
-            splits_dir = base_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
-        else:
-            splits_dir = base_splits_dir
+            return local_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
+        return local_splits_dir
 
-        train_csv = splits_dir / 'train.csv'
-        test_csv = splits_dir / 'test.csv'
-        val_csv = splits_dir / 'val.csv'
-
-        if splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
-            logger.info("==================================================")
-            logger.info(f"Fallback mode enabled: found existing split files at '{splits_dir}'.")
-            logger.info("Loading existing dataset splits instead of recomputing them...")
-            logger.info(f"Base video search path: '{self.video_path}'")
-            logger.info("==================================================")
-
-            train_dict = []
-            test_dict = []
-            val_dict = []
-            need_rewrite_files = False
-
-            try:
-                # Helper function to load data from CSV and auto-fix file paths with batched logging
-                def load_and_fix_csv(csv_path: Path, split_name: str) -> List[List]:
-                    nonlocal need_rewrite_files
-                    loaded_data = []
-                    fixed_count = 0
-                    missing_count = 0
-                    audio_updated_count = 0
-                    
-                    # Variables for logging a few example path corrections
-                    video_fix_example = None
-                    audio_fix_example = None
-                    
-                    with csv_path.open("r", encoding="utf-8") as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            original_audio_path = row.get("audio_path", "")
-                            raw_video_path = row.get("video_path", "")
-                            if not raw_video_path and original_audio_path:
-                                raw_video_path = self._resolve_video_path(original_audio_path)
-                            label = int(row["label"])
-                            
-                            # If the video path does not exist, attempt automatic path correction
-                            if not os.path.exists(raw_video_path):
-                                # Replace backslashes with forward slashes to ensure cross-platform compatibility
-                                normalized_video = raw_video_path.replace('\\', '/') if raw_video_path else original_audio_path.replace('\\', '/')
-                                parts = Path(normalized_video).parts
-                                if len(parts) >= 4:
-                                    # Generate multiple possible paths due to different server layouts
-                                    candidates = [
-                                        os.path.join(self.video_path, parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(self.dataset_path, 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(self.dataset_path, parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(self.dataset_path, 'U_FFIA', 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                    ]
-                                    
-                                    fixed_path = None
-                                    for cand in candidates:
-                                        if os.path.exists(cand):
-                                            fixed_path = cand
-                                            break
-                                            
-                                    if fixed_path is not None:
-                                        if video_fix_example is None:
-                                            video_fix_example = (raw_video_path, fixed_path)
-                                        raw_video_path = fixed_path
-                                        fixed_count += 1
-                                        need_rewrite_files = True
-                                    else:
-                                        if missing_count < 3:
-                                            # Display the primary checked path in warning for reference
-                                            primary_checked = candidates[0]
-                                            logger.warning(f"{split_name} split: Tried path correction candidates, for example '{primary_checked}', but the file still does not exist on this server.")
-                                        missing_count += 1
-
-                            if not os.path.exists(raw_video_path):
-                                raise FileNotFoundError(
-                                    f"{split_name} split has a missing video file that could not be corrected: '{raw_video_path}'"
-                                )
-                            
-                            audio_path_str = self._resolve_audio_path(raw_video_path)
-                            if os.path.normpath(original_audio_path) != os.path.normpath(audio_path_str):
-                                if audio_fix_example is None:
-                                    audio_fix_example = (original_audio_path, audio_path_str)
-                                audio_updated_count += 1
-                                need_rewrite_files = True
-                            loaded_data.append([audio_path_str, raw_video_path, label])
-                    
-                    # Print detailed logs
-                    if fixed_count > 0:
-                        if video_fix_example:
-                            logger.info(f"{split_name} split: Successfully auto-corrected {fixed_count} invalid video paths.")
-                            logger.info(f"   * Video path correction example:\n     - Old: {video_fix_example[0]}\n     - New: {video_fix_example[1]}")
-                    if audio_updated_count > 0:
-                        logger.info(f"{split_name} split: Successfully auto-filled {audio_updated_count} newly detected audio paths.")
-                        if audio_fix_example:
-                            logger.info(f"   * Audio path example: {audio_fix_example[1]}")
-                    if missing_count > 0:
-                        logger.warning(f"{split_name} split: {missing_count} files do not exist on this machine. Please check the dataset.")
-                        
-                    return loaded_data
-
-                train_dict = load_and_fix_csv(train_csv, "Train")
-                test_dict = load_and_fix_csv(test_csv, "Test")
-                val_dict = load_and_fix_csv(val_csv, "Validation")
-
-                self._validate_multimodal_entries("Train", train_dict)
-                self._validate_multimodal_entries("Test", test_dict)
-                self._validate_multimodal_entries("Validation", val_dict)
-                self._validate_split_policy(train_dict, test_dict, val_dict)
-
-                logger.info("Successfully loaded dataset splits from files:")
-                logger.info(f"- Train samples: {len(train_dict)}")
-                logger.info(f"- Test samples:  {len(test_dict)}")
-                logger.info(f"- Val samples:   {len(val_dict)}")
-                
-                # Print first samples for user verification
-                if len(train_dict) > 0:
-                    logger.info(f"  * First loaded train sample: {train_dict[0]}")
-                if len(test_dict) > 0:
-                    logger.info(f"  * First loaded test sample:  {test_dict[0]}")
-                if len(val_dict) > 0:
-                    logger.info(f"  * First loaded val sample:   {val_dict[0]}")
-                
-                # If any paths were corrected or new video paths added, overwrite split files on disk to synchronize
-                if need_rewrite_files:
-                    logger.info("Updating split files on disk to synchronize corrected paths...")
-                    self._save_splits(train_dict, test_dict, val_dict, splits_dir)
-                    logger.info("Finished synchronizing corrected split files on disk.")
-                
-                logger.info("==================================================")
-                return train_dict, test_dict, val_dict
-            except Exception as e:
-                logger.warning(f"Failed to load or auto-correct existing splits: {e}. Falling back to standard splitting.")
+    def _load_existing_splits(self, splits_dir: Path) -> Optional[Tuple[List[List], List[List], List[List]]]:
+        train_csv = splits_dir / "train.csv"
+        test_csv = splits_dir / "test.csv"
+        val_csv = splits_dir / "val.csv"
+        if not (train_csv.exists() and test_csv.exists() and val_csv.exists()):
+            return None
 
         logger.info("==================================================")
-        logger.info("Starting video dataset splitting...")
+        logger.info(f"Fallback mode enabled: found existing split files at '{splits_dir}'.")
+        logger.info("Loading existing dataset splits instead of recomputing them...")
+        logger.info(f"Base image search path: '{self.image_path}'")
+        logger.info("==================================================")
+
+        need_rewrite_files = False
+
+        def load_and_fix_csv(csv_path: Path, split_name: str) -> List[List]:
+            nonlocal need_rewrite_files
+            loaded_data: List[List] = []
+            fixed_count = 0
+            with csv_path.open("r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    label = int(row["label"])
+                    image_path = self._resolve_image_path_from_row(row)
+                    if not os.path.exists(image_path):
+                        raise FileNotFoundError(
+                            f"{split_name} split has a missing image file that could not be corrected: '{image_path}'"
+                        )
+
+                    audio_path = self._resolve_paired_path(image_path, "audio")
+                    wave_path = self._resolve_paired_path(image_path, "wave")
+                    if not audio_path or not wave_path:
+                        raise FileNotFoundError(
+                            f"{split_name} split cannot resolve paired Audio/Wave files for image_path='{image_path}'"
+                        )
+
+                    if (
+                        os.path.normpath(row.get("audio_path", "")) != os.path.normpath(audio_path)
+                        or os.path.normpath(row.get("image_path", row.get("video_path", ""))) != os.path.normpath(image_path)
+                        or os.path.normpath(row.get("wave_path", "")) != os.path.normpath(wave_path)
+                    ):
+                        fixed_count += 1
+                        need_rewrite_files = True
+
+                    loaded_data.append([audio_path, image_path, wave_path, label])
+
+            if fixed_count > 0:
+                logger.info(f"{split_name} split: corrected or filled {fixed_count} MMFFIA multimodal paths.")
+            return loaded_data
+
+        try:
+            train_dict = load_and_fix_csv(train_csv, "Train")
+            test_dict = load_and_fix_csv(test_csv, "Test")
+            val_dict = load_and_fix_csv(val_csv, "Validation")
+
+            self._validate_multimodal_entries("Train", train_dict)
+            self._validate_multimodal_entries("Test", test_dict)
+            self._validate_multimodal_entries("Validation", val_dict)
+            self._validate_split_policy(train_dict, test_dict, val_dict)
+
+            if need_rewrite_files:
+                logger.info("Updating split files on disk to synchronize corrected paths...")
+                self._save_splits(train_dict, test_dict, val_dict, splits_dir)
+
+            logger.info("Successfully loaded dataset splits from files:")
+            logger.info(f"- Train samples: {len(train_dict)}")
+            logger.info(f"- Test samples:  {len(test_dict)}")
+            logger.info(f"- Val samples:   {len(val_dict)}")
+            logger.info("==================================================")
+            return train_dict, test_dict, val_dict
+        except Exception as exc:
+            logger.warning(f"Failed to load or auto-correct existing splits: {exc}. Falling back to standard splitting.")
+            return None
+
+    def split_data(self) -> Tuple[List[List], List[List], List[List]]:
+        splits_dir = self._splits_dir()
+        existing_splits = self._load_existing_splits(splits_dir)
+        if existing_splits is not None:
+            return existing_splits
+
+        logger.info("==================================================")
+        logger.info("Starting MMFFIA image dataset splitting...")
         logger.info(f"Dataset root directory: '{self.dataset_path}'")
+        logger.info(f"Audio root: '{self.audio_path}'")
+        logger.info(f"Image root: '{self.image_path}'")
+        logger.info(f"Wave root:  '{self.wave_path}'")
         logger.info(f"Random seed: {self.seed}")
         logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
         logger.info(f"Evaluation mode: {self.evaluation_mode}")
@@ -752,134 +622,75 @@ class FishDataSplitter(BaseDataSplitter):
         if self.evaluation_mode == "cross_validation":
             logger.info(f"CV folds: {self.num_folds} | Fold index: {self.fold_index} | CV val ratio: {self.cv_val_ratio}")
         logger.info(f"Save split results: {self.save_results}")
-        logger.info("Video paths are required; audio paths are filled only when available.")
+        logger.info("Image is the training anchor; Audio/Wave paths are paired by class and numeric sample id.")
         logger.info("==================================================")
 
-        # Scan files and log the counts
-        logger.info("Scanning video files for each class...")
-        strong_list = self.get_file_list(split_name='strong')
-        logger.info(f"Class 'strong': Found {len(strong_list)} files.")
-        
-        medium_list = self.get_file_list(split_name='medium')
-        logger.info(f"Class 'medium': Found {len(medium_list)} files.")
-        
-        weak_list = self.get_file_list(split_name='weak')
-        logger.info(f"Class 'weak': Found {len(weak_list)} files.")
-        
-        none_list = self.get_file_list(split_name='none')
-        logger.info(f"Class 'none': Found {len(none_list)} files.")
+        class_lists: Dict[int, List[str]] = {}
+        for label in LABEL_ORDER:
+            class_name = LABEL_TO_CLASS[label]
+            files = self.get_file_list(class_name)
+            class_lists[label] = files
+            logger.info(f"Class '{class_name}': Found {len(files)} image files.")
 
-        def build_entries() -> List[List]:
-            return (
-                [self._make_multimodal_entry(video, 1) for video in strong_list] +
-                [self._make_multimodal_entry(video, 2) for video in medium_list] +
-                [self._make_multimodal_entry(video, 3) for video in weak_list] +
-                [self._make_multimodal_entry(video, 0) for video in none_list]
-            )
+        def build_entries(paths_by_label: Dict[int, List[str]]) -> List[List]:
+            entries: List[List] = []
+            for label in LABEL_ORDER:
+                for image_path in paths_by_label[label]:
+                    if self.include_video:
+                        entries.append(self._make_multimodal_entry(image_path, label))
+                    else:
+                        entries.append([image_path, label])
+            return entries
 
         if self.evaluation_mode == "cross_validation":
             logger.info("Building stratified cross-validation fold split...")
-            train_dict, test_dict, val_dict = self._split_entries_cross_validation(build_entries())
-
-            logger.info("==================================================")
-            logger.info("Cross-validation dataset splitting completed successfully!")
-            logger.info(f"- Train samples: {len(train_dict)}")
-            logger.info(f"- Test samples:  {len(test_dict)}")
-            logger.info(f"- Val samples:   {len(val_dict)}")
-            if len(train_dict) > 0:
-                logger.info(f"  * First generated train sample: {train_dict[0]}")
-            if len(test_dict) > 0:
-                logger.info(f"  * First generated test sample:  {test_dict[0]}")
-            if len(val_dict) > 0:
-                logger.info(f"  * First generated val sample:   {val_dict[0]}")
-            logger.info("==================================================")
-
+            train_dict, test_dict, val_dict = self._split_entries_cross_validation(build_entries(class_lists))
             if self.save_results:
                 self._save_splits(train_dict, test_dict, val_dict, splits_dir)
-
             return train_dict, test_dict, val_dict
 
         random_state = np.random.RandomState(self.seed)
-        if self.split_strategy == "time_series":
-            logger.info("Sorting each class chronologically for time_series split...")
-            strong_list = sorted(strong_list, key=self._temporal_path_key)
-            medium_list = sorted(medium_list, key=self._temporal_path_key)
-            weak_list = sorted(weak_list, key=self._temporal_path_key)
-            none_list = sorted(none_list, key=self._temporal_path_key)
-        else:
-            logger.info(f"Shuffling each class list independently with seed={self.seed}...")
-            random_state.shuffle(strong_list)
-            random_state.shuffle(medium_list)
-            random_state.shuffle(weak_list)
-            random_state.shuffle(none_list)
+        ordered_lists: Dict[int, List[str]] = {}
+        for label, file_list in class_lists.items():
+            if self.split_strategy == "time_series":
+                ordered_lists[label] = sorted(file_list, key=_sample_id_sort_key)
+            else:
+                shuffled = list(sorted(file_list, key=_sample_identity_key))
+                random_state.shuffle(shuffled)
+                ordered_lists[label] = shuffled
 
-        # Perform dataset splitting
-        logger.info("Slicing class lists into train, test, and val splits...")
-        if self.split_strategy == "time_series":
-            holdout_size = 2 * self.test_sample_per_class
-            strong_train = strong_list[:-holdout_size]
-            medium_train = medium_list[:-holdout_size]
-            weak_train = weak_list[:-holdout_size]
-            none_train = none_list[:-holdout_size]
+        train_by_label: Dict[int, List[str]] = {}
+        test_by_label: Dict[int, List[str]] = {}
+        val_by_label: Dict[int, List[str]] = {}
 
-            strong_val = strong_list[-holdout_size:-self.test_sample_per_class]
-            medium_val = medium_list[-holdout_size:-self.test_sample_per_class]
-            weak_val = weak_list[-holdout_size:-self.test_sample_per_class]
-            none_val = none_list[-holdout_size:-self.test_sample_per_class]
+        for label in LABEL_ORDER:
+            file_list = ordered_lists[label]
+            required = 2 * self.test_sample_per_class
+            if len(file_list) < required:
+                logger.warning(
+                    f"Class '{LABEL_TO_CLASS[label]}' has only {len(file_list)} files, "
+                    f"but at least {required} samples are required for Test and Val splits."
+                )
 
-            strong_test = strong_list[-self.test_sample_per_class:]
-            medium_test = medium_list[-self.test_sample_per_class:]
-            weak_test = weak_list[-self.test_sample_per_class:]
-            none_test = none_list[-self.test_sample_per_class:]
-        else:
-            strong_test = strong_list[:self.test_sample_per_class]
-            medium_test = medium_list[:self.test_sample_per_class]
-            weak_test = weak_list[:self.test_sample_per_class]
-            none_test = none_list[:self.test_sample_per_class]
+            if self.split_strategy == "time_series":
+                train_by_label[label] = file_list[:-required]
+                val_by_label[label] = file_list[-required:-self.test_sample_per_class]
+                test_by_label[label] = file_list[-self.test_sample_per_class:]
+            else:
+                test_by_label[label] = file_list[:self.test_sample_per_class]
+                val_by_label[label] = file_list[self.test_sample_per_class:required]
+                train_by_label[label] = file_list[required:]
 
-            strong_val = strong_list[self.test_sample_per_class:2*self.test_sample_per_class]
-            medium_val = medium_list[self.test_sample_per_class:2*self.test_sample_per_class]
-            weak_val = weak_list[self.test_sample_per_class:2*self.test_sample_per_class]
-            none_val = none_list[self.test_sample_per_class:2*self.test_sample_per_class]
-
-            strong_train = strong_list[2*self.test_sample_per_class:]
-            medium_train = medium_list[2*self.test_sample_per_class:]
-            weak_train = weak_list[2*self.test_sample_per_class:]
-            none_train = none_list[2*self.test_sample_per_class:]
-
-        # Warn if there are insufficient samples for splitting
-        for class_name, size in [('strong', len(strong_list)), ('medium', len(medium_list)), ('weak', len(weak_list)), ('none', len(none_list))]:
-            req_samples = 2 * self.test_sample_per_class
-            if size < req_samples:
-                logger.warning(f"Class '{class_name}' has only {size} files, but at least {req_samples} samples are required for Test and Val splits.")
-
-        # Log detailed split sizes per class
         logger.info("Per-class split details:")
-        logger.info(f"       - class 'strong': Train={len(strong_train)}, Test={len(strong_test)}, Val={len(strong_val)}")
-        logger.info(f"       - class 'medium': Train={len(medium_train)}, Test={len(medium_test)}, Val={len(medium_val)}")
-        logger.info(f"       - class 'weak':   Train={len(weak_train)}, Test={len(weak_test)}, Val={len(weak_val)}")
-        logger.info(f"       - class 'none':   Train={len(none_train)}, Test={len(none_test)}, Val={len(none_val)}")
+        for label in LABEL_ORDER:
+            logger.info(
+                f"       - class '{LABEL_TO_CLASS[label]}': "
+                f"Train={len(train_by_label[label])}, Test={len(test_by_label[label])}, Val={len(val_by_label[label])}"
+            )
 
-        # Map integer labels and merge lists using list comprehension
-        logger.info("Mapping integer labels and building dataset lists...")
-        train_dict = (
-            [self._make_multimodal_entry(video, 1) for video in strong_train] +
-            [self._make_multimodal_entry(video, 2) for video in medium_train] +
-            [self._make_multimodal_entry(video, 3) for video in weak_train] +
-            [self._make_multimodal_entry(video, 0) for video in none_train]
-        )
-        test_dict = (
-            [self._make_multimodal_entry(video, 1) for video in strong_test] +
-            [self._make_multimodal_entry(video, 2) for video in medium_test] +
-            [self._make_multimodal_entry(video, 3) for video in weak_test] +
-            [self._make_multimodal_entry(video, 0) for video in none_test]
-        )
-        val_dict = (
-            [self._make_multimodal_entry(video, 1) for video in strong_val] +
-            [self._make_multimodal_entry(video, 2) for video in medium_val] +
-            [self._make_multimodal_entry(video, 3) for video in weak_val] +
-            [self._make_multimodal_entry(video, 0) for video in none_val]
-        )
+        train_dict = build_entries(train_by_label)
+        test_dict = build_entries(test_by_label)
+        val_dict = build_entries(val_by_label)
 
         if self.split_strategy == "random_sample":
             logger.info("Applying final shuffle to the train split...")
@@ -888,12 +699,10 @@ class FishDataSplitter(BaseDataSplitter):
         self._validate_split_policy(train_dict, test_dict, val_dict)
 
         logger.info("==================================================")
-        logger.info("Dataset splitting completed successfully!")
+        logger.info("MMFFIA image dataset splitting completed successfully!")
         logger.info(f"- Train samples: {len(train_dict)}")
         logger.info(f"- Test samples:  {len(test_dict)}")
         logger.info(f"- Val samples:   {len(val_dict)}")
-        
-        # Print first samples for user verification
         if len(train_dict) > 0:
             logger.info(f"  * First generated train sample: {train_dict[0]}")
         if len(test_dict) > 0:
@@ -902,47 +711,31 @@ class FishDataSplitter(BaseDataSplitter):
             logger.info(f"  * First generated val sample:   {val_dict[0]}")
         logger.info("==================================================")
 
-        # Automatically save results to the splits directory alongside dataset_path if save_results is True
         if self.save_results:
             self._save_splits(train_dict, test_dict, val_dict, splits_dir)
 
         return train_dict, test_dict, val_dict
 
     def _format_samples(self, split_name: str, data_list: List[List]) -> List[Dict[str, Any]]:
-        """Parse sample information into standardized dictionaries for file export."""
-        label_to_class = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
         samples = []
         for item in data_list:
-            # Support [audio_path, video_path, label] and legacy [video_path, label].
-            if len(item) == 3:
-                audio_path_str = item[0]
-                video_path_str = item[1]
-                label = item[2]
+            if len(item) == 4:
+                audio_path, image_path, wave_path, label = item
             else:
-                video_path_str = item[0]
-                label = item[1]
-                audio_path_str = self._resolve_audio_path(video_path_str)
-
-            # Extract date, session, and sample_id from the absolute path
-            primary_path = audio_path_str or video_path_str
-            parts = Path(primary_path).parts
-            date_part = parts[-4] if len(parts) >= 4 else ""
-            session_part = parts[-3] if len(parts) >= 3 else ""
-            stem = Path(primary_path).stem
-            if "_audio_" in stem:
-                sample_id = stem.split("_audio_")[-1]
-            elif "_video_" in stem:
-                sample_id = stem.split("_video_")[-1]
-            else:
-                sample_id = stem
+                image_path, label = item
+                audio_path = self._resolve_paired_path(image_path, "audio")
+                wave_path = self._resolve_paired_path(image_path, "wave")
 
             samples.append({
-                "video_path": video_path_str,
-                "audio_path": str(audio_path_str),
+                "audio_path": str(audio_path),
+                "image_path": str(image_path),
+                "wave_path": str(wave_path),
                 "label": int(label),
-                "class_name": label_to_class.get(label, ""),
-                "date": date_part,
-                "session": session_part,
-                "sample_id": sample_id
+                "class_name": LABEL_TO_CLASS.get(int(label), ""),
+                "sample_id": _extract_sample_id(str(image_path)),
             })
         return samples
+
+
+if __name__ == "__main__":
+    pass

@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_IMAGE_CACHE_ROOT = "/marimo/video_cache"
+DEFAULT_IMAGE_CACHE_ROOT = "/marimo/image_cache"
 VALID_CACHE_MODES = ("disk", "ram", "none")
 
 
@@ -42,6 +42,11 @@ class ModelConfig(BaseModel):
         default=True,
         description="Whether to request pretrained weights for supported torchvision backbones."
     )
+    classes_num: int = Field(
+        default=3,
+        gt=1,
+        description="Number of MMFFIA feeding intensity classes."
+    )
 
 
 class SplitterConfig(BaseModel):
@@ -49,8 +54,8 @@ class SplitterConfig(BaseModel):
     Configuration parameters for dataset splitting.
     """
     dataset_path: str = Field(
-        default='/marimo/Fish_Feeding_Intensity_Dataset',
-        description="Absolute path to the raw dataset directory."
+        default='/marimo/MMFFIA',
+        description="Absolute path to the raw MMFFIA dataset directory containing Audio, Image, and Wave."
     )
     seed: int = Field(
         default=25,
@@ -68,7 +73,7 @@ class SplitterConfig(BaseModel):
     )
     include_video: bool = Field(
         default=True,
-        description="Whether to return video paths in RAM alongside audio paths."
+        description="Whether to return paired Audio and Wave paths in RAM alongside image paths."
     )
     split_strategy: str = Field(
         default="random_sample",
@@ -110,7 +115,7 @@ class VideoTrainConfig(BaseModel):
     early_stopping: bool = Field(default=True, description="Enable/disable early stopping mechanism.")
     patience: int = Field(default=30, description="Early stopping patience epochs.")
     delta: float = Field(default=0.0, description="Minimum change in monitored metric to qualify as improvement.")
-    cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' decodes from MP4 on demand.")
+    cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' reads images on demand.")
     
     # Nested configurations
     model: ModelConfig = Field(default_factory=ModelConfig, description="Video backbone model configuration.")

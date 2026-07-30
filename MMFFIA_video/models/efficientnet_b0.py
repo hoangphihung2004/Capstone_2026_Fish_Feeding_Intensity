@@ -11,7 +11,7 @@ class EfficientNetB0(nn.Module):
     """
     EfficientNet-B0 image classifier with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, classes_num: int = 3, pretrained: bool = True) -> None:
         super().__init__()
 
         if EfficientNet_B0_Weights is None:
