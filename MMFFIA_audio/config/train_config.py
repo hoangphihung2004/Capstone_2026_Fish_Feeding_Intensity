@@ -71,7 +71,19 @@ class SplitterConfig(BaseModel):
     test_sample_per_class: int = Field(
         default=700,
         gt=0,
-        description="Number of samples per class designated for test and validation subsets."
+        description="Legacy fixed per-class quota retained for backward compatibility. MMFFIA holdout uses holdout_val_ratio and holdout_test_ratio."
+    )
+    holdout_val_ratio: float = Field(
+        default=0.1,
+        gt=0.0,
+        lt=1.0,
+        description="Validation ratio per class for evaluation_mode='holdout'. Uses ceil(class_count * ratio)."
+    )
+    holdout_test_ratio: float = Field(
+        default=0.1,
+        gt=0.0,
+        lt=1.0,
+        description="Test ratio per class for evaluation_mode='holdout'. Uses ceil(class_count * ratio)."
     )
     save_results: bool = Field(
         default=True,

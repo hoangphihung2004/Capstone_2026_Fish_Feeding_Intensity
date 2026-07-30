@@ -16,6 +16,8 @@
     "dataset_path": "/marimo/MMFFIA",
     "seed": 42,
     "test_sample_per_class": 700,
+    "holdout_val_ratio": 0.1,
+    "holdout_test_ratio": 0.1,
     "save_results": true,
     "include_video": true,
     "split_strategy": "random_sample",
