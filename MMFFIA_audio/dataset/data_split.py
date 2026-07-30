@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import sys
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -545,6 +546,23 @@ class FishDataSplitter(BaseDataSplitter):
             return local_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
         return local_splits_dir
 
+    def _clear_existing_splits(self) -> None:
+        dataset_root = Path(self.dataset_path).resolve()
+        splits_root = (Path(self.dataset_path) / "splits").resolve()
+
+        if splits_root.name != "splits":
+            raise ValueError(f"Refusing to delete unexpected split path: '{splits_root}'")
+        try:
+            splits_root.relative_to(dataset_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Refusing to delete split path outside dataset root: '{splits_root}'"
+            ) from exc
+
+        if splits_root.exists():
+            logger.info(f"Removing existing split files before generating a fresh split: '{splits_root}'")
+            shutil.rmtree(splits_root)
+
     def _load_existing_splits(self, splits_dir: Path) -> Optional[Tuple[List[List], List[List], List[List]]]:
         train_csv = splits_dir / "train.csv"
         test_csv = splits_dir / "test.csv"
@@ -621,9 +639,7 @@ class FishDataSplitter(BaseDataSplitter):
 
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
         splits_dir = self._splits_dir()
-        existing_splits = self._load_existing_splits(splits_dir)
-        if existing_splits is not None:
-            return existing_splits
+        self._clear_existing_splits()
 
         logger.info("==================================================")
         logger.info("Starting MMFFIA audio dataset splitting...")
