@@ -38,7 +38,7 @@ class FishVoiceDataLoader:
 
     def __init__(
         self,
-        sample_rate: int = 64000,
+        sample_rate: int = 48000,
         batch_size: int = 40,
         num_workers: int = -1,
         cache_audio: bool = True,
@@ -48,7 +48,7 @@ class FishVoiceDataLoader:
         Initialize FishVoiceDataLoader.
 
         Args:
-            sample_rate (int): Audio target sample rate. Default: 64000.
+            sample_rate (int): Audio target sample rate. Default: 48000.
             batch_size (int): Data loader batch size. Default: 40.
             num_workers (int): Number of parallel CPU loader workers (-1 for auto-detect). Default: -1.
             cache_audio (bool): Enable preloading the entire dataset into RAM cache. Default: True.
@@ -91,10 +91,10 @@ class FishVoiceDataLoader:
         logger.info("Successfully initialized FishVoiceDataLoader.")
 
     @staticmethod
-    def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
+    def load_audio(path: str, sr: int = 48000) -> torch.Tensor:
         """
         Load audio file using torchaudio, resample to the target sample rate,
-        and force a fixed length of 2 seconds (clipping/padding).
+        and force a fixed length of 1 second (clipping/padding).
         """
         import torchaudio
 
@@ -109,7 +109,7 @@ class FishVoiceDataLoader:
             waveform = resampler(waveform)
 
         y = waveform.squeeze(0).to(torch.float32)
-        target_length = sr * 2  # 2 seconds
+        target_length = sr  # 1 second
         
         # Clip if longer, zero-pad if shorter
         if y.numel() > target_length:

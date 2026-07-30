@@ -38,7 +38,7 @@ class InferenceTimer:
 
     def measure_latency_per_sample(
         self,
-        sample_length: int = 128000,
+        sample_length: int = 48000,
         warm_up_steps: int = 10,
         num_steps: int = 50
     ) -> float:
@@ -46,7 +46,7 @@ class InferenceTimer:
         Measure average inference latency per single sample.
 
         Args:
-            sample_length (int): Length of raw input audio waveform (Default: 128000 - equivalent to 2s at 64kHz).
+            sample_length (int): Length of raw input audio waveform (Default: 48000 - equivalent to 1s at 48kHz).
             warm_up_steps (int): Number of warm-up dummy runs to cache CUDA. Default: 10.
             num_steps (int): Number of iterations for average measurement. Default: 50.
 

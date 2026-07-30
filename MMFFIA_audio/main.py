@@ -310,7 +310,7 @@ def run_audio_training(config: TrainConfig, train_config_path: str, device: torc
     model = AudioModel(frontend=frontend, backbone=backbone)
     model = model.to(device)
 
-    dummy_waveform = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
+    dummy_waveform = torch.zeros(1, config.audio_features.sample_rate, device=device)
     model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
     log_model_profile(model=model, example_input=dummy_waveform, model_name=model_name)
 

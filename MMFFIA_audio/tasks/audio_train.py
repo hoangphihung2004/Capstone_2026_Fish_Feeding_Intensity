@@ -333,7 +333,7 @@ class AudioTrainer(BaseTrainer):
             logger.info("Measuring model Inference Latency on device...")
             timer = InferenceTimer(model=self.model, device=self.device)
             latency_ms = timer.measure_latency_per_sample(
-                sample_length=128000, 
+                sample_length=getattr(test_loader.dataset.parent, "sample_rate", 48000),
                 warm_up_steps=10, 
                 num_steps=50
             )
