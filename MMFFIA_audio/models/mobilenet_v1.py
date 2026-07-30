@@ -25,7 +25,7 @@ class MobileNetV1(BaseBackbone):
     AudioFrontend handles Spectrogram, Logmel, SpecAugment, and bn0. This
     backbone receives [Batch, 1, Time, Mel] features and returns raw logits.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 3) -> None:
         super(MobileNetV1, self).__init__()
         self.model_name = "mobilenet_v1"
 

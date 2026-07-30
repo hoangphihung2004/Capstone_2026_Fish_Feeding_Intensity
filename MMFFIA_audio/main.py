@@ -82,7 +82,7 @@ def build_backbone(config: TrainConfig):
     validate_backbone_config(config)
 
     backbone_cls = MODEL_REGISTRY[backbone_name]
-    kwargs = {"classes_num": 4}
+    kwargs = {"classes_num": config.model.classes_num}
     if backbone_name in PRETRAINED_BACKBONES:
         kwargs["pretrained"] = config.model.pretrained
 

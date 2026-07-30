@@ -48,6 +48,11 @@ class ModelConfig(BaseModel):
         default=False,
         description="Whether to request pretrained weights for backbones that support them."
     )
+    classes_num: int = Field(
+        default=3,
+        gt=1,
+        description="Number of MMFFIA feeding intensity classes."
+    )
 
 
 class SplitterConfig(BaseModel):
@@ -55,8 +60,8 @@ class SplitterConfig(BaseModel):
     Configuration parameters for dataset splitting.
     """
     dataset_path: str = Field(
-        default='/marimo/Fish_Feeding_Intensity_Dataset',
-        description="Absolute path to the raw U_FFIA dataset directory."
+        default='/marimo/MMFFIA',
+        description="Absolute path to the raw MMFFIA dataset directory containing Audio, Image, and Wave."
     )
     seed: int = Field(
         default=25,
@@ -74,7 +79,7 @@ class SplitterConfig(BaseModel):
     )
     include_video: bool = Field(
         default=True,
-        description="Whether to return video paths in RAM alongside audio paths."
+        description="Whether to return paired Image and Wave paths in RAM alongside audio paths."
     )
     split_strategy: str = Field(
         default="random_sample",

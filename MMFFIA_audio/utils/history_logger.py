@@ -24,7 +24,7 @@ class HistoryLogger:
     OOP compliant HistoryLogger to automatically log training performance history.
     Automatically records evaluation metrics and flattened confusion matrices to a CSV file.
     """
-    def __init__(self, log_dir: str) -> None:
+    def __init__(self, log_dir: str, class_labels: list = None) -> None:
         """
         Initialize HistoryLogger.
 
@@ -32,6 +32,7 @@ class HistoryLogger:
             log_dir (str): Path to directory where logs and CSV files are stored.
         """
         self.log_dir = log_dir
+        self.class_labels = class_labels or ['none', 'strong', 'weak']
         os.makedirs(self.log_dir, exist_ok=True)
         self.history_csv_path = os.path.join(self.log_dir, 'history.csv')
 
@@ -40,6 +41,14 @@ class HistoryLogger:
             with open(self.history_csv_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 
+                auc_headers = [f'val_auc_class_{label}' for label in self.class_labels]
+                ap_headers = [f'val_ap_class_{label}' for label in self.class_labels]
+                cm_headers = [
+                    f'cm_{actual}_{predicted}'
+                    for actual in self.class_labels
+                    for predicted in self.class_labels
+                ]
+
                 # Column headers including flattened confusion matrix elements
                 headers = [
                     'epoch', 
@@ -47,24 +56,16 @@ class HistoryLogger:
                     'train_accuracy',
                     'train_mAP',
                     'val_loss', 
-                    'val_accuracy', 
+                    'val_accuracy',
                     'val_mAP',
-                    'val_auc_class_none', 'val_auc_class_strong', 'val_auc_class_medium', 'val_auc_class_weak',
-                    'val_ap_class_none', 'val_ap_class_strong', 'val_ap_class_medium', 'val_ap_class_weak',
-                    
-                    # 16 flattened confusion matrix columns (Actual vs Predicted)
-                    'cm_none_none', 'cm_none_strong', 'cm_none_medium', 'cm_none_weak',
-                    'cm_strong_none', 'cm_strong_strong', 'cm_strong_medium', 'cm_strong_weak',
-                    'cm_medium_none', 'cm_medium_strong', 'cm_medium_medium', 'cm_medium_weak',
-                    'cm_weak_none', 'cm_weak_strong', 'cm_weak_medium', 'cm_weak_weak'
-                ]
+                ] + auc_headers + ap_headers + cm_headers
                 writer.writerow(headers)
 
     def _save_confusion_matrix_csv(self, path: str, matrix: np.ndarray) -> None:
         """
         Private Method to save 2D confusion matrix to a labeled CSV file.
         """
-        labels = ['none', 'strong', 'medium', 'weak']
+        labels = self.class_labels
         with open(path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # Write header row (predicted labels)
@@ -104,9 +105,7 @@ class HistoryLogger:
             f"{val_loss:.6f}",
             f"{val_acc:.6f}",
             f"{val_mAP:.6f}",
-            f"{val_auc[0]:.6f}", f"{val_auc[1]:.6f}", f"{val_auc[2]:.6f}", f"{val_auc[3]:.6f}",
-            f"{val_ap[0]:.6f}", f"{val_ap[1]:.6f}", f"{val_ap[2]:.6f}", f"{val_ap[3]:.6f}"
-        ] + [int(val) for val in cm_flat]
+        ] + [f"{value:.6f}" for value in val_auc] + [f"{value:.6f}" for value in val_ap] + [int(val) for val in cm_flat]
 
         with open(self.history_csv_path, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)

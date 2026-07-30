@@ -25,7 +25,7 @@ class AudioModel(nn.Module):
     """
     Unified AudioModel Wrapper class.
     Connects AudioFrontend (GPU spectrogram extractor) with a CNN Backbone model complying with BaseBackbone contract.
-    Accepts 1D raw waveform input and returns classification logits for the 4 feeding intensity classes.
+    Accepts 1D raw waveform input and returns classification logits for the 3 feeding intensity classes.
     """
     def __init__(self, frontend: nn.Module, backbone: BaseBackbone) -> None:
         """

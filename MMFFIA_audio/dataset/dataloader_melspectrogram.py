@@ -83,6 +83,7 @@ class FishVoiceDataLoader:
         else:
             self.splitter_config = splitter_config
         self.splitter = FishDataSplitter(config=self.splitter_config)
+        self.num_classes = self.splitter.num_classes
 
         # 2. Split dataset into train, val, and test partitions
         self.train_dict, self.test_dict, self.val_dict = self.splitter.split_data()
@@ -236,7 +237,7 @@ class FishVoiceDataLoader:
                 wav_numpy = wav_1d.numpy()
 
             # 2. Transform target labels into one-hot vectors
-            target_onehot = np.eye(4)[target]
+            target_onehot = np.eye(self.parent.num_classes)[target]
 
             return {
                 'audio_name': wav_name,

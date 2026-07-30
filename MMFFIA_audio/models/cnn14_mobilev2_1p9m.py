@@ -102,9 +102,9 @@ class Mobilev2Block(nn.Module):
 class Cnn14MobileV2_1P9M(BaseBackbone):
     """
     Cnn14-MobileV2 variant adapted from U-FFIA conv_mv2/CBAM_mobilenet.
-    Approximate parameter count: 1.96M for classes_num=4.
+    Approximate parameter count: 1.96M for classes_num=3.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 3) -> None:
         super(Cnn14MobileV2_1P9M, self).__init__()
         self.model_name = "cnn14_mobilev2_1p9m"
 

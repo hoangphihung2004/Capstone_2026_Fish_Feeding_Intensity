@@ -80,7 +80,7 @@ class MobileNetV2(BaseBackbone):
     This class intentionally excludes Spectrogram, Logmel, SpecAugment, and
     bn0 because those steps are handled by AudioFrontend in the current codebase.
     """
-    def __init__(self, classes_num: int = 4, width_mult: float = 1.0) -> None:
+    def __init__(self, classes_num: int = 3, width_mult: float = 1.0) -> None:
         super(MobileNetV2, self).__init__()
         self.model_name = "mobilenet_v2"
 

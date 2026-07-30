@@ -9,10 +9,11 @@
   "cache_audio": true,
   "model": {
     "backbone": "Cnn14MobileV2",
-    "pretrained": false
+    "pretrained": false,
+    "classes_num": 3
   },
   "dataset_splitter": {
-    "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
+    "dataset_path": "/marimo/MMFFIA",
     "seed": 42,
     "test_sample_per_class": 700,
     "save_results": true,

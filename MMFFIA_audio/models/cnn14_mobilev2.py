@@ -156,7 +156,7 @@ class Cnn14MobileV2(BaseBackbone):
     """
     CNN14 Network with customized MobileNetV2 blocks, inheriting from BaseBackbone.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 3) -> None:
         super(Cnn14MobileV2, self).__init__()
         self.model_name = "cnn14_mobilev2"
 

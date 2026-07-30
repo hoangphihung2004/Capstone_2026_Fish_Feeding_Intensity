@@ -209,7 +209,7 @@ class ResNet22(BaseBackbone):
     Spectrogram, Logmel, SpecAugment, and bn0 are handled by AudioFrontend.
     This backbone receives [Batch, 1, Time, Mel] features and returns logits.
     """
-    def __init__(self, classes_num: int = 4) -> None:
+    def __init__(self, classes_num: int = 3) -> None:
         super(ResNet22, self).__init__()
         self.model_name = "resnet22"
 

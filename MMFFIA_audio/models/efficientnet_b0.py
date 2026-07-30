@@ -14,7 +14,7 @@ class EfficientNetB0(BaseBackbone):
     """
     def __init__(
         self,
-        classes_num: int = 4,
+        classes_num: int = 3,
         pretrained: bool = False,
         dropout: float = 0.2,
     ) -> None:
