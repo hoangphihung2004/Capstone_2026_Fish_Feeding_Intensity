@@ -42,7 +42,7 @@ class ModelConfig(BaseModel):
     """
     backbone: str = Field(
         default="Cnn14MobileV2",
-        description="Backbone class name exported by DL_audio.models."
+        description="Backbone class name exported by U_FFIA_audio.models."
     )
     pretrained: bool = Field(
         default=False,
