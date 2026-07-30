@@ -36,7 +36,7 @@ class ModelConfig(BaseModel):
     """
     backbone: str = Field(
         default="MobileNetV2",
-        description="Backbone class name exported by DL_video.models."
+        description="Backbone class name exported by U_FFIA_video.models."
     )
     pretrained: bool = Field(
         default=True,
@@ -128,5 +128,5 @@ class VideoTrainConfig(BaseModel):
         return cls(**data)
 
 
-# Alias for compatibility matching DL_audio
+# Alias for compatibility matching U_FFIA_audio
 TrainConfig = VideoTrainConfig

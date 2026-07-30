@@ -103,7 +103,7 @@ class BaseDataSplitter(ABC):
             self.video_path = None
             self.video_exists = False
             raise FileNotFoundError(
-                f"DL_video splitting requires a 'video' directory inside dataset_path or dataset_path pointing to a video root: '{self.dataset_path}'"
+                f"U_FFIA_video splitting requires a 'video' directory inside dataset_path or dataset_path pointing to a video root: '{self.dataset_path}'"
             )
 
     @abstractmethod
