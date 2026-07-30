@@ -31,7 +31,9 @@
     "window_size": 2048,
     "hop_size": 1024,
     "mel_bins": 128,
-    "time_drop_width": 64,
+    "fmin": 1,
+    "fmax": 24000,
+    "time_drop_width": 32,
     "time_stripes_num": 2,
     "freq_drop_width": 8,
     "freq_stripes_num": 2

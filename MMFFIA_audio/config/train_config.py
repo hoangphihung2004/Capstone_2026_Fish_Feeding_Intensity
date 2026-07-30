@@ -30,7 +30,7 @@ class AudioFeaturesConfig(BaseModel):
     mel_bins: int = Field(default=128, description="Number of Mel frequency bins (n_mels).")
     fmin: int = Field(default=1, description="Minimum filter frequency.")
     fmax: int = Field(default=24000, description="Maximum filter frequency.")
-    time_drop_width: int = Field(default=64, description="Maximum time masking width.")
+    time_drop_width: int = Field(default=32, description="Maximum time masking width.")
     time_stripes_num: int = Field(default=2, description="Number of masked time stripes.")
     freq_drop_width: int = Field(default=8, description="Maximum frequency masking width.")
     freq_stripes_num: int = Field(default=2, description="Number of masked frequency stripes.")
