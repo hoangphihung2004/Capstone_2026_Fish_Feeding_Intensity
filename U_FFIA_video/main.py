@@ -18,7 +18,7 @@ import torch.optim as optim
 
 # Import refactored OOP components
 from config import ArtifactUploadConfig, TrainConfig
-from dataset import FishVideoDataLoader
+from dataset import FishVideoDataLoader, VideoRAMCache
 from models import (
     ConvNeXtTiny,
     DenseNet121,
@@ -26,6 +26,7 @@ from models import (
     MobileNetV2,
     ResNet18,
     ResNet50,
+    S3D,
     SwinTiny,
     VideoModel,
     ViTBase16,
@@ -55,6 +56,7 @@ MODEL_REGISTRY = {
     "SwinTiny": SwinTiny,
     "ViTBase16": ViTBase16,
     "ConvNeXtTiny": ConvNeXtTiny,
+    "S3D": S3D,
 }
 
 
@@ -269,17 +271,34 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info("Successfully uploaded artifact to Hugging Face.")
 
 
-def run_video_training(config: TrainConfig, train_config_path: str, device: torch.device, fold_index: int = None) -> str:
+def run_video_training(
+    config: TrainConfig,
+    train_config_path: str,
+    device: torch.device,
+    fold_index: int = None,
+    shared_ram_cache: VideoRAMCache = None,
+) -> str:
     """Run one video train/val/test cycle and return the model output directory."""
     logger.info("Initializing DataLoaders...")
+    backbone = build_backbone(config)
+    clip_mode = getattr(backbone, "input_type", "image") == "clip"
+    minimum_required_frames = getattr(backbone, "minimum_frames", 1) if clip_mode else 1
+
     loader_manager = FishVideoDataLoader(
         batch_size=config.batch_size,
+        preload_workers=config.preload_workers,
         dataloader_workers=config.dataloader_workers,
-        prefetch_factor=config.prefetch_factor,
         cache_mode=config.cache_mode,
         image_size=config.video_features.image_size,
-        splitter_config=config.dataset_splitter
+        frames=config.video_features.frames if clip_mode else 1,
+        clip_mode=clip_mode,
+        minimum_required_frames=minimum_required_frames,
+        shared_ram_cache=shared_ram_cache,
+        splitter_config=config.dataset_splitter,
     )
+
+    if clip_mode:
+        config.video_features.frames = loader_manager.effective_frames
 
     train_loader = loader_manager.get_dataloader(split='train', shuffle=True, drop_last=False)
     val_loader = loader_manager.get_dataloader(split='val', shuffle=False)
@@ -287,7 +306,6 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
 
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
-    backbone = build_backbone(config)
     model = VideoModel(backbone=backbone)
     model = model.to(device)
 
@@ -296,6 +314,12 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
         fold_dir = os.path.join(model_cv_dir(config.ckpt_dir, model_name), f"fold_{fold_index:02d}")
         config.ckpt_dir = fold_dir
         train_config_path = write_runtime_config(config, os.path.join(fold_dir, "fold_train_config.json"))
+    else:
+        model_dir = model_cv_dir(config.ckpt_dir, model_name)
+        train_config_path = write_runtime_config(
+            config,
+            os.path.join(model_dir, "runtime_train_config.json"),
+        )
 
     # 5. Initialize Adam optimizer
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
@@ -313,7 +337,12 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
     )
 
     # 7. Start Training & Evaluation process
-    trainer.fit()
+    try:
+        trainer.fit()
+    finally:
+        FishVideoDataLoader.shutdown_dataloader(train_loader)
+        FishVideoDataLoader.shutdown_dataloader(val_loader)
+        FishVideoDataLoader.shutdown_dataloader(test_loader)
 
     if config.dataset_splitter.evaluation_mode == "cross_validation":
         return config.ckpt_dir
@@ -330,7 +359,7 @@ def main():
     validate_backbone_config(config)
 
     logger.info("==================================================")
-    logger.info("Launching Single-Frame Image Classification Training:")
+    logger.info("Launching Video Classification Training:")
     logger.info(f"  - Device Name:              {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     logger.info(f"  - Max Epochs:               {config.epochs}")
     logger.info(f"  - Batch Size:               {config.batch_size}")
@@ -339,6 +368,7 @@ def main():
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
     logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
     logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
+    logger.info(f"  - Requested Frames:         {config.video_features.frames}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     logger.info("==================================================")
@@ -346,6 +376,10 @@ def main():
     # 2. Hardware device configuration
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Training will run on device: '{device}'")
+
+    backbone_cls = MODEL_REGISTRY[config.model.backbone]
+    clip_mode = getattr(backbone_cls, "input_type", "image") == "clip"
+    shared_ram_cache = VideoRAMCache() if config.cache_mode == "ram" and clip_mode else None
 
     if config.dataset_splitter.evaluation_mode == "cross_validation":
         model_dir = None
@@ -360,6 +394,7 @@ def main():
                 train_config_path=train_config_path,
                 device=device,
                 fold_index=fold_index,
+                shared_ram_cache=shared_ram_cache,
             )
             model_dir = str(Path(fold_output_dir).parent)
 
@@ -371,6 +406,7 @@ def main():
             train_config_path=train_config_path,
             device=device,
             fold_index=None,
+            shared_ram_cache=shared_ram_cache,
         )
 
     artifact_upload_config = ArtifactUploadConfig.from_json(artifact_upload_config_path)

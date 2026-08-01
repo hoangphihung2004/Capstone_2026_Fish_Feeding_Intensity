@@ -25,9 +25,10 @@ VALID_CACHE_MODES = ("disk", "ram", "none")
 
 class VideoFeaturesConfig(BaseModel):
     """
-    Single image extraction parameters.
+    Video frame extraction parameters.
     """
     image_size: int = Field(default=224, description="Target width and height for extracted images.")
+    frames: int = Field(default=20, ge=1, description="Requested number of temporal frames for clip-based backbones.")
 
 
 class ModelConfig(BaseModel):
@@ -35,7 +36,7 @@ class ModelConfig(BaseModel):
     Configuration for selecting the video backbone without editing main.py.
     """
     backbone: str = Field(
-        default="MobileNetV2",
+        default="S3D",
         description="Backbone class name exported by U_FFIA_video.models."
     )
     pretrained: bool = Field(
@@ -101,21 +102,21 @@ class VideoTrainConfig(BaseModel):
     Complies with OOP design via Pydantic.
     """
     epochs: int = Field(default=500, description="Maximum training epochs.")
-    batch_size: int = Field(default=50, description="Mini-batch size.")
+    batch_size: int = Field(default=64, description="Mini-batch size.")
+    preload_workers: int = Field(default=-1, ge=-1, description="Number of threads used to preload videos into RAM. Use -1 for automatic CPU-based selection.")
     dataloader_workers: int = Field(default=-1, ge=-1, description="Number of PyTorch DataLoader workers used during training. Use -1 for automatic CPU-based selection.")
-    prefetch_factor: Optional[int] = Field(default=None, description="Number of batches prefetched by each DataLoader worker. None uses PyTorch default.")
     learning_rate: float = Field(default=1e-3, description="Optimizer learning rate.")
     ckpt_dir: str = Field(default='checkpoint/', description="Directory to save checkpoints and CSV logs.")
     monitor: str = Field(default='accuracy', description="Metric to monitor for best model saving ('accuracy' or 'loss').")
     early_stopping: bool = Field(default=True, description="Enable/disable early stopping mechanism.")
     patience: int = Field(default=30, description="Early stopping patience epochs.")
     delta: float = Field(default=0.0, description="Minimum change in monitored metric to qualify as improvement.")
-    cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' decodes from MP4 on demand.")
+    cache_mode: Literal["disk", "ram", "none"] = Field(default="ram", description="Video cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded data into system RAM, 'none' decodes from MP4 on demand.")
     
     # Nested configurations
     model: ModelConfig = Field(default_factory=ModelConfig, description="Video backbone model configuration.")
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
-    video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Image feature extraction configuration.")
+    video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Video frame extraction configuration.")
 
     @classmethod
     def from_json(cls, path: str = 'config/train_config.json') -> 'VideoTrainConfig':

@@ -158,8 +158,8 @@ class VideoTrainer:
 
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch}/{self.config.epochs}")
         for batch in pbar:
-            inputs = batch['video_form'].to(self.device)
-            targets = batch['target'].to(self.device)
+            inputs = batch['video_form'].to(self.device, non_blocking=True)
+            targets = batch['target'].to(self.device, non_blocking=True)
 
             self.optimizer.zero_grad()
 
@@ -227,8 +227,8 @@ class VideoTrainer:
             val_loss_sum = 0.0
             with torch.no_grad():
                 for val_batch in self.val_loader:
-                    val_inputs = val_batch['video_form'].to(self.device)
-                    val_targets = val_batch['target'].to(self.device)
+                    val_inputs = val_batch['video_form'].to(self.device, non_blocking=True)
+                    val_targets = val_batch['target'].to(self.device, non_blocking=True)
                     val_outputs = self.model(val_inputs)
                     if isinstance(val_outputs, dict):
                         val_outputs = val_outputs.get('clipwise_output', val_outputs)
@@ -316,8 +316,13 @@ class VideoTrainer:
             logger.info("Measuring model Inference Latency on device...")
             timer = InferenceTimer(model=self.model, device=self.device)
             img_size = self.config.video_features.image_size
+            input_type = getattr(self.model, "input_type", "image")
+            if input_type == "clip":
+                input_shape = (1, 3, self.config.video_features.frames, img_size, img_size)
+            else:
+                input_shape = (1, 3, img_size, img_size)
             latency_ms = timer.measure_latency_per_sample(
-                input_shape=(1, 3, img_size, img_size),
+                input_shape=input_shape,
                 warm_up_steps=10,
                 num_steps=50
             )

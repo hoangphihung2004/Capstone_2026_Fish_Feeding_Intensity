@@ -44,17 +44,17 @@ class InferenceTimer:
         num_steps: int = 50
     ) -> float:
         """
-        Measure average inference latency per single image sample.
+        Measure average inference latency per image or video clip sample.
 
         Args:
-            input_shape (Tuple[int, ...]): Shape of input image tensor [Batch, Channels, Height, Width]. Default: (1, 3, 224, 224).
+            input_shape (Tuple[int, ...]): Shape of an image [B, C, H, W] or clip [B, C, T, H, W].
             warm_up_steps (int): Number of warm-up dummy runs to cache CUDA. Default: 10.
             num_steps (int): Number of iterations for average measurement. Default: 50.
 
         Returns:
             float: Average inference latency per sample in milliseconds (ms).
         """
-        # Create a single dummy image tensor sample
+        # Create a single dummy image or clip tensor sample.
         dummy_input = torch.randn(*input_shape).to(self.device)
         self.model.eval()
         

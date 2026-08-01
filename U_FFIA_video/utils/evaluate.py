@@ -54,13 +54,15 @@ class VideoEvaluator(BaseEvaluator):
         """
         Private Method to move data tensors to CPU/GPU device.
         """
+        if isinstance(x, torch.Tensor):
+            return x.to(self.device, non_blocking=True)
         if 'float' in str(x.dtype):
-            x = torch.Tensor(x)
+            x = torch.as_tensor(x, dtype=torch.float32)
         elif 'int' in str(x.dtype):
-            x = torch.LongTensor(x)
+            x = torch.as_tensor(x, dtype=torch.long)
         else:
             return x
-        return x.to(self.device)
+        return x.to(self.device, non_blocking=True)
 
     def _append_to_dict(self, data_dict: Dict[str, list], key: str, value: Any) -> None:
         """
