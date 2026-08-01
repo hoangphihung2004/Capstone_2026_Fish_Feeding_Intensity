@@ -136,7 +136,7 @@ class Cnn14MobileV2_1P9M(BaseBackbone):
         x = F.dropout(x, p=0.2, training=self.training)
         x = self.conv_block5(x, pool_size=(2, 2))
         x = F.dropout(x, p=0.2, training=self.training)
-        x = self.conv_block6(x, pool_size=(2, 2))
+        x = self.conv_block6(x, pool_size=(1, 1))
         x = F.dropout(x, p=0.2, training=self.training)
 
         x = torch.mean(x, dim=3)

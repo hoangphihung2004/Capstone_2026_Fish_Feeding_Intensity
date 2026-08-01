@@ -87,7 +87,7 @@ class PANNS_Cnn14(BaseBackbone):
         x = F.dropout(x, p=0.2, training=self.training)
         x = self.conv_block5(x, pool_size=(2, 2), pool_type='avg')
         x = F.dropout(x, p=0.2, training=self.training)
-        x = self.conv_block6(x, pool_size=(2, 2), pool_type='avg')
+        x = self.conv_block6(x, pool_size=(1, 1), pool_type='avg')
         x = F.dropout(x, p=0.2, training=self.training)
         
         x = torch.mean(x, dim=3)
