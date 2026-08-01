@@ -1,6 +1,6 @@
 {
   "epochs": 400,
-  "batch_size": 256,
+  "batch_size": 64,
   "learning_rate": 1e-4,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
@@ -9,7 +9,7 @@
   "delta": 0.0,
   "cache_mode": "ram",
   "model": {
-    "backbone": "MobileNetV2",
+    "backbone": "S3D",
     "pretrained": true
   },
   "dataset_splitter": {
@@ -25,6 +25,7 @@
     "cv_val_ratio": 0.2
   },
   "video_features": {
-    "image_size": 224
+    "image_size": 224,
+    "frames": 20
   }
 }
