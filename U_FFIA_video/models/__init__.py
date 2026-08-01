@@ -7,6 +7,7 @@ from .densenet121 import DenseNet121
 from .swin_tiny import SwinTiny
 from .vit_base_16 import ViTBase16
 from .convnext_tiny import ConvNeXtTiny
+from .s3d import S3D
 
 __all__ = [
     "VideoModel",
@@ -18,4 +19,5 @@ __all__ = [
     "SwinTiny",
     "ViTBase16",
     "ConvNeXtTiny",
+    "S3D",
 ]
