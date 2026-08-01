@@ -53,7 +53,6 @@ class VideoTransform:
 
         train_transform = [
             ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
             transforms.ColorJitter(brightness=0.15),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(20),
@@ -64,7 +63,6 @@ class VideoTransform:
 
         eval_transform = [
             ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
             transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ]
@@ -73,4 +71,57 @@ class VideoTransform:
             "train": VideoTransform(transforms.Compose(train_transform)),
             "val": VideoTransform(transforms.Compose(eval_transform)),
             "test": VideoTransform(transforms.Compose(eval_transform)),
+        }
+
+
+class ClipVideoTransform:
+    """
+    Transform one complete RGB clip with shared random parameters.
+
+    Input:  np.ndarray uint8 [T, H, W, C]
+    Output: torch.Tensor float32 [C, T, H, W]
+    """
+
+    def __init__(self, transform: transforms.Compose) -> None:
+        self.transform = transform
+
+    def __call__(self, clip: np.ndarray) -> torch.Tensor:
+        if not isinstance(clip, np.ndarray) or clip.ndim != 4 or clip.shape[-1] != 3:
+            shape = tuple(clip.shape) if hasattr(clip, "shape") else type(clip).__name__
+            raise ValueError(f"Expected uint8 RGB clip [T, H, W, C], got {shape}.")
+        if clip.dtype != np.uint8:
+            raise ValueError(f"Expected uint8 clip, got dtype={clip.dtype}.")
+
+        # Copy before creating the tensor so augmentation can never mutate RAM cache pages.
+        clip_tensor = torch.from_numpy(np.array(clip, copy=True)).permute(0, 3, 1, 2)
+        clip_tensor = self.transform(clip_tensor)
+        return clip_tensor.permute(1, 0, 2, 3).contiguous()
+
+    @staticmethod
+    def get_transforms():
+        mean = (0.43216, 0.394666, 0.37645)
+        std = (0.22803, 0.22145, 0.216989)
+
+        train_transform = transforms.Compose([
+            transforms.ConvertImageDtype(torch.float32),
+            transforms.ColorJitter(brightness=0.15),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(20, interpolation=InterpolationMode.BILINEAR),
+            transforms.RandomAffine(
+                degrees=0,
+                translate=(0.2, 0.2),
+                interpolation=InterpolationMode.BILINEAR,
+            ),
+            transforms.Normalize(mean, std),
+        ])
+
+        eval_transform = transforms.Compose([
+            transforms.ConvertImageDtype(torch.float32),
+            transforms.Normalize(mean, std),
+        ])
+
+        return {
+            "train": ClipVideoTransform(train_transform),
+            "val": ClipVideoTransform(eval_transform),
+            "test": ClipVideoTransform(eval_transform),
         }
