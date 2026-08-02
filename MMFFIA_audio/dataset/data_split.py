@@ -186,11 +186,16 @@ class BaseDataSplitter(ABC):
     def _temporal_path_key(path: str) -> Tuple[int, str]:
         return _sample_id_sort_key(path)
 
+    def _entry_temporal_path(self, item: List[Any]) -> str:
+        if len(item) == 4:
+            return str(item[1])
+        return self._primary_path_from_entry(item)
+
     def _entry_sample_key(self, item: List[Any]) -> str:
         return _sample_identity_key(self._primary_path_from_entry(item))
 
     def _entry_temporal_key(self, item: List[Any]) -> Tuple[int, str]:
-        return self._temporal_path_key(self._primary_path_from_entry(item))
+        return self._temporal_path_key(self._entry_temporal_path(item))
 
     def _count_labels(self, data_list: List[List]) -> Counter:
         counts = Counter()
@@ -267,6 +272,9 @@ class BaseDataSplitter(ABC):
             ]
 
             if self.split_strategy == "time_series":
+                # After hiding the test fold, keep model selection time-ordered:
+                # train is the first 80% of the remaining samples and val is the last 20%.
+                # The temporal order is based on the paired image filename id.
                 dev_class_entries = sorted(dev_class_entries, key=self._entry_temporal_key)
             else:
                 dev_class_entries = sorted(dev_class_entries, key=self._entry_sample_key)
@@ -443,6 +451,13 @@ class FishDataSplitter(BaseDataSplitter):
             files.extend(glob.glob(str(class_root / f"*{ext}")))
         return sorted(files, key=_sample_id_sort_key)
 
+    def _entry_temporal_path(self, item: List[Any]) -> str:
+        if len(item) == 4:
+            return str(item[1])
+        audio_path = self._primary_path_from_entry(item)
+        image_path = self._resolve_paired_path(audio_path, "image")
+        return image_path or audio_path
+
     def _resolve_paired_path(self, audio_path: str, modality_key: str) -> str:
         audio = Path(audio_path)
         class_name = audio.parent.name
@@ -546,9 +561,10 @@ class FishDataSplitter(BaseDataSplitter):
             return local_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
         return local_splits_dir
 
-    def _clear_existing_splits(self) -> None:
+    def _clear_existing_splits(self, target_dir: Optional[Path] = None) -> None:
         dataset_root = Path(self.dataset_path).resolve()
         splits_root = (Path(self.dataset_path) / "splits").resolve()
+        target_path = Path(target_dir).resolve() if target_dir is not None else splits_root
 
         if splits_root.name != "splits":
             raise ValueError(f"Refusing to delete unexpected split path: '{splits_root}'")
@@ -558,10 +574,16 @@ class FishDataSplitter(BaseDataSplitter):
             raise ValueError(
                 f"Refusing to delete split path outside dataset root: '{splits_root}'"
             ) from exc
+        try:
+            target_path.relative_to(splits_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"Refusing to delete split path outside splits root: '{target_path}'"
+            ) from exc
 
-        if splits_root.exists():
-            logger.info(f"Removing existing split files before generating a fresh split: '{splits_root}'")
-            shutil.rmtree(splits_root)
+        if target_path.exists():
+            logger.info(f"Removing existing split files before generating a fresh split: '{target_path}'")
+            shutil.rmtree(target_path)
 
     def _load_existing_splits(self, splits_dir: Path) -> Optional[Tuple[List[List], List[List], List[List]]]:
         train_csv = splits_dir / "train.csv"
@@ -639,7 +661,7 @@ class FishDataSplitter(BaseDataSplitter):
 
     def split_data(self) -> Tuple[List[List], List[List], List[List]]:
         splits_dir = self._splits_dir()
-        self._clear_existing_splits()
+        self._clear_existing_splits(splits_dir if self.evaluation_mode == "cross_validation" else None)
 
         logger.info("==================================================")
         logger.info("Starting MMFFIA audio dataset splitting...")
