@@ -21,7 +21,7 @@
     "holdout_test_ratio": 0.1,
     "save_results": true,
     "include_video": true,
-    "split_strategy": "random_sample",
+    "split_strategy": "time_series",
     "evaluation_mode": "cross_validation",
     "num_folds": 5,
     "fold_index": null,
