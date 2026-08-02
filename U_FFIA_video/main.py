@@ -288,6 +288,7 @@ def run_video_training(
         batch_size=config.batch_size,
         preload_workers=config.preload_workers,
         dataloader_workers=config.dataloader_workers,
+        prefetch_factor=config.prefetch_factor,
         cache_mode=config.cache_mode,
         image_size=config.video_features.image_size,
         frames=config.video_features.frames if clip_mode else 1,

@@ -79,109 +79,72 @@ def _sample_segment_indices(total_frames: int, frames: int, seed: int) -> np.nda
     return indices
 
 
-def _get_video_frame_count(video_path: str) -> int:
-    try:
-        from decord import VideoReader, cpu
-        frame_count = len(VideoReader(video_path, ctx=cpu(0)))
-    except Exception as decord_exc:
-        cap = cv2.VideoCapture(video_path)
-        try:
-            if not cap.isOpened():
-                raise RuntimeError(f"OpenCV could not open video after Decord failed: {decord_exc}")
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        finally:
-            cap.release()
-
-    if frame_count <= 0:
-        raise ValueError(f"Video has no readable frames: '{video_path}'.")
-    return frame_count
-
-
-def _scan_video_frame_counts(video_paths: List[str], workers: int) -> Dict[str, int]:
-    frame_counts: Dict[str, int] = {}
-    scan_workers = max(1, workers)
-    logger.info(f"Scanning frame counts for {len(video_paths)} videos with {scan_workers} threads...")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=scan_workers) as executor:
-        futures = {
-            executor.submit(_get_video_frame_count, video_path): video_path
-            for video_path in video_paths
-        }
-        try:
-            from tqdm import tqdm
-            iterator = tqdm(
-                concurrent.futures.as_completed(futures),
-                total=len(futures),
-                desc="Scanning video frame counts",
-            )
-        except ImportError:
-            iterator = concurrent.futures.as_completed(futures)
-
-        for future in iterator:
-            video_path = futures[future]
-            try:
-                frame_counts[_normalized_video_key(video_path)] = int(future.result())
-            except Exception as exc:
-                raise RuntimeError(f"Failed to read frame count for '{video_path}': {exc}") from exc
-
-    return frame_counts
-
-
-def _resolve_effective_frames(
-    configured_frames: int,
-    minimum_required_frames: int,
-    frame_counts: Dict[str, int],
-) -> Tuple[int, int, str]:
-    if not frame_counts:
-        raise ValueError("Cannot resolve effective frames because the video dataset is empty.")
-
-    shortest_path, minimum_video_frames = min(frame_counts.items(), key=lambda item: item[1])
-    if minimum_video_frames < minimum_required_frames:
-        raise ValueError(
-            f"S3D requires at least {minimum_required_frames} frames, but video "
-            f"'{shortest_path}' contains only {minimum_video_frames} frames."
-        )
-
+def _resolve_requested_frames(configured_frames: int, minimum_required_frames: int) -> int:
     requested_frames = max(configured_frames, minimum_required_frames)
     if configured_frames < minimum_required_frames:
         logger.warning(
             f"S3D requires at least {minimum_required_frames} frames. "
             f"Configured frames={configured_frames} has been adjusted to {minimum_required_frames}."
         )
+    return requested_frames
 
-    effective_frames = min(requested_frames, minimum_video_frames)
-    if requested_frames > minimum_video_frames:
-        logger.warning(
-            f"Configured frames={requested_frames} exceeds the shortest video length="
-            f"{minimum_video_frames}. Using frames={effective_frames} for all videos."
+
+class _InsufficientVideoFramesError(ValueError):
+    pass
+
+
+def _validate_video_frame_count(video_path: str, total_frames: int, frames: int) -> None:
+    if total_frames <= 0:
+        raise _InsufficientVideoFramesError(f"Video has no readable frames: '{video_path}'.")
+    if total_frames < frames:
+        raise _InsufficientVideoFramesError(
+            f"Video '{video_path}' contains only {total_frames} frames, but the current clip "
+            f"configuration requires {frames}. Reduce video_features.frames or replace this video."
         )
 
-    return effective_frames, minimum_video_frames, shortest_path
 
-
-def _decode_clip_decord(video_path: str, indices: np.ndarray, image_size: int) -> np.ndarray:
+def _decode_clip_decord(
+    video_path: str,
+    frames: int,
+    image_size: int,
+    global_seed: int,
+) -> Tuple[np.ndarray, np.ndarray, int]:
     from decord import VideoReader, cpu
 
     vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0))
-    if len(vr) <= int(indices[-1]):
-        raise ValueError(
-            f"Video frame count changed while decoding '{video_path}': "
-            f"requested index {int(indices[-1])}, available frames {len(vr)}."
-        )
+    total_frames = len(vr)
+    _validate_video_frame_count(video_path=video_path, total_frames=total_frames, frames=frames)
+    indices = _sample_segment_indices(
+        total_frames=total_frames,
+        frames=frames,
+        seed=_stable_video_seed(global_seed=global_seed, video_path=video_path),
+    )
 
     clip = vr.get_batch(indices.tolist()).asnumpy()
     expected_shape = (len(indices), image_size, image_size, 3)
     if clip.shape != expected_shape:
         raise ValueError(f"Decoded clip has shape {clip.shape}, expected {expected_shape} for '{video_path}'.")
-    return np.ascontiguousarray(clip, dtype=np.uint8)
+    return np.ascontiguousarray(clip, dtype=np.uint8), indices, total_frames
 
 
-def _decode_clip_cv2(video_path: str, indices: np.ndarray, image_size: int) -> np.ndarray:
+def _decode_clip_cv2(
+    video_path: str,
+    frames: int,
+    image_size: int,
+    global_seed: int,
+) -> Tuple[np.ndarray, np.ndarray, int]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"OpenCV could not open video: '{video_path}'.")
 
-    frames: List[np.ndarray] = []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    _validate_video_frame_count(video_path=video_path, total_frames=total_frames, frames=frames)
+    indices = _sample_segment_indices(
+        total_frames=total_frames,
+        frames=frames,
+        seed=_stable_video_seed(global_seed=global_seed, video_path=video_path),
+    )
+    decoded_frames: List[np.ndarray] = []
     try:
         for frame_index in indices.tolist():
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_index))
@@ -190,33 +153,40 @@ def _decode_clip_cv2(video_path: str, indices: np.ndarray, image_size: int) -> n
                 raise RuntimeError(f"OpenCV could not decode frame {frame_index} from '{video_path}'.")
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-            frames.append(frame.astype(np.uint8, copy=False))
+            decoded_frames.append(frame.astype(np.uint8, copy=False))
     finally:
         cap.release()
 
-    return np.ascontiguousarray(np.stack(frames, axis=0), dtype=np.uint8)
+    clip = np.ascontiguousarray(np.stack(decoded_frames, axis=0), dtype=np.uint8)
+    return clip, indices, total_frames
 
 
 def _decode_video_clip(
     video_path: str,
-    total_frames: int,
     frames: int,
     image_size: int,
     global_seed: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    indices = _sample_segment_indices(
-        total_frames=total_frames,
-        frames=frames,
-        seed=_stable_video_seed(global_seed=global_seed, video_path=video_path),
-    )
+) -> Tuple[np.ndarray, np.ndarray, int]:
     try:
-        clip = _decode_clip_decord(video_path=video_path, indices=indices, image_size=image_size)
+        clip, indices, total_frames = _decode_clip_decord(
+            video_path=video_path,
+            frames=frames,
+            image_size=image_size,
+            global_seed=global_seed,
+        )
+    except _InsufficientVideoFramesError:
+        raise
     except Exception as exc:
         logger.warning(f"Decord failed for '{video_path}', falling back to OpenCV. Error: {exc}")
-        clip = _decode_clip_cv2(video_path=video_path, indices=indices, image_size=image_size)
+        clip, indices, total_frames = _decode_clip_cv2(
+            video_path=video_path,
+            frames=frames,
+            image_size=image_size,
+            global_seed=global_seed,
+        )
 
     clip.setflags(write=False)
-    return clip, indices
+    return clip, indices, total_frames
 
 
 class VideoRAMCache:
@@ -227,7 +197,6 @@ class VideoRAMCache:
         self.frame_counts: Dict[str, int] = {}
         self.sampled_indices: Dict[str, np.ndarray] = {}
         self.effective_frames: Optional[int] = None
-        self.minimum_video_frames: Optional[int] = None
         self.total_bytes = 0
         self._settings: Optional[Tuple[int, int, int, int]] = None
 
@@ -260,14 +229,11 @@ class VideoRAMCache:
             )
             return int(self.effective_frames)
 
-        self.frame_counts = _scan_video_frame_counts(unique_paths, workers=preload_workers)
-        effective_frames, minimum_video_frames, shortest_path = _resolve_effective_frames(
+        effective_frames = _resolve_requested_frames(
             configured_frames=configured_frames,
             minimum_required_frames=minimum_required_frames,
-            frame_counts=self.frame_counts,
         )
         self.effective_frames = effective_frames
-        self.minimum_video_frames = minimum_video_frames
         self._settings = settings
 
         logger.info("==================================================")
@@ -275,8 +241,6 @@ class VideoRAMCache:
         logger.info(f"  - Videos:                    {len(unique_paths)}")
         logger.info(f"  - Configured Frames:         {configured_frames}")
         logger.info(f"  - Minimum S3D Frames:        {minimum_required_frames}")
-        logger.info(f"  - Shortest Video Frames:     {minimum_video_frames}")
-        logger.info(f"  - Shortest Video Path:       '{shortest_path}'")
         logger.info(f"  - Effective Frames:          {effective_frames}")
         logger.info(f"  - Sampling:                  one seeded random frame per temporal segment")
         logger.info(f"  - Global Seed:               {global_seed}")
@@ -288,16 +252,15 @@ class VideoRAMCache:
 
         preload_threads = max(1, preload_workers)
 
-        def load_one(video_path: str) -> Tuple[str, np.ndarray, np.ndarray]:
+        def load_one(video_path: str) -> Tuple[str, np.ndarray, np.ndarray, int]:
             key = _normalized_video_key(video_path)
-            clip, indices = _decode_video_clip(
+            clip, indices, total_frames = _decode_video_clip(
                 video_path=video_path,
-                total_frames=self.frame_counts[key],
                 frames=effective_frames,
                 image_size=image_size,
                 global_seed=global_seed,
             )
-            return key, clip, indices
+            return key, clip, indices, total_frames
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=preload_threads) as executor:
             futures = {executor.submit(load_one, path): path for path in unique_paths}
@@ -314,10 +277,11 @@ class VideoRAMCache:
             for future in iterator:
                 video_path = futures[future]
                 try:
-                    key, clip, indices = future.result()
+                    key, clip, indices, total_frames = future.result()
                 except Exception as exc:
                     raise RuntimeError(f"Failed to preload video '{video_path}': {exc}") from exc
                 self.clips[key] = clip
+                self.frame_counts[key] = total_frames
                 self.sampled_indices[key] = indices
                 self.total_bytes += clip.nbytes
 
@@ -592,7 +556,6 @@ def _save_clip_to_disk_cache(
 def _load_or_create_clip_sample(
     video_path: str,
     label: Any,
-    total_frames: int,
     frames: int,
     image_size: int,
     global_seed: int,
@@ -613,9 +576,8 @@ def _load_or_create_clip_sample(
             cached["target"] = label
             return cached
 
-    clip, _ = _decode_video_clip(
+    clip, _, _ = _decode_video_clip(
         video_path=video_path,
-        total_frames=total_frames,
         frames=frames,
         image_size=image_size,
         global_seed=global_seed,
@@ -644,6 +606,7 @@ class FishVideoDataLoader:
         batch_size: int = 8,
         preload_workers: int = -1,
         dataloader_workers: int = -1,
+        prefetch_factor: int = 2,
         cache_mode: str = "ram",
         image_size: int = 224,
         frames: int = 20,
@@ -655,6 +618,9 @@ class FishVideoDataLoader:
         self.batch_size = batch_size
         self.preload_workers = _resolve_worker_count(preload_workers)
         self.dataloader_workers = _resolve_worker_count(dataloader_workers)
+        if prefetch_factor < 1:
+            raise ValueError(f"prefetch_factor must be at least 1, got {prefetch_factor}.")
+        self.prefetch_factor = prefetch_factor
         self.cache_mode = cache_mode.lower()
         if self.cache_mode not in VALID_CACHE_MODES:
             raise ValueError(f"Invalid cache_mode='{cache_mode}'. Expected one of {sorted(VALID_CACHE_MODES)}.")
@@ -666,18 +632,20 @@ class FishVideoDataLoader:
         self.image_cache_root = DEFAULT_IMAGE_CACHE_ROOT
         self.image_cache_dir = _resolve_image_cache_dir(video_cache_dir=None, image_size=image_size)
         self.shared_ram_cache = shared_ram_cache
-        self.frame_counts: Dict[str, int] = {}
         self.effective_frames = 1
 
         self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig()
         self.splitter = FishDataSplitter(config=self.splitter_config)
         self.train_dict, self.test_dict, self.val_dict = self.splitter.split_data()
 
-        all_entries = self.train_dict + self.val_dict + self.test_dict
-        all_video_paths = [item[1] for item in all_entries if len(item) >= 3 and item[1]]
-
         if self.clip_mode:
+            self.effective_frames = _resolve_requested_frames(
+                configured_frames=self.configured_frames,
+                minimum_required_frames=self.minimum_required_frames,
+            )
             if self.cache_mode == "ram":
+                all_entries = self.train_dict + self.val_dict + self.test_dict
+                all_video_paths = [item[1] for item in all_entries if len(item) >= 3 and item[1]]
                 if self.shared_ram_cache is None:
                     self.shared_ram_cache = VideoRAMCache()
                 self.effective_frames = self.shared_ram_cache.prepare(
@@ -688,15 +656,6 @@ class FishVideoDataLoader:
                     global_seed=self.splitter_config.seed,
                     preload_workers=self.preload_workers,
                 )
-                self.frame_counts = self.shared_ram_cache.frame_counts
-            else:
-                unique_paths = sorted({_normalized_video_key(path): path for path in all_video_paths}.values())
-                self.frame_counts = _scan_video_frame_counts(unique_paths, workers=self.preload_workers)
-                self.effective_frames, _, _ = _resolve_effective_frames(
-                    configured_frames=self.configured_frames,
-                    minimum_required_frames=self.minimum_required_frames,
-                    frame_counts=self.frame_counts,
-                )
 
         start_method = multiprocessing.get_context().get_start_method()
         logger.info("==================================================")
@@ -705,7 +664,10 @@ class FishVideoDataLoader:
         logger.info(f"  - Batch Size:               {self.batch_size}")
         logger.info(f"  - Preload Workers:          {self.preload_workers}")
         logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
-        logger.info(f"  - DataLoader Prefetch:      {'disabled' if self.dataloader_workers <= 0 else 'PyTorch default'}")
+        logger.info(
+            f"  - DataLoader Prefetch:      "
+            f"{'disabled' if self.dataloader_workers <= 0 else self.prefetch_factor}"
+        )
         logger.info(f"  - Multiprocessing Method:   {start_method}")
         logger.info(f"  - Cache Mode:               {self.cache_mode}")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
@@ -835,11 +797,9 @@ class FishVideoDataLoader:
                         raise RuntimeError("S3D RAM cache was not initialized.")
                     raw_video = self.parent.shared_ram_cache.get(video_name)
                 else:
-                    key = _normalized_video_key(video_name)
                     raw_sample = _load_or_create_clip_sample(
                         video_path=video_name,
                         label=target_value,
-                        total_frames=self.parent.frame_counts[key],
                         frames=self.parent.effective_frames,
                         image_size=self.parent.image_size,
                         global_seed=self.parent.splitter_config.seed,
@@ -882,6 +842,9 @@ class FishVideoDataLoader:
         drop_last: bool = False,
     ) -> DataLoader:
         dataset = self._InnerDataset(parent=self, split=split)
+        loader_options = {}
+        if self.dataloader_workers > 0:
+            loader_options["prefetch_factor"] = self.prefetch_factor
         return DataLoader(
             dataset=dataset,
             batch_size=self.batch_size,
@@ -891,6 +854,7 @@ class FishVideoDataLoader:
             collate_fn=self.collate_fn,
             pin_memory=True,
             persistent_workers=self.dataloader_workers > 0,
+            **loader_options,
         )
 
     @staticmethod

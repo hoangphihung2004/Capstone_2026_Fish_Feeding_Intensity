@@ -1,6 +1,9 @@
 {
   "epochs": 20,
   "batch_size": 16,
+  "preload_workers": -1,
+  "dataloader_workers": -1,
+  "prefetch_factor": 2,
   "learning_rate": 1e-4,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",

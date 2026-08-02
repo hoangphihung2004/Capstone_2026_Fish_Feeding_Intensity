@@ -105,6 +105,7 @@ class VideoTrainConfig(BaseModel):
     batch_size: int = Field(default=64, description="Mini-batch size.")
     preload_workers: int = Field(default=-1, ge=-1, description="Number of threads used to preload videos into RAM. Use -1 for automatic CPU-based selection.")
     dataloader_workers: int = Field(default=-1, ge=-1, description="Number of PyTorch DataLoader workers used during training. Use -1 for automatic CPU-based selection.")
+    prefetch_factor: int = Field(default=2, ge=1, description="Number of batches prefetched by each DataLoader worker. Only applies when dataloader_workers is greater than 0.")
     learning_rate: float = Field(default=1e-3, description="Optimizer learning rate.")
     ckpt_dir: str = Field(default='checkpoint/', description="Directory to save checkpoints and CSV logs.")
     monitor: str = Field(default='accuracy', description="Metric to monitor for best model saving ('accuracy' or 'loss').")
