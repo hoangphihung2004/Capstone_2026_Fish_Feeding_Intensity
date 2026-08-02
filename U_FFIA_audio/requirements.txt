@@ -6,6 +6,7 @@ torchvision
 tqdm
 torchlibrosa
 scikit-learn
+scipy
 soundfile
 torchcodec
 matplotlib

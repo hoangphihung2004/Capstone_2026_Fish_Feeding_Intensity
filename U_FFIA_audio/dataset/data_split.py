@@ -8,7 +8,7 @@ import re
 import shutil
 from collections import Counter
 from pathlib import Path
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Set
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -31,7 +31,7 @@ from config import SplitterConfig
 
 LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
 LABEL_ORDER = [0, 1, 2, 3]
-VALID_SPLIT_STRATEGIES = {"random_sample", "time_series"}
+VALID_SPLIT_STRATEGIES = {"random_sample", "time_series", "group_random"}
 VALID_EVALUATION_MODES = {"holdout", "cross_validation"}
 
 
@@ -206,11 +206,164 @@ class BaseDataSplitter(ABC):
     def _entry_temporal_key(self, item: List[Any]) -> Tuple[Any, ...]:
         return self._temporal_path_key(self._primary_path_from_entry(item))
 
+    def _entry_group_key(self, item: List[Any]) -> str:
+        """Group all samples from one collection session to avoid same-session leakage."""
+        normalized = self._primary_path_from_entry(item).replace('\\', '/')
+        parts = Path(normalized).parts
+        date_part = parts[-4] if len(parts) >= 4 else ""
+        session_part = parts[-3] if len(parts) >= 3 else ""
+        return f"{date_part.lower()}/{session_part.lower()}"
+
     def _count_labels(self, data_list: List[List]) -> Counter:
         counts = Counter()
         for item in data_list:
             counts[self._label_from_entry(item)] += 1
         return counts
+
+    def _group_entries(self, entries: List[List]) -> Dict[str, List[List]]:
+        groups: Dict[str, List[List]] = {}
+        for item in entries:
+            groups.setdefault(self._entry_group_key(item), []).append(item)
+        return groups
+
+    def _group_label_counts(self, group_entries: Dict[str, List[List]], group_keys: List[str]) -> np.ndarray:
+        return np.array(
+            [
+                [sum(1 for item in group_entries[group_key] if self._label_from_entry(item) == label) for group_key in group_keys]
+                for label in LABEL_ORDER
+            ],
+            dtype=float,
+        )
+
+    def _solve_exact_group_holdout(self, group_entries: Dict[str, List[List]]) -> Tuple[Set[str], Set[str]]:
+        """
+        Select disjoint date_session groups for val/test with exact per-class quotas.
+        This keeps every sample from one collection session in the same split.
+        """
+        try:
+            from scipy.optimize import Bounds, LinearConstraint, milp
+        except ImportError as exc:
+            raise ImportError(
+                "split_strategy='group_random' requires scipy.optimize.milp. "
+                "Install scipy or project requirements before splitting."
+            ) from exc
+
+        group_keys = sorted(group_entries)
+        rng = np.random.RandomState(self.seed)
+        rng.shuffle(group_keys)
+        group_count = len(group_keys)
+        class_group_counts = self._group_label_counts(group_entries, group_keys)
+        target = float(self.test_sample_per_class)
+
+        objective = np.zeros(2 * group_count)
+
+        constraints = []
+        lower_bounds = []
+        upper_bounds = []
+
+        for row in class_group_counts:
+            coeff = np.zeros(2 * group_count)
+            coeff[:group_count] = row
+            constraints.append(coeff)
+            lower_bounds.append(target)
+            upper_bounds.append(target)
+
+        for row in class_group_counts:
+            coeff = np.zeros(2 * group_count)
+            coeff[group_count:] = row
+            constraints.append(coeff)
+            lower_bounds.append(target)
+            upper_bounds.append(target)
+
+        for idx in range(group_count):
+            coeff = np.zeros(2 * group_count)
+            coeff[idx] = 1
+            coeff[group_count + idx] = 1
+            constraints.append(coeff)
+            lower_bounds.append(0)
+            upper_bounds.append(1)
+
+        linear_constraint = LinearConstraint(
+            np.vstack(constraints),
+            np.array(lower_bounds),
+            np.array(upper_bounds),
+        )
+        result = milp(
+            c=objective,
+            integrality=np.ones(2 * group_count),
+            bounds=Bounds(np.zeros(2 * group_count), np.ones(2 * group_count)),
+            constraints=linear_constraint,
+            options={"time_limit": 120, "mip_rel_gap": 0},
+        )
+
+        if not result.success:
+            raise ValueError(
+                "Could not find an exact group_random holdout split with "
+                f"{self.test_sample_per_class} samples per class for both val and test. "
+                f"MILP status={result.status}, message={result.message}"
+            )
+
+        selected = np.rint(result.x).astype(int)
+        val_groups = {group_keys[idx] for idx in np.where(selected[:group_count] == 1)[0]}
+        test_groups = {group_keys[idx] for idx in np.where(selected[group_count:] == 1)[0]}
+        return val_groups, test_groups
+
+    def _split_entries_group_holdout(self, all_entries: List[List]) -> Tuple[List[List], List[List], List[List]]:
+        group_entries = self._group_entries(all_entries)
+        val_groups, test_groups = self._solve_exact_group_holdout(group_entries)
+
+        train_dict = [item for item in all_entries if self._entry_group_key(item) not in val_groups and self._entry_group_key(item) not in test_groups]
+        test_dict = [item for item in all_entries if self._entry_group_key(item) in test_groups]
+        val_dict = [item for item in all_entries if self._entry_group_key(item) in val_groups]
+
+        logger.info(
+            f"group_random holdout selected groups: train={len(set(self._entry_group_key(item) for item in train_dict))}, "
+            f"test={len(test_groups)}, val={len(val_groups)}"
+        )
+        self._validate_split_policy(train_dict, test_dict, val_dict)
+        return train_dict, test_dict, val_dict
+
+    def _group_random_cross_validation_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
+        try:
+            from sklearn.model_selection import StratifiedGroupKFold
+        except ImportError as exc:
+            raise ImportError(
+                "split_strategy='group_random' with cross_validation requires scikit-learn."
+            ) from exc
+
+        ordered_entries = sorted(all_entries, key=self._entry_sample_key)
+        labels = np.array([self._label_from_entry(item) for item in ordered_entries])
+        groups = np.array([self._entry_group_key(item) for item in ordered_entries])
+        indexes = np.arange(len(ordered_entries))
+
+        outer = StratifiedGroupKFold(n_splits=self.num_folds, shuffle=True, random_state=self.seed)
+        outer_splits = list(outer.split(indexes, labels, groups))
+        dev_idx, test_idx = outer_splits[int(self.fold_index)]
+
+        dev_entries = [ordered_entries[int(idx)] for idx in dev_idx]
+        dev_labels = np.array([self._label_from_entry(item) for item in dev_entries])
+        dev_groups = np.array([self._entry_group_key(item) for item in dev_entries])
+        dev_indexes = np.arange(len(dev_entries))
+
+        val_n_splits = max(2, int(round(1.0 / self.cv_val_ratio)))
+        val_n_splits = min(val_n_splits, len(set(dev_groups)))
+        inner = StratifiedGroupKFold(
+            n_splits=val_n_splits,
+            shuffle=True,
+            random_state=self.seed + 10000 + int(self.fold_index),
+        )
+        inner_splits = list(inner.split(dev_indexes, dev_labels, dev_groups))
+        train_dev_idx, val_dev_idx = inner_splits[int(self.fold_index) % len(inner_splits)]
+
+        train_entries = [dev_entries[int(idx)] for idx in train_dev_idx]
+        val_entries = [dev_entries[int(idx)] for idx in val_dev_idx]
+        test_entries = [ordered_entries[int(idx)] for idx in test_idx]
+
+        return (
+            {self._entry_sample_key(item) for item in train_entries},
+            {self._entry_sample_key(item) for item in test_entries},
+            {self._entry_sample_key(item) for item in val_entries},
+        )
 
     @staticmethod
     def _sample_key_set(data_list: List[List], sample_key_fn) -> set:
@@ -261,6 +414,9 @@ class BaseDataSplitter(ABC):
 
     def _cross_validation_expected_splits(self, all_entries: List[List]) -> Tuple[set, set, set]:
         """Build expected sample-key sets for one stratified outer CV fold."""
+        if self.split_strategy == "group_random":
+            return self._group_random_cross_validation_expected_splits(all_entries)
+
         fold_index = int(self.fold_index)
         train_entries: List[List] = []
         test_entries: List[List] = []
@@ -336,6 +492,18 @@ class BaseDataSplitter(ABC):
         total_counts = Counter()
         for counts in counts_by_split.values():
             total_counts.update(counts)
+
+        if self.split_strategy == "group_random":
+            seen_groups: Dict[str, str] = {}
+            for split_name, data_list in splits.items():
+                for item in data_list:
+                    group_key = self._entry_group_key(item)
+                    if group_key in seen_groups and seen_groups[group_key] != split_name:
+                        raise ValueError(
+                            f"Leakage detected: group '{group_key}' appears in both "
+                            f"{seen_groups[group_key]} and {split_name}."
+                        )
+                    seen_groups[group_key] = split_name
 
         if self.evaluation_mode == "holdout":
             for split_name in ["test", "val"]:
@@ -752,6 +920,28 @@ class FishDataSplitter(BaseDataSplitter):
 
             logger.info("==================================================")
             logger.info("Cross-validation dataset splitting completed successfully!")
+            logger.info(f"- Train samples: {len(train_dict)}")
+            logger.info(f"- Test samples:  {len(test_dict)}")
+            logger.info(f"- Val samples:   {len(val_dict)}")
+            if len(train_dict) > 0:
+                logger.info(f"  * First generated train sample: {train_dict[0]}")
+            if len(test_dict) > 0:
+                logger.info(f"  * First generated test sample:  {test_dict[0]}")
+            if len(val_dict) > 0:
+                logger.info(f"  * First generated val sample:   {val_dict[0]}")
+            logger.info("==================================================")
+
+            if self.save_results:
+                self._save_splits(train_dict, test_dict, val_dict, splits_dir)
+
+            return train_dict, test_dict, val_dict
+
+        if self.split_strategy == "group_random":
+            logger.info("Building group_random holdout split with group_key=date_session...")
+            train_dict, test_dict, val_dict = self._split_entries_group_holdout(build_entries())
+
+            logger.info("==================================================")
+            logger.info("group_random holdout dataset splitting completed successfully!")
             logger.info(f"- Train samples: {len(train_dict)}")
             logger.info(f"- Test samples:  {len(test_dict)}")
             logger.info(f"- Val samples:   {len(val_dict)}")

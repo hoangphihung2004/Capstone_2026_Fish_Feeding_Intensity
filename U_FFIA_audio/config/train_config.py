@@ -78,7 +78,7 @@ class SplitterConfig(BaseModel):
     )
     split_strategy: str = Field(
         default="random_sample",
-        description="Dataset split strategy: 'random_sample' preserves the legacy seeded per-class random split; 'time_series' sorts each class by time while keeping the same per-class val/test quotas."
+        description="Dataset split strategy: 'random_sample' preserves the legacy seeded per-class random split; 'time_series' sorts each class by time while keeping the same per-class val/test quotas; 'group_random' splits whole date_session groups to prevent same-session leakage."
     )
     evaluation_mode: str = Field(
         default="holdout",
