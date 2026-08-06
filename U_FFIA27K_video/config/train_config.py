@@ -36,7 +36,7 @@ class ModelConfig(BaseModel):
     """
     backbone: str = Field(
         default="MobileNetV2",
-        description="Backbone class name exported by U_FFIA_video.models."
+        description="Backbone class name exported by U_FFIA27K_video.models."
     )
     pretrained: bool = Field(
         default=True,
