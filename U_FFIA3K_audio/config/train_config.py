@@ -64,7 +64,7 @@ class SplitterConfig(BaseModel):
         description="Random seed for split reproducibility."
     )
     test_sample_per_class: int = Field(
-        default=150,
+        default=50,
         gt=0,
         description="Number of samples per class designated for test and validation subsets."
     )
