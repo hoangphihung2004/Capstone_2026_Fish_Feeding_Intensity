@@ -42,7 +42,7 @@ class ModelConfig(BaseModel):
     """
     backbone: str = Field(
         default="Cnn14MobileV2",
-        description="Backbone class name exported by U_FFIA_audio.models."
+        description="Backbone class name exported by U_FFIA27K_audio.models."
     )
     pretrained: bool = Field(
         default=False,
@@ -56,7 +56,7 @@ class SplitterConfig(BaseModel):
     """
     dataset_path: str = Field(
         default='/marimo/Fish_Feeding_Intensity_Dataset',
-        description="Absolute path to the raw U_FFIA dataset directory."
+        description="Absolute path to the raw U_FFIA27K dataset directory."
     )
     seed: int = Field(
         default=25,
