@@ -1,5 +1,6 @@
 {
   "train_config_path": "config/train_config.json",
+  "artifact_upload_config_path": "config/artifact_upload_config.json",
   "checkpoint_path": "",
   "output_dir": "outputs",
   "batch_size": 128,
