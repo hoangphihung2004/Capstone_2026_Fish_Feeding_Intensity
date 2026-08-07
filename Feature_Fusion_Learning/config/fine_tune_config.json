@@ -1,0 +1,14 @@
+{
+  "dataset_tag": "AFFIA3K",
+  "feature_mode": "audio_video",
+  "audio_feature_root": "/marimo/U_FFIA3K_audio/outputs",
+  "video_feature_root": "/marimo/U_FFIA3K_video/outputs",
+  "audio_model_name": "CNN6",
+  "video_model_name": "EfficientNetB0",
+  "evaluation_mode": "both",
+  "folds": "all",
+  "num_folds": 5,
+  "seed": 42,
+  "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
+  "output_dir": "outputs"
+}
