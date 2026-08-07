@@ -1,4 +1,5 @@
 import csv
+import concurrent.futures
 import copy
 import hashlib
 import json
@@ -251,17 +252,56 @@ def load_checkpoint_splits(splits_dir: Path, modality: str) -> Tuple[List[List[A
 
 
 class AudioFeatureDataset(Dataset):
-    def __init__(self, entries: List[List[Any]], sample_rate: int) -> None:
+    def __init__(self, entries: List[List[Any]], sample_rate: int, cache_audio: bool, num_workers: int) -> None:
         self.entries = entries
         self.sample_rate = sample_rate
+        self.cache_audio = cache_audio
+        self.num_workers = max(int(num_workers), 1)
+        self.waveform_cache: List[np.ndarray] | None = None
+        if self.cache_audio:
+            self._preload_audio()
+
+    def _preload_audio(self) -> None:
+        logger.info(f"FEATURE_EXTRACTION_STAGE: PRELOAD_AUDIO_RAM_START - samples={len(self.entries)}")
+
+        def load_one(index: int) -> Tuple[int, np.ndarray]:
+            row = entry_to_base_row(self.entries[index])
+            waveform = FishVoiceDataLoader.load_audio(row["input_path"], sr=self.sample_rate)
+            return index, waveform.numpy()
+
+        cache: List[np.ndarray | None] = [None] * len(self.entries)
+        total_bytes = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = {executor.submit(load_one, index): index for index in range(len(self.entries))}
+            for future in tqdm(
+                concurrent.futures.as_completed(futures),
+                total=len(futures),
+                desc="Preloading audio to RAM",
+                unit="file",
+                dynamic_ncols=True,
+            ):
+                index, waveform = future.result()
+                cache[index] = waveform
+                total_bytes += waveform.nbytes
+
+        if any(item is None for item in cache):
+            raise RuntimeError("Audio RAM preload did not fill every cache slot.")
+        self.waveform_cache = [item for item in cache if item is not None]
+        cache_size_mb = total_bytes / (1024 ** 2)
+        logger.info(
+            f"FEATURE_EXTRACTION_STAGE: PRELOAD_AUDIO_RAM_DONE - samples={len(self.waveform_cache)}, cache_size_mb={cache_size_mb:.1f}"
+        )
 
     def __len__(self) -> int:
         return len(self.entries)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         row = entry_to_base_row(self.entries[index])
-        waveform = FishVoiceDataLoader.load_audio(row["input_path"], sr=self.sample_rate)
-        return {**row, "waveform": waveform.numpy()}
+        if self.waveform_cache is not None:
+            waveform = self.waveform_cache[index]
+        else:
+            waveform = FishVoiceDataLoader.load_audio(row["input_path"], sr=self.sample_rate).numpy()
+        return {**row, "waveform": waveform}
 
 
 def collate_audio(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -352,7 +392,12 @@ def extract_all_features(
     device: torch.device,
     run_name: str,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]], str, int]:
-    dataset = AudioFeatureDataset(entries=entries, sample_rate=config.audio_features.sample_rate)
+    dataset = AudioFeatureDataset(
+        entries=entries,
+        sample_rate=config.audio_features.sample_rate,
+        cache_audio=bool(feature_cfg.get("cache_audio", False)),
+        num_workers=int(feature_cfg.get("num_workers", 0)),
+    )
     loader = DataLoader(
         dataset,
         batch_size=int(feature_cfg.get("batch_size", config.batch_size)),
