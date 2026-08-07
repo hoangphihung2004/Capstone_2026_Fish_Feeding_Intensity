@@ -275,11 +275,17 @@ def load_checkpoint(model: torch.nn.Module, checkpoint_path: Path, device: torch
     if not isinstance(state_dict, dict):
         raise ValueError(f"Unsupported checkpoint format: {checkpoint_path}")
     cleaned = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
-    missing, unexpected = model.load_state_dict(cleaned, strict=False)
-    if missing:
-        logger.warning(f"Missing checkpoint keys: {missing[:10]}{'...' if len(missing) > 10 else ''}")
-    if unexpected:
-        logger.warning(f"Unexpected checkpoint keys: {unexpected[:10]}{'...' if len(unexpected) > 10 else ''}")
+    logger.info("CHECKPOINT_MATCH_STATUS: CHECKING_STRICT_100_PERCENT_MATCH")
+    logger.info(f"Checkpoint path: {checkpoint_path}")
+    try:
+        model.load_state_dict(cleaned, strict=True)
+    except RuntimeError as exc:
+        logger.error("CHECKPOINT_MATCH_STATUS: FAILED_STRICT_100_PERCENT_MATCH")
+        logger.error("Checkpoint keys must match the selected model architecture exactly.")
+        raise RuntimeError(
+            f"Checkpoint does not match the selected model 100%: {checkpoint_path}"
+        ) from exc
+    logger.info("CHECKPOINT_MATCH_STATUS: STRICT_100_PERCENT_MATCH")
     logger.info(f"Loaded checkpoint: {checkpoint_path}")
 
 
