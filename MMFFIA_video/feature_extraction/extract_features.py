@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -370,6 +371,7 @@ def extract_all_features(
     config: TrainConfig,
     feature_cfg: Dict[str, Any],
     device: torch.device,
+    run_name: str,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]], str, int]:
     dataset = VideoFeatureDataset(entries=entries, image_size=config.video_features.image_size)
     loader = DataLoader(
@@ -387,7 +389,7 @@ def extract_all_features(
     metadata: List[Dict[str, Any]] = []
     index = 0
     with torch.no_grad():
-        for batch in loader:
+        for batch in tqdm(loader, desc=run_name, unit="batch", dynamic_ncols=True):
             image = batch["image"].to(device)
             hook.features = None
             _ = model(image)
@@ -516,13 +518,17 @@ def write_feature_run(
     logger.info(f"CHECKPOINT_SELECTED: {checkpoint_path}")
     load_checkpoint(model, checkpoint_path, device)
 
+    run_name = f"Extracting {mode}" if fold is None else f"Extracting {mode} fold_{fold}"
+    logger.info(f"FEATURE_EXTRACTION_STAGE: START_EXTRACT - {run_name}")
     features, metadata, feature_name, feature_dim = extract_all_features(
         model=model,
         entries=combined_entries,
         config=config,
         feature_cfg=feature_cfg,
         device=device,
+        run_name=run_name,
     )
+    logger.info(f"FEATURE_EXTRACTION_STAGE: END_EXTRACT - {run_name}")
     rows = attach_split_columns(
         metadata=metadata,
         mode=mode,
@@ -531,6 +537,7 @@ def write_feature_run(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"FEATURE_EXTRACTION_STAGE: SAVE_OUTPUT - {output_dir}")
     np.save(output_dir / "features.npy", features)
     write_csv(output_dir / "metadata.csv", rows, feature_metadata_fieldnames(rows))
 
@@ -566,6 +573,8 @@ def write_feature_run(
     if hasattr(config, "video_features"):
         feature_info["image_size"] = config.video_features.image_size
     write_json(output_dir / "feature_info.json", feature_info)
+    logger.info(f"FEATURE_OUTPUT_DIR: {output_dir}")
+    logger.info("FEATURE_EXTRACTION_STAGE: DONE_RUN")
 
 
 def main() -> None:
