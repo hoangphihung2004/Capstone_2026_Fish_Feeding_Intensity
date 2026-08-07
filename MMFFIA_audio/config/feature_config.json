@@ -1,0 +1,12 @@
+{
+  "train_config_path": "config/train_config.json",
+  "checkpoint_path": "",
+  "output_dir": "outputs",
+  "batch_size": 128,
+  "num_workers": 0,
+  "device": "cuda",
+  "seed": 42,
+  "num_folds": 5,
+  "cv_val_ratio": 0.2,
+  "cache_audio": false
+}
