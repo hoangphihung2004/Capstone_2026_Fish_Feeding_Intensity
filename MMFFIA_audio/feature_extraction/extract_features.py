@@ -241,9 +241,37 @@ def build_model(config: TrainConfig, device: torch.device) -> AudioModel:
     return model
 
 
-def default_checkpoint_path(config: TrainConfig, model: AudioModel) -> Path:
+def default_checkpoint_path(config: TrainConfig, model: AudioModel, fold_index: int | None = None) -> Path:
     model_name = model.backbone.get_name() if hasattr(model.backbone, "get_name") else model.backbone.__class__.__name__
-    return PROJECT_ROOT / (config.ckpt_dir if config.ckpt_dir else "checkpoint") / model_name / "audio_best.pt"
+    base_dir = PROJECT_ROOT / (config.ckpt_dir if config.ckpt_dir else "checkpoint")
+    model_dir = base_dir if base_dir.name == model_name else base_dir / model_name
+    if fold_index is not None:
+        return model_dir / f"fold_{fold_index:02d}" / "audio_best.pt"
+    return model_dir / "audio_best.pt"
+
+
+def resolve_checkpoint_path(
+    feature_cfg: Dict[str, Any],
+    config: TrainConfig,
+    model: AudioModel,
+    fold_index: int | None = None,
+) -> Path:
+    ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
+    if ckpt_value:
+        if fold_index is not None:
+            if "{fold" not in ckpt_value and "{fold_index" not in ckpt_value:
+                raise ValueError(
+                    "checkpoint_path must be a fold-aware template for cross-validation, "
+                    "for example 'checkpoint/model/fold_{fold_index:02d}/audio_best.pt'."
+                )
+            ckpt_value = ckpt_value.format(fold=fold_index, fold_index=fold_index)
+        checkpoint_path = Path(ckpt_value)
+    else:
+        checkpoint_path = default_checkpoint_path(config, model, fold_index=fold_index)
+
+    if not checkpoint_path.is_absolute():
+        checkpoint_path = PROJECT_ROOT / checkpoint_path
+    return checkpoint_path
 
 
 def load_checkpoint(model: torch.nn.Module, checkpoint_path: Path, device: torch.device) -> None:
@@ -337,61 +365,113 @@ def summarize_split(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"counts": counts, "class_counts": class_counts}
 
 
-def write_split_metadata(
-    output_dir: Path,
-    mode: str,
-    fold: int | None,
-    split_entries_map: Dict[str, List[List[Any]]],
-    all_index: Dict[str, Dict[str, Any]],
-    config: TrainConfig,
-) -> None:
-    rows: List[Dict[str, Any]] = []
-    split_id = f"{mode}_fold_{fold}" if fold is not None else mode
-    for split in SPLIT_ORDER:
-        for entry in split_entries_map[split]:
-            base = entry_to_base_row(entry)
-            sample_key = base["sample_key"]
-            if sample_key not in all_index:
-                raise KeyError(f"Split sample is missing from all features: {sample_key}")
-            feature_index = all_index[sample_key]["feature_index"]
-            rows.append(
-                {
-                    "feature_index": feature_index,
-                    "split_id": split_id,
-                    "mode": mode,
-                    "fold": "" if fold is None else fold,
-                    "split": split,
-                    "sample_key": sample_key,
-                    "label": base["label"],
-                    "label_id": base["label_id"],
-                    "input_path": base["input_path"],
-                    "pair_path": base["pair_path"],
-                    "wave_path": base["wave_path"],
-                }
-            )
-
-    if len({(row["split"], row["sample_key"]) for row in rows}) != len(rows):
-        raise ValueError(f"Duplicate split/sample_key rows detected for {split_id}.")
-
+def feature_metadata_fieldnames(rows: List[Dict[str, Any]]) -> List[str]:
     fieldnames = [
         "feature_index",
         "split_id",
         "mode",
         "fold",
         "split",
+        "modality",
         "sample_key",
         "label",
         "label_id",
         "input_path",
         "pair_path",
-        "wave_path",
     ]
-    write_csv(output_dir / "metadata.csv", rows, fieldnames)
+    if any("wave_path" in row for row in rows):
+        fieldnames.append("wave_path")
+    return fieldnames
+
+
+def attach_split_columns(
+    metadata: List[Dict[str, Any]],
+    mode: str,
+    fold: int | None,
+    split_entries_map: Dict[str, List[List[Any]]],
+) -> List[Dict[str, Any]]:
+    split_by_key: Dict[str, str] = {}
+    for split in SPLIT_ORDER:
+        for entry in split_entries_map[split]:
+            base = entry_to_base_row(entry)
+            sample_key = base["sample_key"]
+            if sample_key in split_by_key:
+                raise ValueError(f"Duplicate sample_key across splits for {mode}: {sample_key}")
+            split_by_key[sample_key] = split
+
+    split_id = f"{mode}_fold_{fold}" if fold is not None else mode
+    rows: List[Dict[str, Any]] = []
+    for row in metadata:
+        sample_key = row["sample_key"]
+        if sample_key not in split_by_key:
+            raise KeyError(f"Extracted sample is missing from split map: {sample_key}")
+        rows.append(
+            {
+                "feature_index": row["feature_index"],
+                "split_id": split_id,
+                "mode": mode,
+                "fold": "" if fold is None else fold,
+                "split": split_by_key[sample_key],
+                "modality": row["modality"],
+                "sample_key": row["sample_key"],
+                "label": row["label"],
+                "label_id": row["label_id"],
+                "input_path": row["input_path"],
+                "pair_path": row["pair_path"],
+                **({"wave_path": row["wave_path"]} if "wave_path" in row else {}),
+            }
+        )
+    return rows
+
+
+def write_feature_run(
+    output_dir: Path,
+    mode: str,
+    fold: int | None,
+    split_entries_map: Dict[str, List[List[Any]]],
+    config: TrainConfig,
+    feature_cfg: Dict[str, Any],
+    device: torch.device,
+) -> None:
+    combined_entries: List[List[Any]] = []
+    for split in SPLIT_ORDER:
+        combined_entries.extend(split_entries_map[split])
+
+    logger.info("==================================================")
+    logger.info(f"FEATURE_EXTRACTION_MODE: {mode}")
+    if fold is not None:
+        logger.info(f"FOLD_INDEX: {fold}")
+    logger.info(f"Samples to extract for this run: {len(combined_entries)}")
+    logger.info("==================================================")
+
+    model = build_model(config, device)
+    checkpoint_path = resolve_checkpoint_path(feature_cfg, config, model, fold_index=fold)
+    logger.info(f"CHECKPOINT_SELECTED: {checkpoint_path}")
+    load_checkpoint(model, checkpoint_path, device)
+
+    features, metadata, feature_name, feature_dim = extract_all_features(
+        model=model,
+        entries=combined_entries,
+        config=config,
+        feature_cfg=feature_cfg,
+        device=device,
+    )
+    rows = attach_split_columns(
+        metadata=metadata,
+        mode=mode,
+        fold=fold,
+        split_entries_map=split_entries_map,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    np.save(output_dir / "features.npy", features)
+    write_csv(output_dir / "metadata.csv", rows, feature_metadata_fieldnames(rows))
+
     summary = summarize_split(rows)
     write_json(
         output_dir / "split_info.json",
         {
-            "split_id": split_id,
+            "split_id": f"{mode}_fold_{fold}" if fold is not None else mode,
             "mode": mode,
             "fold": fold,
             "seed": config.dataset_splitter.seed,
@@ -405,83 +485,59 @@ def write_split_metadata(
             **summary,
         },
     )
+    feature_info = {
+        "modality": rows[0]["modality"] if rows else "",
+        "backbone": config.model.backbone,
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_match_status": "STRICT_100_PERCENT_MATCH",
+        "feature_name": feature_name,
+        "feature_dim": feature_dim,
+        "num_samples": int(features.shape[0]),
+        "feature_shape": list(features.shape),
+        "dataset_path": config.dataset_splitter.dataset_path,
+    }
+    if hasattr(config, "video_features"):
+        feature_info["image_size"] = config.video_features.image_size
+    write_json(output_dir / "feature_info.json", feature_info)
 
 
 def main() -> None:
     feature_cfg = load_feature_config()
-    base_config = make_train_config(feature_cfg, mode="holdout")
     requested_device = str(feature_cfg.get("device", "cuda"))
     device = torch.device("cuda" if requested_device == "cuda" and torch.cuda.is_available() else "cpu")
     output_root = PROJECT_ROOT / feature_cfg.get("output_dir", "outputs")
 
     holdout_train, holdout_val, holdout_test, holdout_config = split_entries(feature_cfg, mode="holdout")
-    all_entries = unique_entries(holdout_train + holdout_val + holdout_test)
-    logger.info(f"Unique samples for all-feature extraction: {len(all_entries)}")
-
-    model = build_model(base_config, device)
-    ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
-    checkpoint_path = Path(ckpt_value) if ckpt_value else default_checkpoint_path(base_config, model)
-    if not checkpoint_path.is_absolute():
-        checkpoint_path = PROJECT_ROOT / checkpoint_path
-    load_checkpoint(model, checkpoint_path, device)
-
-    features, all_metadata, feature_name, feature_dim = extract_all_features(
-        model=model,
-        entries=all_entries,
-        config=base_config,
+    write_feature_run(
+        output_dir=output_root / "holdout",
+        mode="holdout",
+        fold=None,
+        split_entries_map={"train": holdout_train, "val": holdout_val, "test": holdout_test},
+        config=holdout_config,
         feature_cfg=feature_cfg,
         device=device,
     )
 
-    all_dir = output_root / "all"
-    all_dir.mkdir(parents=True, exist_ok=True)
-    np.save(all_dir / "features.npy", features)
-    write_csv(
-        all_dir / "metadata.csv",
-        all_metadata,
-        ["feature_index", "modality", "sample_key", "label", "label_id", "input_path", "pair_path", "wave_path"],
-    )
-    write_json(
-        all_dir / "feature_info.json",
-        {
-            "modality": "audio",
-            "backbone": base_config.model.backbone,
-            "checkpoint_path": str(checkpoint_path),
-            "feature_name": feature_name,
-            "feature_dim": feature_dim,
-            "num_samples": int(features.shape[0]),
-            "feature_shape": list(features.shape),
-            "dataset_path": base_config.dataset_splitter.dataset_path,
-        },
-    )
-
-    all_index = {row["sample_key"]: row for row in all_metadata}
-    write_split_metadata(
-        output_root / "holdout",
-        mode="holdout",
-        fold=None,
-        split_entries_map={"train": holdout_train, "val": holdout_val, "test": holdout_test},
-        all_index=all_index,
-        config=holdout_config,
-    )
-
     cv_root = output_root / "cross_validation"
-    for fold_index in range(base_config.dataset_splitter.num_folds):
+    for fold_index in range(holdout_config.dataset_splitter.num_folds):
         train_entries, val_entries, test_entries, fold_config = split_entries(
             feature_cfg, mode="cross_validation", fold_index=fold_index
         )
-        write_split_metadata(
-            cv_root / f"fold_{fold_index}",
+        write_feature_run(
+            output_dir=cv_root / f"fold_{fold_index}",
             mode="cross_validation",
             fold=fold_index,
             split_entries_map={"train": train_entries, "val": val_entries, "test": test_entries},
-            all_index=all_index,
             config=fold_config,
+            feature_cfg=feature_cfg,
+            device=device,
         )
 
     logger.info(f"Feature extraction completed successfully. Output: {output_root}")
     artifact_upload_config = load_artifact_upload_config(feature_cfg)
-    upload_features_artifact_if_enabled(artifact_upload_config, base_config)
+    artifact_config = make_train_config(feature_cfg, mode="holdout")
+    artifact_config.dataset_splitter.evaluation_mode = "holdout_cross_validation"
+    upload_features_artifact_if_enabled(artifact_upload_config, artifact_config)
 
 
 if __name__ == "__main__":
