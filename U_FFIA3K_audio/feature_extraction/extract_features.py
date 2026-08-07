@@ -256,6 +256,17 @@ def load_checkpoint_splits(splits_dir: Path, modality: str) -> Tuple[List[List[A
     return train_entries, val_entries, test_entries
 
 
+def resolve_num_workers(value: int) -> int:
+    if value >= 0:
+        return value
+    max_cpu = os.cpu_count()
+    if max_cpu is None or max_cpu <= 0:
+        return 0
+    if max_cpu == 2:
+        return max_cpu // 2
+    return max_cpu - 1
+
+
 class AudioFeatureDataset(Dataset):
     def __init__(self, entries: List[List[Any]], sample_rate: int, cache_audio: bool, num_workers: int) -> None:
         self.entries = entries
@@ -397,17 +408,19 @@ def extract_all_features(
     device: torch.device,
     run_name: str,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]], str, int]:
+    num_workers = resolve_num_workers(int(feature_cfg.get("num_workers", 0)))
+    logger.info(f"Resolved feature extraction workers: {num_workers}")
     dataset = AudioFeatureDataset(
         entries=entries,
         sample_rate=config.audio_features.sample_rate,
         cache_audio=bool(feature_cfg.get("cache_audio", False)),
-        num_workers=int(feature_cfg.get("num_workers", 0)),
+        num_workers=num_workers,
     )
     loader = DataLoader(
         dataset,
         batch_size=int(feature_cfg.get("batch_size", config.batch_size)),
         shuffle=False,
-        num_workers=int(feature_cfg.get("num_workers", 0)),
+        num_workers=num_workers,
         collate_fn=collate_audio,
         pin_memory=device.type == "cuda",
     )
