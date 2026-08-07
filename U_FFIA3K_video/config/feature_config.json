@@ -11,7 +11,7 @@
   "use_checkpoint_splits": true,
   "output_dir": "outputs",
   "batch_size": 128,
-  "num_workers": 4,
+  "num_workers": -1,
   "device": "cuda",
   "seed": 42,
   "test_sample_per_class": 50,
