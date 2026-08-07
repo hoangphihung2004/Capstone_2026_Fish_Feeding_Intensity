@@ -1,4 +1,5 @@
-﻿import csv
+import csv
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -250,18 +251,56 @@ def load_checkpoint_splits(splits_dir: Path, modality: str) -> Tuple[List[List[A
 
 
 class VideoFeatureDataset(Dataset):
-    def __init__(self, entries: List[List[Any]], image_size: int) -> None:
+    def __init__(self, entries: List[List[Any]], image_size: int, cache_mode: str, num_workers: int) -> None:
         self.entries = entries
         self.image_size = image_size
+        self.cache_mode = cache_mode.lower()
+        self.num_workers = max(int(num_workers), 1)
+        self.image_cache: List[np.ndarray] | None = None
         self.transform = VideoTransform.get_transforms(image_size=image_size)["test"]
+        if self.cache_mode == "ram":
+            self._preload_images_to_ram()
+
+    def _read_row(self, index: int) -> Tuple[int, np.ndarray]:
+        row = entry_to_base_row(self.entries[index])
+        sample = _read_image(row["input_path"], row["label_id"], self.image_size)
+        return index, sample["image_form"]
+
+    def _preload_images_to_ram(self) -> None:
+        logger.info(f"FEATURE_EXTRACTION_STAGE: PRELOAD_VIDEO_RAM_START - samples={len(self.entries)}")
+        cache: List[np.ndarray | None] = [None] * len(self.entries)
+        total_bytes = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = {executor.submit(self._read_row, index): index for index in range(len(self.entries))}
+            for future in tqdm(
+                concurrent.futures.as_completed(futures),
+                total=len(futures),
+                desc="Preloading video frames to RAM",
+                unit="file",
+                dynamic_ncols=True,
+            ):
+                index, image = future.result()
+                cache[index] = image
+                total_bytes += image.nbytes
+
+        if any(item is None for item in cache):
+            raise RuntimeError("Video RAM preload did not fill every cache slot.")
+        self.image_cache = [item for item in cache if item is not None]
+        cache_size_mb = total_bytes / (1024 ** 2)
+        logger.info(
+            f"FEATURE_EXTRACTION_STAGE: PRELOAD_VIDEO_RAM_DONE - samples={len(self.image_cache)}, cache_size_mb={cache_size_mb:.1f}"
+        )
 
     def __len__(self) -> int:
         return len(self.entries)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         row = entry_to_base_row(self.entries[index])
-        sample = _read_image(row["input_path"], row["label_id"], self.image_size)
-        image = self.transform(sample["image_form"])
+        if self.image_cache is not None:
+            image_form = self.image_cache[index]
+        else:
+            _, image_form = self._read_row(index)
+        image = self.transform(image_form)
         return {**row, "image": image}
 
 
@@ -373,7 +412,12 @@ def extract_all_features(
     device: torch.device,
     run_name: str,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]], str, int]:
-    dataset = VideoFeatureDataset(entries=entries, image_size=config.video_features.image_size)
+    dataset = VideoFeatureDataset(
+        entries=entries,
+        image_size=config.video_features.image_size,
+        cache_mode=str(feature_cfg.get("cache_mode", "none")),
+        num_workers=int(feature_cfg.get("num_workers", 0)),
+    )
     loader = DataLoader(
         dataset,
         batch_size=int(feature_cfg.get("batch_size", config.batch_size)),
