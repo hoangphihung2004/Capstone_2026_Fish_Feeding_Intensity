@@ -1,7 +1,10 @@
-﻿{
+{
   "train_config_path": "config/train_config.json",
   "artifact_upload_config_path": "config/artifact_upload_config.json",
   "checkpoint_path": "",
+  "holdout_checkpoint_path": "",
+  "cross_validation_checkpoint_dir": "",
+  "use_checkpoint_splits": true,
   "output_dir": "outputs",
   "batch_size": 128,
   "num_workers": 0,

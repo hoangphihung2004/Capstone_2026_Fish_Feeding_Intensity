@@ -199,6 +199,48 @@ def split_entries(feature_cfg: Dict[str, Any], mode: str, fold_index: int | None
     return train_entries, val_entries, test_entries, config
 
 
+def csv_value(row: Dict[str, str], names: Tuple[str, ...]) -> str:
+    for name in names:
+        value = row.get(name)
+        if value:
+            return value
+    return ""
+
+
+def load_split_csv(split_csv: Path, modality: str) -> List[List[Any]]:
+    if not split_csv.exists():
+        raise FileNotFoundError(f"Missing checkpoint split CSV: {split_csv}")
+
+    entries: List[List[Any]] = []
+    with split_csv.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            label = int(row["label"])
+            audio_path = csv_value(row, ("audio_path", "input_path", "path"))
+            image_path = csv_value(row, ("image_path", "video_path", "pair_path"))
+            wave_path = csv_value(row, ("wave_path",))
+
+            if modality == "audio":
+                if not audio_path:
+                    raise ValueError(f"Missing audio_path in {split_csv}")
+                entries.append([audio_path, image_path, wave_path, label] if wave_path else [audio_path, image_path, label])
+            else:
+                if not image_path:
+                    image_path = csv_value(row, ("video_name", "image_name"))
+                if not image_path:
+                    raise ValueError(f"Missing image/video path in {split_csv}")
+                entries.append([audio_path, image_path, wave_path, label] if wave_path else [audio_path, image_path, label])
+    return entries
+
+
+def load_checkpoint_splits(splits_dir: Path, modality: str) -> Tuple[List[List[Any]], List[List[Any]], List[List[Any]]]:
+    logger.info(f"CHECKPOINT_SPLITS_SELECTED: {splits_dir}")
+    train_entries = load_split_csv(splits_dir / "train.csv", modality=modality)
+    val_entries = load_split_csv(splits_dir / "val.csv", modality=modality)
+    test_entries = load_split_csv(splits_dir / "test.csv", modality=modality)
+    return train_entries, val_entries, test_entries
+
+
 class VideoFeatureDataset(Dataset):
     def __init__(self, entries: List[List[Any]], image_size: int) -> None:
         self.entries = entries
@@ -277,18 +319,26 @@ def resolve_checkpoint_path(
     model: VideoModel,
     fold_index: int | None = None,
 ) -> Path:
-    ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
-    if ckpt_value:
-        if fold_index is not None:
-            if "{fold" not in ckpt_value and "{fold_index" not in ckpt_value:
-                raise ValueError(
-                    "checkpoint_path must be a fold-aware template for cross-validation, "
-                    "for example 'checkpoint/model/fold_{fold_index:02d}/video_best.pt'."
-                )
-            ckpt_value = ckpt_value.format(fold=fold_index, fold_index=fold_index)
-        checkpoint_path = Path(ckpt_value)
+    if fold_index is None:
+        ckpt_value = str(feature_cfg.get("holdout_checkpoint_path", "")).strip()
+        if not ckpt_value:
+            ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
+        checkpoint_path = Path(ckpt_value) if ckpt_value else default_checkpoint_path(config, model, fold_index=None)
     else:
-        checkpoint_path = default_checkpoint_path(config, model, fold_index=fold_index)
+        cv_dir_value = str(feature_cfg.get("cross_validation_checkpoint_dir", "")).strip()
+        if cv_dir_value:
+            checkpoint_path = Path(cv_dir_value) / f"fold_{fold_index:02d}" / "video_best.pt"
+        else:
+            ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
+            if ckpt_value:
+                if "{fold" not in ckpt_value and "{fold_index" not in ckpt_value:
+                    raise ValueError(
+                        "checkpoint_path must be a fold-aware template for cross-validation, "
+                        "for example 'checkpoint/model/fold_{fold_index:02d}/video_best.pt'."
+                    )
+                checkpoint_path = Path(ckpt_value.format(fold=fold_index, fold_index=fold_index))
+            else:
+                checkpoint_path = default_checkpoint_path(config, model, fold_index=fold_index)
 
     if not checkpoint_path.is_absolute():
         checkpoint_path = PROJECT_ROOT / checkpoint_path
@@ -526,8 +576,18 @@ def main() -> None:
     requested_device = str(feature_cfg.get("device", "cuda"))
     device = torch.device("cuda" if requested_device == "cuda" and torch.cuda.is_available() else "cpu")
     output_root = PROJECT_ROOT / feature_cfg.get("output_dir", "outputs")
+    use_checkpoint_splits = bool(feature_cfg.get("use_checkpoint_splits", True))
 
-    holdout_train, holdout_val, holdout_test, holdout_config = split_entries(feature_cfg, mode="holdout")
+    holdout_config = make_train_config(feature_cfg, mode="holdout")
+    holdout_model = build_model(holdout_config, device)
+    holdout_checkpoint_path = resolve_checkpoint_path(feature_cfg, holdout_config, holdout_model, fold_index=None)
+    del holdout_model
+    if use_checkpoint_splits:
+        holdout_train, holdout_val, holdout_test = load_checkpoint_splits(
+            holdout_checkpoint_path.parent / "splits", modality="video"
+        )
+    else:
+        holdout_train, holdout_val, holdout_test, holdout_config = split_entries(feature_cfg, mode="holdout")
     write_feature_run(
         output_dir=output_root / "holdout",
         mode="holdout",
@@ -540,9 +600,18 @@ def main() -> None:
 
     cv_root = output_root / "cross_validation"
     for fold_index in range(holdout_config.dataset_splitter.num_folds):
-        train_entries, val_entries, test_entries, fold_config = split_entries(
-            feature_cfg, mode="cross_validation", fold_index=fold_index
-        )
+        fold_config = make_train_config(feature_cfg, mode="cross_validation", fold_index=fold_index)
+        fold_model = build_model(fold_config, device)
+        fold_checkpoint_path = resolve_checkpoint_path(feature_cfg, fold_config, fold_model, fold_index=fold_index)
+        del fold_model
+        if use_checkpoint_splits:
+            train_entries, val_entries, test_entries = load_checkpoint_splits(
+                fold_checkpoint_path.parent / "splits", modality="video"
+            )
+        else:
+            train_entries, val_entries, test_entries, fold_config = split_entries(
+                feature_cfg, mode="cross_validation", fold_index=fold_index
+            )
         write_feature_run(
             output_dir=cv_root / f"fold_{fold_index}",
             mode="cross_validation",
