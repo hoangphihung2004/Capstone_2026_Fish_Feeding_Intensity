@@ -140,7 +140,7 @@ def make_train_config(feature_cfg: Dict[str, Any], mode: str, fold_index: int | 
         config.model.backbone = model_cfg.get("backbone", config.model.backbone)
         if "pretrained" in model_cfg:
             config.model.pretrained = bool(model_cfg["pretrained"])
-        if "classes_num" in model_cfg:
+        if "classes_num" in model_cfg and hasattr(config.model, "classes_num"):
             config.model.classes_num = int(model_cfg["classes_num"])
     config.batch_size = int(feature_cfg.get("batch_size", config.batch_size))
     config.cache_mode = str(feature_cfg.get("cache_mode", "none")).lower()
