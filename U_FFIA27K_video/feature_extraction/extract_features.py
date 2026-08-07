@@ -2,8 +2,10 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -14,10 +16,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import TrainConfig
+from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishDataSplitter
 from dataset.dataloader_videos import _decode_center_image, _decode_center_image_cv2
-from main import build_backbone
+from main import artifact_repo_path, artifact_zip_path, build_backbone, safe_filename_part, zip_directory
 from models import VideoModel
 from transforms import VideoTransform
 
@@ -49,6 +51,85 @@ def load_feature_config() -> Dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Missing feature config: {config_path}")
     return load_json(config_path)
+
+
+def load_artifact_upload_config(feature_cfg: Dict[str, Any]) -> ArtifactUploadConfig:
+    config_path = PROJECT_ROOT / feature_cfg.get(
+        "artifact_upload_config_path", "config/artifact_upload_config.json"
+    )
+    if not config_path.exists():
+        logger.info(f"Artifact upload config not found. Skipping upload: {config_path}")
+        return ArtifactUploadConfig(enabled=False)
+    return ArtifactUploadConfig.from_json(str(config_path))
+
+
+def build_feature_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = ".zip") -> str:
+    suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    filename_parts = [
+        config.model.backbone,
+        config.dataset_splitter.evaluation_mode,
+        config.dataset_splitter.split_strategy,
+        timestamp,
+    ]
+    safe_stem = "_".join(safe_filename_part(part) for part in filename_parts)
+    return f"Features_{safe_stem}{suffix}"
+
+
+def upload_features_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: TrainConfig) -> None:
+    if not upload_config.enabled:
+        logger.info("Feature artifact upload is disabled. Skipping Hugging Face upload.")
+        return
+
+    if not upload_config.repo_id:
+        raise ValueError("artifact_upload.repo_id must be set when artifact upload is enabled.")
+
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        try:
+            from huggingface_hub import HfFolder
+
+            token = HfFolder.get_token()
+        except Exception:
+            token = None
+    if not token:
+        raise EnvironmentError(
+            "HF_TOKEN environment variable must be set or Hugging Face CLI login must be completed when artifact upload is enabled."
+        )
+
+    try:
+        from huggingface_hub import create_repo, upload_file
+    except ImportError as exc:
+        raise ImportError("huggingface_hub is required for feature artifact upload. Install it with requirements.txt.") from exc
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = Path(upload_config.path_in_repo).suffix or ".zip"
+    artifact_filename = build_feature_artifact_filename(config, timestamp, suffix=suffix)
+    output_zip_path = artifact_zip_path(upload_config.zip_path, artifact_filename)
+    artifact_zip = zip_directory(upload_config.source_dir, str(output_zip_path))
+
+    if upload_config.create_repo:
+        create_repo(
+            repo_id=upload_config.repo_id,
+            repo_type=upload_config.repo_type,
+            token=token,
+            exist_ok=True,
+        )
+
+    path_in_repo = artifact_repo_path(upload_config.path_in_repo, artifact_filename)
+    logger.info("==================================================")
+    logger.info(f"Uploading feature artifact to Hugging Face repo: '{upload_config.repo_id}'")
+    logger.info(f"Repo type:                                    '{upload_config.repo_type}'")
+    logger.info(f"Path in repo:                                 '{path_in_repo}'")
+    logger.info("==================================================")
+
+    upload_file(
+        path_or_fileobj=str(artifact_zip),
+        path_in_repo=path_in_repo,
+        repo_id=upload_config.repo_id,
+        repo_type=upload_config.repo_type,
+        token=token,
+    )
+    logger.info("Successfully uploaded feature artifact to Hugging Face.")
 
 
 def make_train_config(feature_cfg: Dict[str, Any], mode: str, fold_index: int | None = None) -> TrainConfig:
@@ -419,6 +500,8 @@ def main() -> None:
         )
 
     logger.info(f"Feature extraction completed successfully. Output: {output_root}")
+    artifact_upload_config = load_artifact_upload_config(feature_cfg)
+    upload_features_artifact_if_enabled(artifact_upload_config, base_config)
 
 
 if __name__ == "__main__":
