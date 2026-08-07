@@ -92,8 +92,8 @@ def get_models(selected_models: Iterable[str] | None = None):
         "LR": (LogisticRegression(random_state=RANDOM_STATE), param_lr, 20, True),
         "KNN": (KNeighborsClassifier(), param_knn, 100, True),
         "SVM": (SVC(), param_svm, 50, True),
-        "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_rf, 100, False),
-        "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_et, 100, False),
+        "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_rf, 100, True),
+        "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_et, 100, True),
     }
 
     if LGBMClassifier is not None:
@@ -107,7 +107,7 @@ def get_models(selected_models: Iterable[str] | None = None):
             ),
             param_lgbm,
             100,
-            False,
+            True,
         )
     elif selected_models is None or "LGBM" in selected_models:
         raise ImportError("lightgbm is required because LGBM is enabled in config.")
