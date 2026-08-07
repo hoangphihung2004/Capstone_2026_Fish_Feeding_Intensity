@@ -249,7 +249,7 @@ def load_split_csv(split_csv: Path, modality: str) -> List[List[Any]]:
 
 
 def load_checkpoint_splits(splits_dir: Path, modality: str) -> Tuple[List[List[Any]], List[List[Any]], List[List[Any]]]:
-    logger.info(f"CHECKPOINT_SPLITS_SELECTED: {splits_dir}")
+    logger.info(f"Checkpoint split directory selected: {splits_dir}")
     train_entries = load_split_csv(splits_dir / "train.csv", modality=modality)
     val_entries = load_split_csv(splits_dir / "val.csv", modality=modality)
     test_entries = load_split_csv(splits_dir / "test.csv", modality=modality)
@@ -267,7 +267,7 @@ class AudioFeatureDataset(Dataset):
             self._preload_audio()
 
     def _preload_audio(self) -> None:
-        logger.info(f"FEATURE_EXTRACTION_STAGE: PRELOAD_AUDIO_RAM_START - samples={len(self.entries)}")
+        logger.info(f"Feature extraction stage: preloading audio waveforms into RAM (samples={len(self.entries)})")
 
         def load_one(index: int) -> Tuple[int, np.ndarray]:
             row = entry_to_base_row(self.entries[index])
@@ -294,7 +294,7 @@ class AudioFeatureDataset(Dataset):
         self.waveform_cache = [item for item in cache if item is not None]
         cache_size_mb = total_bytes / (1024 ** 2)
         logger.info(
-            f"FEATURE_EXTRACTION_STAGE: PRELOAD_AUDIO_RAM_DONE - samples={len(self.waveform_cache)}, cache_size_mb={cache_size_mb:.1f}"
+            f"Feature extraction stage: audio RAM preload completed (samples={len(self.waveform_cache)}, cache_size_mb={cache_size_mb:.1f})"
         )
 
     def __len__(self) -> int:
@@ -375,17 +375,17 @@ def load_checkpoint(model: torch.nn.Module, checkpoint_path: Path, device: torch
     if not isinstance(state_dict, dict):
         raise ValueError(f"Unsupported checkpoint format: {checkpoint_path}")
     cleaned = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
-    logger.info("CHECKPOINT_MATCH_STATUS: CHECKING_STRICT_100_PERCENT_MATCH")
+    logger.info("Checkpoint compatibility verification: validating exact architecture match.")
     logger.info(f"Checkpoint path: {checkpoint_path}")
     try:
         model.load_state_dict(cleaned, strict=True)
     except RuntimeError as exc:
-        logger.error("CHECKPOINT_MATCH_STATUS: FAILED_STRICT_100_PERCENT_MATCH")
+        logger.error("Checkpoint compatibility verification failed: checkpoint weights do not exactly match the selected architecture.")
         logger.error("Checkpoint keys must match the selected model architecture exactly.")
         raise RuntimeError(
             f"Checkpoint does not match the selected model 100%: {checkpoint_path}"
         ) from exc
-    logger.info("CHECKPOINT_MATCH_STATUS: STRICT_100_PERCENT_MATCH")
+    logger.info("Checkpoint compatibility verification passed: checkpoint weights exactly match the selected architecture.")
     logger.info(f"Loaded checkpoint: {checkpoint_path}")
 
 
@@ -543,7 +543,7 @@ def write_feature_run(
         combined_entries.extend(split_entries_map[split])
 
     logger.info("==================================================")
-    logger.info(f"FEATURE_EXTRACTION_MODE: {mode}")
+    logger.info(f"Feature extraction mode: {mode}")
     if fold is not None:
         logger.info(f"FOLD_INDEX: {fold}")
     logger.info(f"Samples to extract for this run: {len(combined_entries)}")
@@ -551,11 +551,11 @@ def write_feature_run(
 
     model = build_model(config, device)
     checkpoint_path = resolve_checkpoint_path(feature_cfg, config, model, fold_index=fold)
-    logger.info(f"CHECKPOINT_SELECTED: {checkpoint_path}")
+    logger.info(f"Selected checkpoint path: {checkpoint_path}")
     load_checkpoint(model, checkpoint_path, device)
 
     run_name = f"Extracting {mode}" if fold is None else f"Extracting {mode} fold_{fold}"
-    logger.info(f"FEATURE_EXTRACTION_STAGE: START_EXTRACT - {run_name}")
+    logger.info(f"Feature extraction stage: started feature extraction for {run_name}")
     features, metadata, feature_name, feature_dim = extract_all_features(
         model=model,
         entries=combined_entries,
@@ -564,7 +564,7 @@ def write_feature_run(
         device=device,
         run_name=run_name,
     )
-    logger.info(f"FEATURE_EXTRACTION_STAGE: END_EXTRACT - {run_name}")
+    logger.info(f"Feature extraction stage: completed feature extraction for {run_name}")
     rows = attach_split_columns(
         metadata=metadata,
         mode=mode,
@@ -573,7 +573,7 @@ def write_feature_run(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"FEATURE_EXTRACTION_STAGE: SAVE_OUTPUT - {output_dir}")
+    logger.info(f"Feature extraction stage: saving output files to {output_dir}")
     np.save(output_dir / "features.npy", features)
     write_csv(output_dir / "metadata.csv", rows, feature_metadata_fieldnames(rows))
 
@@ -609,8 +609,8 @@ def write_feature_run(
     if hasattr(config, "video_features"):
         feature_info["image_size"] = config.video_features.image_size
     write_json(output_dir / "feature_info.json", feature_info)
-    logger.info(f"FEATURE_OUTPUT_DIR: {output_dir}")
-    logger.info("FEATURE_EXTRACTION_STAGE: DONE_RUN")
+    logger.info(f"Feature extraction output directory: {output_dir}")
+    logger.info("Feature extraction stage: run completed successfully.")
 
 
 def main() -> None:
