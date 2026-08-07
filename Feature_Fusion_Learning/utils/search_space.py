@@ -141,7 +141,8 @@ def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_v
     params_list = get_random_params(param_grid, n_iter)
     start_time = time.time()
 
-    for params in tqdm(params_list, desc=f"Fine tuning - {model_name}"):
+    progress = tqdm(params_list, desc=f"Fine tuning - {model_name}")
+    for params in progress:
         try:
             model_instance = clone(model)
             model_instance.set_params(**params)
@@ -151,6 +152,10 @@ def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_v
             if acc > best_acc:
                 best_acc = acc
                 best_param = params
+            progress.set_postfix(
+                current_val_acc=f"{acc:.4f}",
+                best_val_acc=f"{best_acc:.4f}",
+            )
         except Exception:
             pass
 
