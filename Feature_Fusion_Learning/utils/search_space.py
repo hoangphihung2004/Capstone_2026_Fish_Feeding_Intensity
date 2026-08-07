@@ -152,10 +152,7 @@ def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_v
             if acc > best_acc:
                 best_acc = acc
                 best_param = params
-            progress.set_postfix(
-                current_val_acc=f"{acc:.4f}",
-                best_val_acc=f"{best_acc:.4f}",
-            )
+            progress.set_postfix(best_val_acc=f"{best_acc:.4f}")
         except Exception:
             pass
 
