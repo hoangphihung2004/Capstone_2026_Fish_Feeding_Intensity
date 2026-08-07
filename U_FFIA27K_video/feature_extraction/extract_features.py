@@ -85,7 +85,12 @@ def upload_features_artifact_if_enabled(upload_config: ArtifactUploadConfig, con
     if not upload_config.repo_id:
         raise ValueError("artifact_upload.repo_id must be set when artifact upload is enabled.")
 
-    token = os.environ.get("HF_TOKEN")
+    try:
+        from huggingface_hub import create_repo, get_token, upload_file
+    except ImportError as exc:
+        raise ImportError("huggingface_hub is required for feature artifact upload. Install it with requirements.txt.") from exc
+
+    token = os.environ.get("HF_TOKEN") or get_token()
     if not token:
         try:
             from huggingface_hub import HfFolder
@@ -93,15 +98,10 @@ def upload_features_artifact_if_enabled(upload_config: ArtifactUploadConfig, con
             token = HfFolder.get_token()
         except Exception:
             token = None
-    if not token:
-        raise EnvironmentError(
-            "HF_TOKEN environment variable must be set or Hugging Face CLI login must be completed when artifact upload is enabled."
-        )
-
-    try:
-        from huggingface_hub import create_repo, upload_file
-    except ImportError as exc:
-        raise ImportError("huggingface_hub is required for feature artifact upload. Install it with requirements.txt.") from exc
+    if token:
+        logger.info("Hugging Face authentication token detected for artifact upload.")
+    else:
+        logger.info("No explicit Hugging Face token was detected; relying on the active Hugging Face CLI session.")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = Path(upload_config.path_in_repo).suffix or ".zip"
