@@ -307,24 +307,14 @@ def resolve_checkpoint_path(
 ) -> Path:
     if fold_index is None:
         ckpt_value = str(feature_cfg.get("holdout_checkpoint_path", "")).strip()
-        if not ckpt_value:
-            ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
         checkpoint_path = Path(ckpt_value) if ckpt_value else default_checkpoint_path(config, model, fold_index=None)
     else:
         cv_dir_value = str(feature_cfg.get("cross_validation_checkpoint_dir", "")).strip()
-        if cv_dir_value:
-            checkpoint_path = Path(cv_dir_value) / f"fold_{fold_index:02d}" / "audio_best.pt"
-        else:
-            ckpt_value = str(feature_cfg.get("checkpoint_path", "")).strip()
-            if ckpt_value:
-                if "{fold" not in ckpt_value and "{fold_index" not in ckpt_value:
-                    raise ValueError(
-                        "checkpoint_path must be a fold-aware template for cross-validation, "
-                        "for example 'checkpoint/model/fold_{fold_index:02d}/audio_best.pt'."
-                    )
-                checkpoint_path = Path(ckpt_value.format(fold=fold_index, fold_index=fold_index))
-            else:
-                checkpoint_path = default_checkpoint_path(config, model, fold_index=fold_index)
+        checkpoint_path = (
+            Path(cv_dir_value) / f"fold_{fold_index:02d}" / "audio_best.pt"
+            if cv_dir_value
+            else default_checkpoint_path(config, model, fold_index=fold_index)
+        )
 
     if not checkpoint_path.is_absolute():
         checkpoint_path = PROJECT_ROOT / checkpoint_path

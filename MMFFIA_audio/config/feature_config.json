@@ -6,7 +6,6 @@
     "classes_num": 3
   },
   "artifact_upload_config_path": "config/artifact_upload_config.json",
-  "checkpoint_path": "",
   "holdout_checkpoint_path": "",
   "cross_validation_checkpoint_dir": "",
   "use_checkpoint_splits": true,
