@@ -135,6 +135,13 @@ def upload_features_artifact_if_enabled(upload_config: ArtifactUploadConfig, con
 def make_train_config(feature_cfg: Dict[str, Any], mode: str, fold_index: int | None = None) -> TrainConfig:
     train_config_path = PROJECT_ROOT / feature_cfg.get("train_config_path", "config/train_config.json")
     config = TrainConfig.from_json(str(train_config_path))
+    model_cfg = feature_cfg.get("model", {})
+    if model_cfg:
+        config.model.backbone = model_cfg.get("backbone", config.model.backbone)
+        if "pretrained" in model_cfg:
+            config.model.pretrained = bool(model_cfg["pretrained"])
+        if "classes_num" in model_cfg:
+            config.model.classes_num = int(model_cfg["classes_num"])
     config.batch_size = int(feature_cfg.get("batch_size", config.batch_size))
     config.cache_mode = str(feature_cfg.get("cache_mode", "none")).lower()
     config.dataset_splitter.seed = int(feature_cfg.get("seed", config.dataset_splitter.seed))
