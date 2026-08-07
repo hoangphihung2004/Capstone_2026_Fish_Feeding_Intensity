@@ -89,9 +89,9 @@ def get_models(selected_models: Iterable[str] | None = None):
     }
 
     models = {
-        "LR": (LogisticRegression(random_state=RANDOM_STATE), param_lr, 10, True),
+        "LR": (LogisticRegression(random_state=RANDOM_STATE), param_lr, 20, True),
         "KNN": (KNeighborsClassifier(), param_knn, 100, True),
-        "SVM": (SVC(), param_svm, 10, True),
+        "SVM": (SVC(), param_svm, 50, True),
         "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_rf, 100, False),
         "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_et, 100, False),
     }
