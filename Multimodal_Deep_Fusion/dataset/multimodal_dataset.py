@@ -5,7 +5,7 @@ import csv
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -20,11 +20,6 @@ from transforms import VideoTransform
 logger = logging.getLogger(__name__)
 
 
-LABEL_COLUMNS = ("label", "label_id", "target")
-AUDIO_COLUMNS = ("audio_path", "wav_path", "input_path", "path")
-VIDEO_COLUMNS = ("video_path", "mp4_path", "image_path")
-
-
 def resolve_num_workers(num_workers: int) -> int:
     if num_workers != -1:
         return max(0, int(num_workers))
@@ -34,15 +29,6 @@ def resolve_num_workers(num_workers: int) -> int:
     if max_cpu == 2:
         return max_cpu // 2
     return (max_cpu // 2) + 1
-
-
-def _first_value(row: Dict[str, Any], candidates: Iterable[str]) -> str:
-    for key in candidates:
-        value = row.get(key)
-        if value not in (None, ""):
-            return str(value)
-    return ""
-
 
 def _sample_key_from_paths(audio_path: str, video_path: str) -> str:
     path = audio_path or video_path
@@ -56,9 +42,9 @@ def _sample_key_from_paths(audio_path: str, video_path: str) -> str:
 
 def _normalize_entry(entry: List[Any] | Tuple[Any, ...] | Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(entry, dict):
-        audio_path = _first_value(entry, AUDIO_COLUMNS)
-        video_path = _first_value(entry, VIDEO_COLUMNS)
-        label_value = _first_value(entry, LABEL_COLUMNS)
+        audio_path = str(entry["audio_path"])
+        video_path = str(entry["video_path"])
+        label_value = entry["label"]
         sample_key = str(entry.get("sample_key") or _sample_key_from_paths(audio_path, video_path))
     elif len(entry) >= 3:
         audio_path = str(entry[0])
@@ -89,47 +75,7 @@ def _normalize_entry(entry: List[Any] | Tuple[Any, ...] | Dict[str, Any]) -> Dic
     }
 
 
-def load_split_csv(path: str | Path) -> List[Dict[str, Any]]:
-    split_path = Path(path)
-    if not split_path.exists():
-        raise FileNotFoundError(f"Split CSV not found: {split_path}")
-
-    rows: List[Dict[str, Any]] = []
-    with split_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(_normalize_entry(row))
-    if not rows:
-        raise ValueError(f"Split CSV is empty: {split_path}")
-    return rows
-
-
-def _split_dir_for_mode(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int] = None) -> Path:
-    if mode == "holdout":
-        if not dataset_cfg.holdout_splits_dir:
-            raise ValueError("dataset.holdout_splits_dir must be set when use_existing_splits=true.")
-        return Path(dataset_cfg.holdout_splits_dir)
-    if mode == "cross_validation":
-        if not dataset_cfg.cross_validation_splits_dir:
-            raise ValueError("dataset.cross_validation_splits_dir must be set when use_existing_splits=true.")
-        if fold_index is None:
-            raise ValueError("fold_index must be set for cross_validation split loading.")
-        return Path(dataset_cfg.cross_validation_splits_dir) / f"fold_{fold_index:02d}" / "splits"
-    raise ValueError(f"Unsupported split mode: {mode}")
-
-
 def load_splits(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
-    if dataset_cfg.use_existing_splits:
-        split_dir = _split_dir_for_mode(dataset_cfg, mode=mode, fold_index=fold_index)
-        splits = {
-            "train": load_split_csv(split_dir / "train.csv"),
-            "val": load_split_csv(split_dir / "val.csv"),
-            "test": load_split_csv(split_dir / "test.csv"),
-        }
-        _validate_splits(splits)
-        logger.info("Loaded existing split files from: %s", split_dir)
-        return splits
-
     splitter_cfg = SplitterConfig(
         dataset_path=dataset_cfg.dataset_path,
         seed=dataset_cfg.seed,
@@ -141,6 +87,14 @@ def load_splits(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int]
         num_folds=dataset_cfg.num_folds,
         fold_index=fold_index,
         cv_val_ratio=dataset_cfg.cv_val_ratio,
+    )
+    logger.info(
+        "Generating fresh multimodal split using FishDataSplitter "
+        "(mode=%s, seed=%s, strategy=%s, fold_index=%s).",
+        mode,
+        dataset_cfg.seed,
+        dataset_cfg.split_strategy,
+        fold_index,
     )
     splitter = FishDataSplitter(splitter_cfg)
     train_raw, test_raw, val_raw = splitter.split_data()

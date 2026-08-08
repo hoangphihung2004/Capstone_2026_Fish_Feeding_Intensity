@@ -62,9 +62,6 @@ class FusionConfig(BaseModel):
 
 class DatasetConfig(BaseModel):
     dataset_path: str = "/marimo/Fish_Feeding_Intensity_Dataset"
-    use_existing_splits: bool = True
-    holdout_splits_dir: str = ""
-    cross_validation_splits_dir: str = ""
     cache_audio: bool = True
     cache_video: bool = True
     video_cache_mode: Literal["none", "ram", "disk"] = "ram"

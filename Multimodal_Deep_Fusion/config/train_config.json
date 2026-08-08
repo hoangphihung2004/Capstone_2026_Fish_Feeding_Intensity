@@ -35,9 +35,6 @@
   },
   "dataset": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
-    "use_existing_splits": true,
-    "holdout_splits_dir": "",
-    "cross_validation_splits_dir": "",
     "cache_audio": true,
     "cache_video": true,
     "video_cache_mode": "ram",

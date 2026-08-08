@@ -16,22 +16,7 @@ Then run:
 python main.py
 ```
 
-Each run supports one evaluation mode only: `holdout` or `cross_validation`. When `use_existing_splits` is `true`, set the matching split path:
-
-```json
-"holdout_splits_dir": "/marimo/holdout/DL_audio/checkpoint/panns_cnn6/splits",
-"cross_validation_splits_dir": "/marimo/cv/DL_audio/checkpoint/panns_cnn6"
-```
-
-The cross-validation loader expects:
-
-```text
-fold_00/splits/train.csv
-fold_00/splits/val.csv
-fold_00/splits/test.csv
-...
-fold_04/splits/test.csv
-```
+Each run supports one evaluation mode only: `holdout` or `cross_validation`. Splits are generated automatically with the same `FishDataSplitter` logic used by the single-modal 27K audio/video branches.
 
 Each run selects one audio model, one video model, and one fusion head.
 
