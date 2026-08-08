@@ -81,7 +81,7 @@ class TrainConfig(BaseModel):
     evaluation_mode: Literal["holdout", "cross_validation"] = "holdout"
     epochs: int = 200
     batch_size: int = 256
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-3
     weight_decay: float = 1e-4
     optimizer: Literal["adam", "adamw", "sgd"] = "adamw"
     monitor: Literal["accuracy", "f1_macro", "loss"] = "accuracy"
