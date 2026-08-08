@@ -74,9 +74,9 @@ def main() -> None:
     root = _experiment_root(cfg, project_dir)
     root.mkdir(parents=True, exist_ok=True)
 
-    if cfg.evaluation_mode in ("holdout", "both"):
+    if cfg.evaluation_mode == "holdout":
         _run_holdout(cfg, root)
-    if cfg.evaluation_mode in ("cross_validation", "both"):
+    elif cfg.evaluation_mode == "cross_validation":
         _run_cross_validation(cfg, root)
 
     upload_cfg = load_artifact_upload_config(project_dir / "config" / "artifact_upload_config.json")

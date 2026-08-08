@@ -16,7 +16,7 @@ Then run:
 python main.py
 ```
 
-The run supports `holdout`, `cross_validation`, or `both`. When `use_existing_splits` is `true`, set:
+Each run supports one evaluation mode only: `holdout` or `cross_validation`. When `use_existing_splits` is `true`, set the matching split path:
 
 ```json
 "holdout_splits_dir": "/marimo/holdout/DL_audio/checkpoint/panns_cnn6/splits",

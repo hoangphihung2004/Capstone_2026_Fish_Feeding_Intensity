@@ -83,7 +83,7 @@ class TrainConfig(BaseModel):
     seed: int = 42
     device: str = "cuda"
     num_classes: int = 4
-    evaluation_mode: Literal["holdout", "cross_validation", "both"] = "both"
+    evaluation_mode: Literal["holdout", "cross_validation"] = "holdout"
     epochs: int = 200
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4

@@ -2,7 +2,7 @@
   "seed": 42,
   "device": "cuda",
   "num_classes": 4,
-  "evaluation_mode": "both",
+  "evaluation_mode": "holdout",
   "epochs": 200,
   "learning_rate": 0.0001,
   "weight_decay": 0.0001,
