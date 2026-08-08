@@ -18,7 +18,7 @@ Edit only `config/fine_tune_config.json` for feature inputs and model selection:
   "folds": "all",
   "num_folds": 5,
   "seed": 42,
-  "trial_n_jobs": 4,
+  "trial_n_jobs": 8,
   "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
   "output_dir": "outputs"
 }
