@@ -16,6 +16,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _log_run_configuration(cfg, root: Path) -> None:
+    logger.info("==================================================")
+    logger.info("Multimodal Deep Fusion configuration")
+    logger.info("  - Evaluation mode:          %s", cfg.evaluation_mode)
+    logger.info("  - Audio backbone:           %s", cfg.audio.backbone)
+    logger.info("  - Video backbone:           %s", cfg.video.backbone)
+    logger.info("  - Fusion head:              %s", cfg.fusion.type)
+    logger.info("  - Epochs:                   %s", cfg.epochs)
+    logger.info("  - Batch size:               %s", cfg.batch_size)
+    logger.info("  - Optimizer:                %s", cfg.optimizer)
+    logger.info("  - Learning rate:            %s", cfg.learning_rate)
+    logger.info("  - Weight decay:             %s", cfg.weight_decay)
+    logger.info("  - Early stopping:           %s", cfg.early_stopping)
+    logger.info("  - Monitor metric:           %s", cfg.monitor)
+    logger.info("  - Dataset path:             %s", cfg.dataset.dataset_path)
+    logger.info("  - Split strategy:           %s", cfg.dataset.split_strategy)
+    logger.info("  - Seed:                     %s", cfg.seed)
+    logger.info("  - Output directory:         %s", root)
+    logger.info("==================================================")
+
+
 def _experiment_root(cfg, project_dir: Path) -> Path:
     name = f"{cfg.audio.backbone}_{cfg.video.backbone}_{cfg.fusion.type}"
     output_dir = Path(cfg.output_dir)
@@ -75,6 +96,7 @@ def main() -> None:
     set_seed(cfg.seed)
     root = _experiment_root(cfg, project_dir)
     root.mkdir(parents=True, exist_ok=True)
+    _log_run_configuration(cfg, root)
 
     if cfg.evaluation_mode == "holdout":
         _run_holdout(cfg, root)

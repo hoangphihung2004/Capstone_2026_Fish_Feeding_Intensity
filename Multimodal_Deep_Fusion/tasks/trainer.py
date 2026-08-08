@@ -4,7 +4,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
@@ -41,6 +41,20 @@ def _score(metrics: Dict[str, float], monitor: str) -> float:
     return metrics[monitor]
 
 
+def _count_parameters(model: nn.Module) -> tuple[int, int]:
+    total = sum(param.numel() for param in model.parameters())
+    trainable = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    return total, trainable
+
+
+def _gpu_memory_summary(device: torch.device) -> str:
+    if device.type != "cuda":
+        return "GPU memory: unavailable"
+    allocated = torch.cuda.memory_allocated(device) / (1024**3)
+    reserved = torch.cuda.memory_reserved(device) / (1024**3)
+    return f"GPU memory: allocated={allocated:.2f}GB, reserved={reserved:.2f}GB"
+
+
 class MultimodalTrainer:
     def __init__(
         self,
@@ -65,14 +79,39 @@ class MultimodalTrainer:
         with (self.output_dir / "config_snapshot.json").open("w", encoding="utf-8") as f:
             json.dump(cfg.model_dump(), f, indent=2, ensure_ascii=False)
         save_split_files(splits, self.output_dir / "splits")
+        self._log_initial_state()
 
-    def _run_epoch(self, split: str, train: bool) -> Dict[str, float | List[int]]:
+    def _log_initial_state(self) -> None:
+        total_params, trainable_params = _count_parameters(self.model)
+        logger.info("==================================================")
+        logger.info("Initialized multimodal trainer: %s", self.run_name)
+        logger.info("  - Device:                   %s", self.device)
+        logger.info("  - Output directory:         %s", self.output_dir)
+        logger.info("  - Epochs:                   %s", self.cfg.epochs)
+        logger.info("  - Batch size:               %s", self.cfg.batch_size)
+        logger.info("  - Optimizer:                %s", self.cfg.optimizer)
+        logger.info("  - Learning rate:            %s", self.cfg.learning_rate)
+        logger.info("  - Weight decay:             %s", self.cfg.weight_decay)
+        logger.info("  - Monitor:                  %s", self.cfg.monitor)
+        logger.info("  - Early stopping:           %s", self.cfg.early_stopping)
+        logger.info("  - Total parameters:         %s", f"{total_params:,}")
+        logger.info("  - Trainable parameters:     %s", f"{trainable_params:,}")
+        for split_name in ("train", "val", "test"):
+            logger.info("  - %-5s samples:             %s", split_name, len(self.loaders[split_name].dataset))
+        logger.info("  - %s", _gpu_memory_summary(self.device))
+        logger.info("==================================================")
+
+    def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
         self.model.train(train)
         total_loss = 0.0
         all_true: List[int] = []
         all_pred: List[int] = []
         loader = self.loaders[split]
-        iterator = tqdm(loader, desc=f"{self.run_name} {split}", unit="batch")
+        if epoch is None:
+            desc = f"{self.run_name} {split}"
+        else:
+            desc = f"{self.run_name} epoch {epoch:03d}/{self.cfg.epochs:03d} {split}"
+        iterator = tqdm(loader, desc=desc, unit="batch")
         for batch in iterator:
             waveform = batch["waveform"].to(self.device, non_blocking=True)
             video_form = batch["video_form"].to(self.device, non_blocking=True)
@@ -92,24 +131,40 @@ class MultimodalTrainer:
             all_true.extend(target.detach().cpu().numpy().astype(int).tolist())
             all_pred.extend(pred.detach().cpu().numpy().astype(int).tolist())
             acc = float(np.mean(np.asarray(all_true) == np.asarray(all_pred)))
-            iterator.set_postfix(loss=f"{loss.item():.4f}", acc=f"{acc:.4f}")
+            running_loss = total_loss / max(1, len(all_true))
+            iterator.set_postfix(batch_loss=f"{loss.item():.4f}", loss=f"{running_loss:.4f}", acc=f"{acc:.4f}")
 
         metrics = compute_metrics(all_true, all_pred)
         metrics["loss"] = total_loss / max(1, len(all_true))
         metrics["y_true"] = all_true
         metrics["y_pred"] = all_pred
+        logger.info(
+            "%s %s completed | loss=%.4f | acc=%.4f | f1_macro=%.4f",
+            self.run_name,
+            split,
+            metrics["loss"],
+            metrics["accuracy"],
+            metrics["f1_macro"],
+        )
         return metrics
 
     def fit(self) -> Dict[str, float]:
         best_score = -float("inf")
+        best_val_accuracy = 0.0
+        best_val_f1 = 0.0
         best_epoch = 0
         bad_epochs = 0
         best_path = self.output_dir / "checkpoint" / "multimodal_best.pt"
         best_path.parent.mkdir(parents=True, exist_ok=True)
 
+        logger.info("==================================================")
+        logger.info("Starting training loop for %s", self.run_name)
+        logger.info("Checkpoint path: %s", best_path)
+        logger.info("==================================================")
+
         for epoch in range(1, self.cfg.epochs + 1):
-            train_metrics = self._run_epoch("train", train=True)
-            val_metrics = self._run_epoch("val", train=False)
+            train_metrics = self._run_epoch("train", train=True, epoch=epoch)
+            val_metrics = self._run_epoch("val", train=False, epoch=epoch)
             row = {
                 "epoch": epoch,
                 "train_loss": float(train_metrics["loss"]),
@@ -121,16 +176,33 @@ class MultimodalTrainer:
             }
             self.history.append(row)
             current_score = _score(val_metrics, self.cfg.monitor)
+            improved = current_score > best_score + self.cfg.delta
+            if improved:
+                best_val_accuracy = float(val_metrics["accuracy"])
+                best_val_f1 = float(val_metrics["f1_macro"])
+                bad_epochs_for_log = 0
+            else:
+                bad_epochs_for_log = bad_epochs + 1
             logger.info(
-                "Epoch %03d/%03d | train_acc=%.4f | val_acc=%.4f | best_val_acc=%.4f",
+                (
+                    "Epoch %03d/%03d summary | train_loss=%.4f | train_acc=%.4f | "
+                    "val_loss=%.4f | val_acc=%.4f | val_f1=%.4f | "
+                    "best_val_acc=%.4f | best_val_f1=%.4f | bad_epochs=%d | %s"
+                ),
                 epoch,
                 self.cfg.epochs,
+                row["train_loss"],
                 row["train_accuracy"],
+                row["val_loss"],
                 row["val_accuracy"],
-                max([h["val_accuracy"] for h in self.history]),
+                row["val_f1_macro"],
+                best_val_accuracy,
+                best_val_f1,
+                bad_epochs_for_log,
+                _gpu_memory_summary(self.device),
             )
 
-            if current_score > best_score + self.cfg.delta:
+            if improved:
                 best_score = current_score
                 best_epoch = epoch
                 bad_epochs = 0
@@ -144,6 +216,13 @@ class MultimodalTrainer:
                     },
                     best_path,
                 )
+                logger.info(
+                    "Saved new best checkpoint | epoch=%d | monitor=%s | score=%.6f | path=%s",
+                    epoch,
+                    self.cfg.monitor,
+                    best_score,
+                    best_path,
+                )
             else:
                 bad_epochs += 1
                 if self.cfg.early_stopping and bad_epochs >= self.cfg.patience:
@@ -152,8 +231,10 @@ class MultimodalTrainer:
 
         save_history_csv(self.history, self.output_dir / "history.csv")
         save_history_plot(self.history, self.output_dir / "history.png")
+        logger.info("Saved training history to %s", self.output_dir)
         checkpoint = torch.load(best_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+        logger.info("Loaded best checkpoint from epoch %d for final test evaluation.", int(checkpoint["epoch"]))
         test_metrics = self._run_epoch("test", train=False)
         result = {
             "best_epoch": float(best_epoch),
@@ -169,6 +250,13 @@ class MultimodalTrainer:
         }
         save_metrics_csv(result, self.output_dir / "result.csv")
         save_confusion_outputs(test_metrics["y_true"], test_metrics["y_pred"], self.output_dir)
+        logger.info(
+            "Final test result | loss=%.4f | acc=%.4f | f1_macro=%.4f | output=%s",
+            result["test_loss"],
+            result["test_accuracy"],
+            result["test_f1_macro"],
+            self.output_dir,
+        )
         return result
 
 
@@ -192,3 +280,4 @@ def save_cv_summary(fold_results: List[Dict[str, float]], output_dir: str | Path
         writer = csv.DictWriter(f, fieldnames=["metric", "mean", "std"])
         writer.writeheader()
         writer.writerows(summary_rows)
+    logger.info("Saved cross-validation summary to %s", output_path / "summary_mean_std.csv")
