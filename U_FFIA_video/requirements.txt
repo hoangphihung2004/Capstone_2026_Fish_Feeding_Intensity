@@ -11,4 +11,6 @@ decord
 huggingface_hub
 fvcore
 pytorchvideo
+einops
+
 

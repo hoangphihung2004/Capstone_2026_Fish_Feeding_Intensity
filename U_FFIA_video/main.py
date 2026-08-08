@@ -31,6 +31,7 @@ from models import (
     SwinTiny,
     VideoModel,
     ViTBase16,
+    ViT3D,
     X3DXS,
     X3DM,
 )
@@ -63,6 +64,7 @@ MODEL_REGISTRY = {
     "X3DXS": X3DXS,
     "X3DM": X3DM,
     "I3D": I3D,
+    "ViT3D": ViT3D,
 }
 
 

@@ -11,6 +11,7 @@ from .s3d import S3D
 from .x3d_xs import X3DXS
 from .x3d_m import X3DM
 from .i3d import I3D
+from .vit3d import ViT3D
 
 __all__ = [
     "VideoModel",
@@ -26,5 +27,6 @@ __all__ = [
     "X3DXS",
     "X3DM",
     "I3D",
+    "ViT3D",
 ]
 
