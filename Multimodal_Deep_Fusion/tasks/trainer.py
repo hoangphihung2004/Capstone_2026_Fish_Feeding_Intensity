@@ -3,23 +3,24 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam, AdamW, SGD
+from sklearn import metrics as sklearn_metrics
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
 from tqdm import tqdm
 
 from config import TrainConfig
 from dataset import save_split_files
 from models import MultimodalDeepFusionModel
 from utils.metrics import (
-    compute_metrics,
+    CLASS_NAMES,
     save_confusion_outputs,
-    save_history_csv,
-    save_history_plot,
     save_metrics_csv,
 )
 
@@ -55,6 +56,256 @@ def _gpu_memory_summary(device: torch.device) -> str:
     return f"GPU memory: allocated={allocated:.2f}GB, reserved={reserved:.2f}GB"
 
 
+def _sync_device(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def _one_hot(labels: List[int], num_classes: int) -> np.ndarray:
+    return np.eye(num_classes, dtype=np.float32)[np.asarray(labels, dtype=int)]
+
+
+def _statistics_from_outputs(y_true: List[int], logits: List[List[float]], num_classes: int) -> Dict[str, Any]:
+    target = _one_hot(y_true, num_classes)
+    output = np.asarray(logits, dtype=np.float32)
+    pred = np.argmax(output, axis=1)
+    true = np.asarray(y_true, dtype=int)
+
+    average_precision = sklearn_metrics.average_precision_score(target, output, average=None)
+    auc = sklearn_metrics.roc_auc_score(target, output, average=None)
+    acc = accuracy_score(true, pred)
+    cm = confusion_matrix(true, pred, labels=list(range(num_classes)))
+    message = "\n" + classification_report(true, pred, digits=4, zero_division=0)
+    prec_weighted, rec_weighted, f1_weighted, _ = precision_recall_fscore_support(
+        true, pred, average="weighted", zero_division=0
+    )
+    prec_macro, rec_macro, f1_macro, _ = precision_recall_fscore_support(
+        true, pred, average="macro", zero_division=0
+    )
+    return {
+        "average_precision": average_precision,
+        "accuracy": acc,
+        "auc": auc,
+        "message": message,
+        "confu_matrix": cm,
+        "prec_weighted": prec_weighted,
+        "rec_weighted": rec_weighted,
+        "f1_weighted": f1_weighted,
+        "prec_macro": prec_macro,
+        "rec_macro": rec_macro,
+        "f1_macro": f1_macro,
+        "y_true": true,
+        "y_pred": pred,
+    }
+
+
+class MultimodalHistoryLogger:
+    def __init__(self, log_dir: str | Path) -> None:
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.history_csv_path = self.log_dir / "history.csv"
+        self._write_history_header()
+
+    def _history_headers(self) -> list[str]:
+        return [
+            "epoch",
+            "train_loss",
+            "train_accuracy",
+            "train_mAP",
+            "val_loss",
+            "val_accuracy",
+            "val_mAP",
+            "val_auc_class_none",
+            "val_auc_class_strong",
+            "val_auc_class_medium",
+            "val_auc_class_weak",
+            "val_ap_class_none",
+            "val_ap_class_strong",
+            "val_ap_class_medium",
+            "val_ap_class_weak",
+            "cm_none_none",
+            "cm_none_strong",
+            "cm_none_medium",
+            "cm_none_weak",
+            "cm_strong_none",
+            "cm_strong_strong",
+            "cm_strong_medium",
+            "cm_strong_weak",
+            "cm_medium_none",
+            "cm_medium_strong",
+            "cm_medium_medium",
+            "cm_medium_weak",
+            "cm_weak_none",
+            "cm_weak_strong",
+            "cm_weak_medium",
+            "cm_weak_weak",
+        ]
+
+    def _write_history_header(self) -> None:
+        with self.history_csv_path.open("w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(self._history_headers())
+
+    def _save_confusion_matrix_csv(self, path: str | Path, matrix: np.ndarray) -> None:
+        with Path(path).open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Actual\\Predicted"] + CLASS_NAMES)
+            for index, label in enumerate(CLASS_NAMES):
+                writer.writerow([label] + list(matrix[index]))
+
+    def log_epoch(
+        self,
+        epoch: int,
+        train_loss: float,
+        train_acc: float,
+        train_mAP: float,
+        val_loss: float,
+        val_statistics: Dict[str, Any],
+        is_best: bool = False,
+    ) -> None:
+        val_acc = float(np.mean(val_statistics["accuracy"]))
+        val_mAP = float(np.mean(val_statistics["average_precision"]))
+        val_auc = val_statistics["auc"]
+        val_ap = val_statistics["average_precision"]
+        cm_flat = list(val_statistics["confu_matrix"].flatten())
+        row_data = [
+            epoch,
+            f"{train_loss:.6f}",
+            f"{train_acc:.6f}",
+            f"{train_mAP:.6f}",
+            f"{val_loss:.6f}",
+            f"{val_acc:.6f}",
+            f"{val_mAP:.6f}",
+            f"{val_auc[0]:.6f}",
+            f"{val_auc[1]:.6f}",
+            f"{val_auc[2]:.6f}",
+            f"{val_auc[3]:.6f}",
+            f"{val_ap[0]:.6f}",
+            f"{val_ap[1]:.6f}",
+            f"{val_ap[2]:.6f}",
+            f"{val_ap[3]:.6f}",
+        ] + [int(value) for value in cm_flat]
+
+        with self.history_csv_path.open("a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(row_data)
+
+        if is_best:
+            self._save_confusion_matrix_csv(self.log_dir / "confusion_matrix_best.csv", val_statistics["confu_matrix"])
+
+    def save_summary(
+        self,
+        training_time: float,
+        inference_time_ms: float,
+        val_statistics: Dict[str, Any],
+        test_statistics: Dict[str, Any],
+    ) -> None:
+        summary_csv_path = self.log_dir / "summary.csv"
+        val_mAP = float(np.mean(val_statistics["average_precision"]))
+        test_mAP = float(np.mean(test_statistics["average_precision"]))
+        headers = [
+            "Training Time (s)",
+            "Inference Time (ms/sample)",
+            "Precision Val (Weighted)",
+            "Recall Val (Weighted)",
+            "F1-score Val (Weighted)",
+            "Accuracy Val",
+            "mAP Val",
+            "Precision Val (Macro)",
+            "Recall Val (Macro)",
+            "F1-score Val (Macro)",
+            "Precision Test (Weighted)",
+            "Recall Test (Weighted)",
+            "F1-score Test (Weighted)",
+            "Accuracy Test",
+            "mAP Test",
+            "Precision Test (Macro)",
+            "Recall Test (Macro)",
+            "F1-score Test (Macro)",
+        ]
+        row_data = [
+            f"{training_time:.2f}",
+            f"{inference_time_ms:.3f}",
+            f"{val_statistics['prec_weighted']:.6f}",
+            f"{val_statistics['rec_weighted']:.6f}",
+            f"{val_statistics['f1_weighted']:.6f}",
+            f"{val_statistics['accuracy']:.6f}",
+            f"{val_mAP:.6f}",
+            f"{val_statistics['prec_macro']:.6f}",
+            f"{val_statistics['rec_macro']:.6f}",
+            f"{val_statistics['f1_macro']:.6f}",
+            f"{test_statistics['prec_weighted']:.6f}",
+            f"{test_statistics['rec_weighted']:.6f}",
+            f"{test_statistics['f1_weighted']:.6f}",
+            f"{test_statistics['accuracy']:.6f}",
+            f"{test_mAP:.6f}",
+            f"{test_statistics['prec_macro']:.6f}",
+            f"{test_statistics['rec_macro']:.6f}",
+            f"{test_statistics['f1_macro']:.6f}",
+        ]
+        with summary_csv_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            writer.writerow(row_data)
+        logger.info("Successfully exported Summary Report to: '%s'", summary_csv_path)
+
+    def plot_history(self) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        logging.getLogger("matplotlib").setLevel(logging.WARNING)
+        import matplotlib.pyplot as plt
+
+        epochs = []
+        train_losses, val_losses = [], []
+        train_accs, val_accs = [], []
+        train_maps, val_maps = [], []
+        with self.history_csv_path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                epochs.append(int(row["epoch"]))
+                train_losses.append(float(row["train_loss"]))
+                val_losses.append(float(row["val_loss"]))
+                train_accs.append(float(row["train_accuracy"]))
+                val_accs.append(float(row["val_accuracy"]))
+                train_maps.append(float(row["train_mAP"]))
+                val_maps.append(float(row["val_mAP"]))
+
+        if not epochs:
+            logger.warning("Warning: No epoch data found to plot.")
+            return
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        fig.suptitle("Fish Feeding Intensity Model Learning History", fontsize=16, fontweight="bold", y=0.98)
+        axes[0].plot(epochs, train_losses, label="Train Loss", color="#1f77b4", linewidth=2, linestyle="--")
+        axes[0].plot(epochs, val_losses, label="Val Loss", color="#ff7f0e", linewidth=2)
+        axes[0].set_title("Loss Curves", fontsize=12, fontweight="bold")
+        axes[0].set_xlabel("Epoch", fontsize=10)
+        axes[0].set_ylabel("Loss", fontsize=10)
+        axes[0].grid(True, linestyle=":", alpha=0.6)
+        axes[0].legend(frameon=True)
+
+        axes[1].plot(epochs, train_accs, label="Train Acc", color="#2ca02c", linewidth=2, linestyle="--")
+        axes[1].plot(epochs, val_accs, label="Val Acc", color="#d62728", linewidth=2)
+        axes[1].set_title("Accuracy Curves", fontsize=12, fontweight="bold")
+        axes[1].set_xlabel("Epoch", fontsize=10)
+        axes[1].set_ylabel("Accuracy", fontsize=10)
+        axes[1].grid(True, linestyle=":", alpha=0.6)
+        axes[1].legend(frameon=True)
+
+        axes[2].plot(epochs, train_maps, label="Train mAP", color="#9467bd", linewidth=2, linestyle="--")
+        axes[2].plot(epochs, val_maps, label="Val mAP", color="#8c564b", linewidth=2)
+        axes[2].set_title("Mean Average Precision (mAP)", fontsize=12, fontweight="bold")
+        axes[2].set_xlabel("Epoch", fontsize=10)
+        axes[2].set_ylabel("mAP", fontsize=10)
+        axes[2].grid(True, linestyle=":", alpha=0.6)
+        axes[2].legend(frameon=True)
+
+        plt.tight_layout()
+        plot_path = self.log_dir / "learning_curves.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Successfully generated and saved learning curves to: '%s'", plot_path)
+
+
 class MultimodalTrainer:
     def __init__(
         self,
@@ -74,10 +325,14 @@ class MultimodalTrainer:
         self.model = MultimodalDeepFusionModel(cfg).to(self.device)
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = _optimizer(self.model.parameters(), cfg)
-        self.history: List[Dict[str, float]] = []
+        self.history_logger = MultimodalHistoryLogger(log_dir=self.output_dir)
 
         with (self.output_dir / "config_snapshot.json").open("w", encoding="utf-8") as f:
             json.dump(cfg.model_dump(), f, indent=2, ensure_ascii=False)
+        with (self.output_dir / "train_config.json").open("w", encoding="utf-8") as f:
+            json.dump(cfg.model_dump(), f, indent=2, ensure_ascii=False)
+        with (self.output_dir / "splitter_config.json").open("w", encoding="utf-8") as f:
+            json.dump(cfg.dataset.model_dump(), f, indent=2, ensure_ascii=False)
         save_split_files(splits, self.output_dir / "splits")
         self._log_initial_state()
 
@@ -106,6 +361,7 @@ class MultimodalTrainer:
         total_loss = 0.0
         all_true: List[int] = []
         all_pred: List[int] = []
+        all_logits: List[List[float]] = []
         loader = self.loaders[split]
         if epoch is None:
             desc = f"{self.run_name} {split}"
@@ -130,14 +386,13 @@ class MultimodalTrainer:
             total_loss += float(loss.item()) * target.size(0)
             all_true.extend(target.detach().cpu().numpy().astype(int).tolist())
             all_pred.extend(pred.detach().cpu().numpy().astype(int).tolist())
+            all_logits.extend(torch.softmax(logits.detach(), dim=1).cpu().numpy().astype(float).tolist())
             acc = float(np.mean(np.asarray(all_true) == np.asarray(all_pred)))
             running_loss = total_loss / max(1, len(all_true))
             iterator.set_postfix(batch_loss=f"{loss.item():.4f}", loss=f"{running_loss:.4f}", acc=f"{acc:.4f}")
 
-        metrics = compute_metrics(all_true, all_pred)
+        metrics = _statistics_from_outputs(all_true, all_logits, self.cfg.num_classes)
         metrics["loss"] = total_loss / max(1, len(all_true))
-        metrics["y_true"] = all_true
-        metrics["y_pred"] = all_pred
         logger.info(
             "%s %s completed | loss=%.4f | acc=%.4f | f1_macro=%.4f",
             self.run_name,
@@ -150,12 +405,15 @@ class MultimodalTrainer:
 
     def fit(self) -> Dict[str, float]:
         best_score = -float("inf")
-        best_val_accuracy = 0.0
-        best_val_f1 = 0.0
+        best_acc = 0.0
+        best_mAP = 0.0
+        best_loss = float("inf")
         best_epoch = 0
+        best_val_statistics = None
         bad_epochs = 0
         best_path = self.output_dir / "checkpoint" / "multimodal_best.pt"
         best_path.parent.mkdir(parents=True, exist_ok=True)
+        train_start_time = time.perf_counter()
 
         logger.info("==================================================")
         logger.info("Starting training loop for %s", self.run_name)
@@ -169,35 +427,33 @@ class MultimodalTrainer:
                 "epoch": epoch,
                 "train_loss": float(train_metrics["loss"]),
                 "train_accuracy": float(train_metrics["accuracy"]),
-                "train_f1_macro": float(train_metrics["f1_macro"]),
+                "train_mAP": float(np.mean(train_metrics["average_precision"])),
                 "val_loss": float(val_metrics["loss"]),
                 "val_accuracy": float(val_metrics["accuracy"]),
-                "val_f1_macro": float(val_metrics["f1_macro"]),
+                "val_mAP": float(np.mean(val_metrics["average_precision"])),
             }
-            self.history.append(row)
             current_score = _score(val_metrics, self.cfg.monitor)
             improved = current_score > best_score + self.cfg.delta
             if improved:
-                best_val_accuracy = float(val_metrics["accuracy"])
-                best_val_f1 = float(val_metrics["f1_macro"])
+                best_acc = float(val_metrics["accuracy"])
+                best_mAP = float(np.mean(val_metrics["average_precision"]))
+                best_loss = float(val_metrics["loss"])
+                best_val_statistics = val_metrics
                 bad_epochs_for_log = 0
             else:
                 bad_epochs_for_log = bad_epochs + 1
             logger.info(
                 (
-                    "Epoch %03d/%03d summary | train_loss=%.4f | train_acc=%.4f | "
-                    "val_loss=%.4f | val_acc=%.4f | val_f1=%.4f | "
-                    "best_val_acc=%.4f | best_val_f1=%.4f | bad_epochs=%d | %s"
+                    "Epoch %d: Train Loss = %.5f | Train Acc = %.4f | Train mAP = %.4f | "
+                    "Val Loss = %.5f | Val Acc = %.4f | Val mAP = %.4f | bad_epochs=%d | %s"
                 ),
                 epoch,
-                self.cfg.epochs,
                 row["train_loss"],
                 row["train_accuracy"],
+                row["train_mAP"],
                 row["val_loss"],
                 row["val_accuracy"],
-                row["val_f1_macro"],
-                best_val_accuracy,
-                best_val_f1,
+                row["val_mAP"],
                 bad_epochs_for_log,
                 _gpu_memory_summary(self.device),
             )
@@ -217,39 +473,68 @@ class MultimodalTrainer:
                     best_path,
                 )
                 logger.info(
-                    "Saved new best checkpoint | epoch=%d | monitor=%s | score=%.6f | path=%s",
-                    epoch,
-                    self.cfg.monitor,
-                    best_score,
+                    "Saved best model checkpoint to: '%s' (Monitor value = %.5f)",
                     best_path,
+                    best_score,
                 )
-            else:
+            self.history_logger.log_epoch(
+                epoch=epoch,
+                train_loss=row["train_loss"],
+                train_acc=row["train_accuracy"],
+                train_mAP=row["train_mAP"],
+                val_loss=row["val_loss"],
+                val_statistics=val_metrics,
+                is_best=improved,
+            )
+
+            if not improved:
                 bad_epochs += 1
                 if self.cfg.early_stopping and bad_epochs >= self.cfg.patience:
-                    logger.info("Early stopping at epoch %d. Best epoch: %d", epoch, best_epoch)
+                    logger.info("Early stopping triggered at epoch %d!", epoch)
                     break
+            logger.info(
+                "Current best: Epoch %d | Loss: %.5f | Accuracy: %.4f | mAP: %.4f",
+                best_epoch,
+                best_loss,
+                best_acc,
+                best_mAP,
+            )
 
-        save_history_csv(self.history, self.output_dir / "history.csv")
-        save_history_plot(self.history, self.output_dir / "history.png")
-        logger.info("Saved training history to %s", self.output_dir)
+        training_time = time.perf_counter() - train_start_time
+        try:
+            self.history_logger.plot_history()
+        except Exception as exc:
+            logger.warning("Warning: Failed to generate learning curves plot: %s", str(exc))
+
+        logger.info("==================================================")
+        logger.info("Training complete. Starting evaluation on Test split...")
         checkpoint = torch.load(best_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
-        logger.info("Loaded best checkpoint from epoch %d for final test evaluation.", int(checkpoint["epoch"]))
+        logger.info("Reloaded best checkpoint model from Epoch %d...", int(checkpoint["epoch"]))
         test_metrics = self._run_epoch("test", train=False)
+        test_mAP = float(np.mean(test_metrics["average_precision"]))
+        test_acc = float(np.mean(test_metrics["accuracy"]))
+        logger.info("TEST Results -> Accuracy: %.4f | mAP: %.4f", test_acc, test_mAP)
+        logger.info("Detailed Classification Report:\n%s", test_metrics["message"])
+        logger.info("Measuring model Inference Latency on device...")
+        latency_ms = self._measure_latency_per_sample(warm_up_steps=10, num_steps=50)
         result = {
             "best_epoch": float(best_epoch),
             "best_val_score": float(best_score),
             "test_loss": float(test_metrics["loss"]),
-            "test_accuracy": float(test_metrics["accuracy"]),
-            "test_precision_macro": float(test_metrics["precision_macro"]),
-            "test_recall_macro": float(test_metrics["recall_macro"]),
+            "test_accuracy": test_acc,
+            "test_mAP": test_mAP,
+            "test_precision_macro": float(test_metrics["prec_macro"]),
+            "test_recall_macro": float(test_metrics["rec_macro"]),
             "test_f1_macro": float(test_metrics["f1_macro"]),
-            "test_precision_weighted": float(test_metrics["precision_weighted"]),
-            "test_recall_weighted": float(test_metrics["recall_weighted"]),
+            "test_precision_weighted": float(test_metrics["prec_weighted"]),
+            "test_recall_weighted": float(test_metrics["rec_weighted"]),
             "test_f1_weighted": float(test_metrics["f1_weighted"]),
         }
         save_metrics_csv(result, self.output_dir / "result.csv")
-        save_confusion_outputs(test_metrics["y_true"], test_metrics["y_pred"], self.output_dir)
+        save_confusion_outputs(test_metrics["y_true"].tolist(), test_metrics["y_pred"].tolist(), self.output_dir)
+        if best_val_statistics is not None:
+            self.history_logger.save_summary(training_time, latency_ms, best_val_statistics, test_metrics)
         logger.info(
             "Final test result | loss=%.4f | acc=%.4f | f1_macro=%.4f | output=%s",
             result["test_loss"],
@@ -258,6 +543,28 @@ class MultimodalTrainer:
             self.output_dir,
         )
         return result
+
+    def _measure_latency_per_sample(self, warm_up_steps: int = 10, num_steps: int = 50) -> float:
+        self.model.eval()
+        waveform = torch.zeros(1, self.cfg.audio_features.sample_rate * 2, device=self.device)
+        video = torch.zeros(
+            1,
+            3,
+            self.cfg.video_features.image_size,
+            self.cfg.video_features.image_size,
+            device=self.device,
+        )
+        with torch.no_grad():
+            for _ in range(warm_up_steps):
+                _ = self.model(waveform=waveform, video_form=video)
+            _sync_device(self.device)
+            start = time.perf_counter()
+            for _ in range(num_steps):
+                _ = self.model(waveform=waveform, video_form=video)
+            _sync_device(self.device)
+        latency_ms = ((time.perf_counter() - start) / max(1, num_steps)) * 1000.0
+        logger.info("Inference latency: %.3f ms/sample", latency_ms)
+        return latency_ms
 
 
 def save_cv_summary(fold_results: List[Dict[str, float]], output_dir: str | Path) -> None:
