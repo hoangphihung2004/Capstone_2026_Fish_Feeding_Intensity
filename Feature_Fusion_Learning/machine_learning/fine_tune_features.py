@@ -73,6 +73,7 @@ def run_one_feature_set(config, mode, fold=None):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     models = get_models(config.get("models"))
+    trial_n_jobs = int(config.get("trial_n_jobs", 1))
     rows = []
 
     for model_name, model_info in models.items():
@@ -98,6 +99,7 @@ def run_one_feature_set(config, mode, fold=None):
             feature_set.y_train,
             x_val_use,
             feature_set.y_val,
+            trial_n_jobs=trial_n_jobs,
         )
 
         best_model = clone(model)
@@ -149,6 +151,7 @@ def run_one_feature_set(config, mode, fold=None):
             "num_test": int(len(feature_set.y_test)),
             "num_features": int(feature_set.x_train.shape[1]),
             "models": list(models.keys()),
+            "trial_n_jobs": trial_n_jobs,
         },
         output_dir / "run_info.json",
     )

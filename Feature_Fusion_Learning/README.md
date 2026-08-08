@@ -18,10 +18,13 @@ Edit only `config/fine_tune_config.json` for feature inputs and model selection:
   "folds": "all",
   "num_folds": 5,
   "seed": 42,
+  "trial_n_jobs": 4,
   "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
   "output_dir": "outputs"
 }
 ```
+
+`trial_n_jobs` controls how many hyperparameter trials run in parallel. It does not change the number of trials or the search space.
 
 Set Hugging Face upload in `config/artifact_upload_config.json`. Leave `source_dir`, `zip_path`, and `path_in_repo` empty to use the default source folder and generated artifact name. Set `repo_id` before running if upload is required.
 

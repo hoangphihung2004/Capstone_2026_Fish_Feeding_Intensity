@@ -9,6 +9,7 @@
   "folds": "all",
   "num_folds": 5,
   "seed": 42,
+  "trial_n_jobs": 4,
   "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
   "output_dir": "outputs"
 }

@@ -1,8 +1,15 @@
+import os
 import random
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
 from typing import Iterable
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 import numpy as np
 from tqdm import tqdm
@@ -135,26 +142,74 @@ def get_random_params(param_grid, n_iter):
     return params_list
 
 
-def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_val, y_val):
+def _set_inner_n_jobs(model_instance, outer_n_jobs: int):
+    if outer_n_jobs > 1 and "n_jobs" in model_instance.get_params():
+        model_instance.set_params(n_jobs=1)
+    return model_instance
+
+
+def _evaluate_params(index, model_name, model, params, x_train, y_train, x_val, y_val, trial_n_jobs):
+    model_instance = clone(model)
+    model_instance.set_params(**params)
+    model_instance = _set_inner_n_jobs(model_instance, trial_n_jobs)
+    model_instance.fit(x_train, y_train)
+    y_pred_val = model_instance.predict(x_val)
+    acc = accuracy_score(y_val, y_pred_val)
+    return index, params, acc
+
+
+def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_val, y_val, trial_n_jobs=1):
     best_param = None
     best_acc = -1
+    best_index = None
+    trial_n_jobs = max(1, int(trial_n_jobs))
     params_list = get_random_params(param_grid, n_iter)
     start_time = time.time()
 
-    progress = tqdm(params_list, desc=f"Fine tuning - {model_name}")
-    for params in progress:
-        try:
-            model_instance = clone(model)
-            model_instance.set_params(**params)
-            model_instance.fit(x_train, y_train)
-            y_pred_val = model_instance.predict(x_val)
-            acc = accuracy_score(y_val, y_pred_val)
-            if acc > best_acc:
-                best_acc = acc
-                best_param = params
-            progress.set_postfix(best_val_acc=f"{best_acc:.4f}")
-        except Exception:
-            pass
+    if trial_n_jobs == 1:
+        progress = tqdm(list(enumerate(params_list)), desc=f"Fine tuning - {model_name}")
+        for index, params in progress:
+            try:
+                _, candidate_params, acc = _evaluate_params(
+                    index, model_name, model, params, x_train, y_train, x_val, y_val, trial_n_jobs
+                )
+                if acc > best_acc or (acc == best_acc and (best_index is None or index < best_index)):
+                    best_acc = acc
+                    best_param = candidate_params
+                    best_index = index
+                progress.set_postfix(best_val_acc=f"{best_acc:.4f}", n_jobs=trial_n_jobs)
+            except Exception:
+                pass
+    else:
+        progress = tqdm(total=len(params_list), desc=f"Fine tuning - {model_name}")
+        with ThreadPoolExecutor(max_workers=trial_n_jobs) as executor:
+            futures = [
+                executor.submit(
+                    _evaluate_params,
+                    index,
+                    model_name,
+                    model,
+                    params,
+                    x_train,
+                    y_train,
+                    x_val,
+                    y_val,
+                    trial_n_jobs,
+                )
+                for index, params in enumerate(params_list)
+            ]
+            for future in as_completed(futures):
+                try:
+                    index, candidate_params, acc = future.result()
+                    if acc > best_acc or (acc == best_acc and (best_index is None or index < best_index)):
+                        best_acc = acc
+                        best_param = candidate_params
+                        best_index = index
+                except Exception:
+                    pass
+                progress.update(1)
+                progress.set_postfix(best_val_acc=f"{best_acc:.4f}", n_jobs=trial_n_jobs)
+        progress.close()
 
     tuning_time = time.time() - start_time
     if best_param is None:
