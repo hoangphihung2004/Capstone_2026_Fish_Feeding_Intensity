@@ -8,6 +8,9 @@ from .swin_tiny import SwinTiny
 from .vit_base_16 import ViTBase16
 from .convnext_tiny import ConvNeXtTiny
 from .s3d import S3D
+from .x3d_xs import X3DXS
+from .x3d_m import X3DM
+from .i3d import I3D
 
 __all__ = [
     "VideoModel",
@@ -20,4 +23,8 @@ __all__ = [
     "ViTBase16",
     "ConvNeXtTiny",
     "S3D",
+    "X3DXS",
+    "X3DM",
+    "I3D",
 ]
+

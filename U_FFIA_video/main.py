@@ -23,6 +23,7 @@ from models import (
     ConvNeXtTiny,
     DenseNet121,
     EfficientNetB0,
+    I3D,
     MobileNetV2,
     ResNet18,
     ResNet50,
@@ -30,6 +31,8 @@ from models import (
     SwinTiny,
     VideoModel,
     ViTBase16,
+    X3DXS,
+    X3DM,
 )
 from tasks import VideoTrainer
 
@@ -57,6 +60,9 @@ MODEL_REGISTRY = {
     "ViTBase16": ViTBase16,
     "ConvNeXtTiny": ConvNeXtTiny,
     "S3D": S3D,
+    "X3DXS": X3DXS,
+    "X3DM": X3DM,
+    "I3D": I3D,
 }
 
 
