@@ -3,6 +3,7 @@ import sys
 import copy
 import csv
 import json
+import inspect
 from pathlib import Path
 from datetime import datetime
 import zipfile
@@ -78,7 +79,23 @@ def validate_backbone_config(config: TrainConfig) -> None:
 def build_backbone(config: TrainConfig):
     validate_backbone_config(config)
     backbone_cls = MODEL_REGISTRY[config.model.backbone]
-    return backbone_cls(classes_num=4, pretrained=config.model.pretrained)
+    
+    # Inspect backbone constructor to pass appropriate parameters
+    sig = inspect.signature(backbone_cls.__init__)
+    kwargs = {}
+    if "classes_num" in sig.parameters:
+        kwargs["classes_num"] = 4
+    elif "num_classes" in sig.parameters:
+        kwargs["num_classes"] = 4
+        
+    if "pretrained" in sig.parameters:
+        kwargs["pretrained"] = config.model.pretrained
+    if "image_size" in sig.parameters:
+        kwargs["image_size"] = config.video_features.image_size
+    if "frames" in sig.parameters:
+        kwargs["frames"] = config.video_features.frames
+        
+    return backbone_cls(**kwargs)
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
