@@ -1,0 +1,70 @@
+{
+  "seed": 42,
+  "device": "cuda",
+  "num_classes": 4,
+  "evaluation_mode": "both",
+  "epochs": 200,
+  "learning_rate": 0.0001,
+  "weight_decay": 0.0001,
+  "optimizer": "adamw",
+  "monitor": "accuracy",
+  "early_stopping": true,
+  "patience": 30,
+  "delta": 0.0,
+  "output_dir": "outputs",
+  "audio": {
+    "backbone": "PANNS_Cnn6",
+    "pretrained": false,
+    "freeze": false,
+    "checkpoint_path": ""
+  },
+  "video": {
+    "backbone": "EfficientNetB0",
+    "pretrained": true,
+    "freeze": false,
+    "checkpoint_path": ""
+  },
+  "fusion": {
+    "type": "raw_concat",
+    "proj_dim": 256,
+    "hidden_dim": 256,
+    "dropout": 0.3,
+    "num_heads": 4,
+    "activation": "relu",
+    "use_batchnorm": true
+  },
+  "dataset": {
+    "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
+    "use_existing_splits": true,
+    "holdout_splits_dir": "",
+    "cross_validation_splits_dir": "",
+    "cache_audio": true,
+    "cache_video": true,
+    "video_cache_mode": "ram",
+    "video_decode_backend": "opencv",
+    "num_workers": -1,
+    "batch_size": 32,
+    "prefetch_factor": null,
+    "seed": 42,
+    "split_strategy": "random_sample",
+    "test_sample_per_class": 700,
+    "num_folds": 5,
+    "cv_val_ratio": 0.2
+  },
+  "audio_features": {
+    "sample_rate": 64000,
+    "window_size": 2048,
+    "hop_size": 1024,
+    "mel_bins": 128,
+    "fmin": 1,
+    "fmax": 32000,
+    "time_drop_width": 64,
+    "time_stripes_num": 2,
+    "freq_drop_width": 8,
+    "freq_stripes_num": 2,
+    "freeze_parameters": true
+  },
+  "video_features": {
+    "image_size": 224
+  }
+}
