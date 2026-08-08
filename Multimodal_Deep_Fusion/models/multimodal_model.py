@@ -22,7 +22,7 @@ def _strict_load_checkpoint(module: nn.Module, checkpoint_path: str, prefix: str
     path = Path(checkpoint_path)
     if not path.exists():
         raise FileNotFoundError(f"{prefix} checkpoint not found: {checkpoint_path}")
-    checkpoint = torch.load(path, map_location="cpu")
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     state_dict = checkpoint.get("model_state_dict", checkpoint.get("state_dict", checkpoint))
     if any(key.startswith("module.") for key in state_dict):
         state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}

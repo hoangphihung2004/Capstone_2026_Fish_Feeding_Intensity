@@ -508,7 +508,7 @@ class MultimodalTrainer:
 
         logger.info("==================================================")
         logger.info("Training complete. Starting evaluation on Test split...")
-        checkpoint = torch.load(best_path, map_location=self.device)
+        checkpoint = torch.load(best_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         logger.info("Reloaded best checkpoint model from Epoch %d...", int(checkpoint["epoch"]))
         test_metrics = self._run_epoch("test", train=False)
