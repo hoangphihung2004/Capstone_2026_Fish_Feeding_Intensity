@@ -32,6 +32,7 @@ def _run_holdout(cfg, root: Path) -> Dict[str, float]:
         dataset_cfg=cfg.dataset,
         sample_rate=cfg.audio_features.sample_rate,
         image_size=cfg.video_features.image_size,
+        batch_size=cfg.batch_size,
     )
     trainer = MultimodalTrainer(
         cfg=cfg,
@@ -54,6 +55,7 @@ def _run_cross_validation(cfg, root: Path) -> List[Dict[str, float]]:
             dataset_cfg=cfg.dataset,
             sample_rate=cfg.audio_features.sample_rate,
             image_size=cfg.video_features.image_size,
+            batch_size=cfg.batch_size,
         )
         trainer = MultimodalTrainer(
             cfg=cfg,

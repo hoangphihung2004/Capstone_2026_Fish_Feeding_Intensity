@@ -65,9 +65,7 @@ class DatasetConfig(BaseModel):
     cache_audio: bool = True
     cache_video: bool = True
     video_cache_mode: Literal["none", "ram", "disk"] = "ram"
-    video_decode_backend: Literal["opencv", "decord"] = "opencv"
     num_workers: int = -1
-    batch_size: int = 32
     prefetch_factor: Optional[int] = None
     seed: int = 42
     split_strategy: Literal["random_sample", "time_series", "group_random"] = "random_sample"
@@ -82,6 +80,7 @@ class TrainConfig(BaseModel):
     num_classes: int = 4
     evaluation_mode: Literal["holdout", "cross_validation"] = "holdout"
     epochs: int = 200
+    batch_size: int = 256
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
     optimizer: Literal["adam", "adamw", "sgd"] = "adamw"

@@ -158,7 +158,6 @@ class MultimodalFishDataset(Dataset):
         image_size: int,
         cache_audio: bool,
         cache_video: bool,
-        video_decode_backend: str,
         num_workers: int,
     ) -> None:
         self.entries = entries
@@ -167,7 +166,6 @@ class MultimodalFishDataset(Dataset):
         self.image_size = image_size
         self.cache_audio = cache_audio
         self.cache_video = cache_video
-        self.video_decode_backend = video_decode_backend
         self.preload_workers = max(1, num_workers)
         self.audio_cache: Optional[List[np.ndarray]] = None
         self.video_cache: Optional[List[Dict[str, Any]]] = None
@@ -210,12 +208,11 @@ class MultimodalFishDataset(Dataset):
         logger.info("Cached %s audio to RAM: %.1f MB", self.split, total_bytes / (1024**2))
 
     def _decode_video(self, video_path: str, label: int) -> Dict[str, Any]:
-        if self.video_decode_backend == "decord":
-            try:
-                return _decode_center_image(video_path=video_path, label=label, image_size=self.image_size)
-            except Exception as exc:
-                logger.warning("Decord failed for '%s', falling back to OpenCV. Error: %s", video_path, exc)
-        return _decode_center_image_cv2(video_path=video_path, label=label, image_size=self.image_size)
+        try:
+            return _decode_center_image(video_path=video_path, label=label, image_size=self.image_size)
+        except Exception as exc:
+            logger.warning("Decord failed for '%s', falling back to OpenCV. Error: %s", video_path, exc)
+            return _decode_center_image_cv2(video_path=video_path, label=label, image_size=self.image_size)
 
     def _preload_video(self) -> None:
         logger.info("Preloading %s center-frame video samples to RAM (%d samples)...", self.split, len(self.entries))
@@ -287,6 +284,7 @@ def create_dataloaders(
     dataset_cfg: DatasetConfig,
     sample_rate: int,
     image_size: int,
+    batch_size: int,
 ) -> Dict[str, DataLoader]:
     workers = resolve_num_workers(dataset_cfg.num_workers)
     loaders: Dict[str, DataLoader] = {}
@@ -298,12 +296,11 @@ def create_dataloaders(
             image_size=image_size,
             cache_audio=dataset_cfg.cache_audio,
             cache_video=dataset_cfg.cache_video and dataset_cfg.video_cache_mode == "ram",
-            video_decode_backend=dataset_cfg.video_decode_backend,
             num_workers=workers,
         )
         dataloader_kwargs = {
             "dataset": dataset,
-            "batch_size": dataset_cfg.batch_size,
+            "batch_size": batch_size,
             "shuffle": split_name == "train",
             "drop_last": False,
             "num_workers": workers,
