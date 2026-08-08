@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from huggingface_hub import HfApi
+from huggingface_hub import get_token
 
 
 def safe_filename_part(value):
@@ -50,7 +51,11 @@ def build_artifact_name(fine_config, timestamp=None):
 def zip_directory(source_dir, zip_path):
     source_dir = Path(source_dir).resolve()
     zip_path = Path(zip_path).resolve()
+    if not source_dir.is_dir():
+        raise FileNotFoundError(f"Artifact source_dir does not exist or is not a directory: {source_dir}")
     zip_path.parent.mkdir(parents=True, exist_ok=True)
+    if zip_path.exists():
+        zip_path.unlink()
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for path in source_dir.rglob("*"):
@@ -58,9 +63,29 @@ def zip_directory(source_dir, zip_path):
                 continue
             if path.resolve() == zip_path:
                 continue
-            zip_file.write(path, path.relative_to(source_dir.parent))
+            zip_file.write(path, path.relative_to(source_dir))
 
     return zip_path
+
+
+def resolve_hf_token():
+    token = os.environ.get("HF_TOKEN") or get_token()
+    if token:
+        print("Hugging Face authentication token detected for artifact upload.")
+        return token
+
+    try:
+        from huggingface_hub import HfFolder
+
+        token = HfFolder.get_token()
+    except Exception:
+        token = None
+
+    if token:
+        print("Hugging Face authentication token detected for artifact upload.")
+    else:
+        print("No explicit Hugging Face token was detected; relying on the active Hugging Face CLI session.")
+    return token
 
 
 def upload_artifact_if_enabled(upload_config, fine_config, default_source_dir=None):
@@ -81,16 +106,17 @@ def upload_artifact_if_enabled(upload_config, fine_config, default_source_dir=No
 
     repo_type = upload_config.get("repo_type", "dataset")
     path_in_repo = upload_config.get("path_in_repo") or artifact_name
-    token = os.environ.get("HF_TOKEN")
+    token = resolve_hf_token()
     api = HfApi(token=token)
     if upload_config.get("create_repo", True):
-        api.create_repo(repo_id=repo_id, repo_type=repo_type, exist_ok=True)
+        api.create_repo(repo_id=repo_id, repo_type=repo_type, token=token, exist_ok=True)
 
     api.upload_file(
         path_or_fileobj=str(zip_path),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type=repo_type,
+        token=token,
     )
     print(f"Uploaded artifact: {repo_id}/{path_in_repo}")
     return zip_path

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Dict, Tuple
 
 import numpy as np
@@ -74,6 +75,26 @@ def label_names_from_metadata(metadata: pd.DataFrame) -> Dict[int, str]:
     return names
 
 
+def fusion_sample_key(value) -> str:
+    key = str(value).strip().replace("\\", "/")
+    return re.sub(r"(?i)(^|[/_-])(audio|video)(?=[/_-]|$)", r"\1modality", key)
+
+
+def validate_unique_fusion_keys(metadata: pd.DataFrame, split: str, modality: str) -> None:
+    duplicate_mask = metadata.duplicated(["_fusion_key", "split", "_join_label"], keep=False)
+    if not duplicate_mask.any():
+        return
+
+    examples = metadata.loc[
+        duplicate_mask,
+        ["sample_key", "_fusion_key", "split", "_join_label"],
+    ].head(5)
+    raise ValueError(
+        f"Duplicate normalized sample keys in {modality} metadata for split '{split}'. "
+        f"Examples: {examples.to_dict(orient='records')}"
+    )
+
+
 def split_single_modality(features: np.ndarray, metadata: pd.DataFrame, feature_name: str) -> SplitFeatures:
     y_col = label_column(metadata)
     label_names = label_names_from_metadata(metadata)
@@ -117,16 +138,21 @@ def merge_modalities(
 
         a["_join_label"] = a[audio_y_col].astype(str)
         v["_join_label"] = v[video_y_col].astype(str)
+        a["_fusion_key"] = a["sample_key"].apply(fusion_sample_key)
+        v["_fusion_key"] = v["sample_key"].apply(fusion_sample_key)
         a["_target_label"] = a[audio_y_col]
         v["_target_label"] = v[video_y_col]
-        key_cols = ["sample_key", "split", "_join_label"]
+        validate_unique_fusion_keys(a, split, "audio")
+        validate_unique_fusion_keys(v, split, "video")
+
+        key_cols = ["_fusion_key", "split", "_join_label"]
         merged = a.merge(v, on=key_cols, suffixes=("_audio", "_video"), how="inner")
         if len(merged) != len(a) or len(merged) != len(v):
-            missing_audio = set(zip(a["sample_key"], a["split"], a["_join_label"])) - set(
-                zip(merged["sample_key"], merged["split"], merged["_join_label"])
+            missing_audio = set(zip(a["_fusion_key"], a["split"], a["_join_label"])) - set(
+                zip(merged["_fusion_key"], merged["split"], merged["_join_label"])
             )
-            missing_video = set(zip(v["sample_key"], v["split"], v["_join_label"])) - set(
-                zip(merged["sample_key"], merged["split"], merged["_join_label"])
+            missing_video = set(zip(v["_fusion_key"], v["split"], v["_join_label"])) - set(
+                zip(merged["_fusion_key"], merged["split"], merged["_join_label"])
             )
             raise ValueError(
                 f"Audio/video feature mismatch for split '{split}'. "
@@ -135,7 +161,7 @@ def merge_modalities(
                 f"missing_video_examples={list(missing_video)[:3]}"
             )
 
-        merged = merged.sort_values(["sample_key", "feature_index_audio", "feature_index_video"])
+        merged = merged.sort_values(["_fusion_key", "feature_index_audio", "feature_index_video"])
         x_audio = audio_features[merged["feature_index_audio"].astype(int).to_numpy()]
         x_video = video_features[merged["feature_index_video"].astype(int).to_numpy()]
         outputs[f"x_{split}"] = np.concatenate([x_audio, x_video], axis=1)
