@@ -9,3 +9,6 @@ tqdm
 matplotlib
 decord
 huggingface_hub
+fvcore
+pytorchvideo
+
