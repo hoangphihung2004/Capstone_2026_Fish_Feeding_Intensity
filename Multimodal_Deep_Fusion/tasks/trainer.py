@@ -42,20 +42,6 @@ def _score(metrics: Dict[str, float], monitor: str) -> float:
     return metrics[monitor]
 
 
-def _count_parameters(model: nn.Module) -> tuple[int, int]:
-    total = sum(param.numel() for param in model.parameters())
-    trainable = sum(param.numel() for param in model.parameters() if param.requires_grad)
-    return total, trainable
-
-
-def _gpu_memory_summary(device: torch.device) -> str:
-    if device.type != "cuda":
-        return "GPU memory: unavailable"
-    allocated = torch.cuda.memory_allocated(device) / (1024**3)
-    reserved = torch.cuda.memory_reserved(device) / (1024**3)
-    return f"GPU memory: allocated={allocated:.2f}GB, reserved={reserved:.2f}GB"
-
-
 def _sync_device(device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
@@ -337,23 +323,15 @@ class MultimodalTrainer:
         self._log_initial_state()
 
     def _log_initial_state(self) -> None:
-        total_params, trainable_params = _count_parameters(self.model)
         logger.info("==================================================")
-        logger.info("Initialized multimodal trainer: %s", self.run_name)
-        logger.info("  - Device:                   %s", self.device)
-        logger.info("  - Output directory:         %s", self.output_dir)
-        logger.info("  - Epochs:                   %s", self.cfg.epochs)
-        logger.info("  - Batch size:               %s", self.cfg.batch_size)
-        logger.info("  - Optimizer:                %s", self.cfg.optimizer)
-        logger.info("  - Learning rate:            %s", self.cfg.learning_rate)
-        logger.info("  - Weight decay:             %s", self.cfg.weight_decay)
-        logger.info("  - Monitor:                  %s", self.cfg.monitor)
-        logger.info("  - Early stopping:           %s", self.cfg.early_stopping)
-        logger.info("  - Total parameters:         %s", f"{total_params:,}")
-        logger.info("  - Trainable parameters:     %s", f"{trainable_params:,}")
-        for split_name in ("train", "val", "test"):
-            logger.info("  - %-5s samples:             %s", split_name, len(self.loaders[split_name].dataset))
-        logger.info("  - %s", _gpu_memory_summary(self.device))
+        logger.info("MultimodalTrainer successfully initialized:")
+        logger.info("  - Monitor Metric:               '%s'", self.cfg.monitor)
+        logger.info("  - Early Stopping Enabled:       %s", self.cfg.early_stopping)
+        if self.cfg.early_stopping:
+            logger.info("    * Patience:                   %s epochs", self.cfg.patience)
+            logger.info("    * Delta:                      %s", self.cfg.delta)
+        logger.info("  - Checkpoint Dir:               '%s'", self.output_dir / "checkpoint")
+        logger.info("  - Precision:                    FP32")
         logger.info("==================================================")
 
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
@@ -363,11 +341,8 @@ class MultimodalTrainer:
         all_pred: List[int] = []
         all_logits: List[List[float]] = []
         loader = self.loaders[split]
-        if epoch is None:
-            desc = f"{self.run_name} {split}"
-        else:
-            desc = f"{self.run_name} epoch {epoch:03d}/{self.cfg.epochs:03d} {split}"
-        iterator = tqdm(loader, desc=desc, unit="batch")
+        desc = f"Epoch {epoch}/{self.cfg.epochs}" if epoch is not None else split
+        iterator = tqdm(loader, desc=desc, unit="batch", disable=not train)
         for batch in iterator:
             waveform = batch["waveform"].to(self.device, non_blocking=True)
             video_form = batch["video_form"].to(self.device, non_blocking=True)
@@ -387,20 +362,11 @@ class MultimodalTrainer:
             all_true.extend(target.detach().cpu().numpy().astype(int).tolist())
             all_pred.extend(pred.detach().cpu().numpy().astype(int).tolist())
             all_logits.extend(torch.softmax(logits.detach(), dim=1).cpu().numpy().astype(float).tolist())
-            acc = float(np.mean(np.asarray(all_true) == np.asarray(all_pred)))
-            running_loss = total_loss / max(1, len(all_true))
-            iterator.set_postfix(batch_loss=f"{loss.item():.4f}", loss=f"{running_loss:.4f}", acc=f"{acc:.4f}")
+            if train:
+                iterator.set_postfix({"Loss": f"{loss.item():.4f}"})
 
         metrics = _statistics_from_outputs(all_true, all_logits, self.cfg.num_classes)
         metrics["loss"] = total_loss / max(1, len(all_true))
-        logger.info(
-            "%s %s completed | loss=%.4f | acc=%.4f | f1_macro=%.4f",
-            self.run_name,
-            split,
-            metrics["loss"],
-            metrics["accuracy"],
-            metrics["f1_macro"],
-        )
         return metrics
 
     def fit(self) -> Dict[str, float]:
@@ -415,12 +381,9 @@ class MultimodalTrainer:
         best_path.parent.mkdir(parents=True, exist_ok=True)
         train_start_time = time.perf_counter()
 
-        logger.info("==================================================")
-        logger.info("Starting training loop for %s", self.run_name)
-        logger.info("Checkpoint path: %s", best_path)
-        logger.info("==================================================")
+        logger.info("Starting training pipeline (Monitor metric: %s)...", self.cfg.monitor)
 
-        for epoch in range(1, self.cfg.epochs + 1):
+        for epoch in range(self.cfg.epochs):
             train_metrics = self._run_epoch("train", train=True, epoch=epoch)
             val_metrics = self._run_epoch("val", train=False, epoch=epoch)
             row = {
@@ -439,13 +402,10 @@ class MultimodalTrainer:
                 best_mAP = float(np.mean(val_metrics["average_precision"]))
                 best_loss = float(val_metrics["loss"])
                 best_val_statistics = val_metrics
-                bad_epochs_for_log = 0
-            else:
-                bad_epochs_for_log = bad_epochs + 1
             logger.info(
                 (
                     "Epoch %d: Train Loss = %.5f | Train Acc = %.4f | Train mAP = %.4f | "
-                    "Val Loss = %.5f | Val Acc = %.4f | Val mAP = %.4f | bad_epochs=%d | %s"
+                    "Val Loss = %.5f | Val Acc = %.4f | Val mAP = %.4f"
                 ),
                 epoch,
                 row["train_loss"],
@@ -454,8 +414,6 @@ class MultimodalTrainer:
                 row["val_loss"],
                 row["val_accuracy"],
                 row["val_mAP"],
-                bad_epochs_for_log,
-                _gpu_memory_summary(self.device),
             )
 
             if improved:
@@ -475,7 +433,7 @@ class MultimodalTrainer:
                 logger.info(
                     "Saved best model checkpoint to: '%s' (Monitor value = %.5f)",
                     best_path,
-                    best_score,
+                    row["val_loss"] if self.cfg.monitor == "loss" else row["val_accuracy"],
                 )
             self.history_logger.log_epoch(
                 epoch=epoch,
