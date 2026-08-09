@@ -9,7 +9,7 @@
   "weight_decay": 0.0001,
   "optimizer": "adamw",
   "monitor": "accuracy",
-  "early_stopping": true,
+  "early_stopping": false,
   "patience": 30,
   "delta": 0.0,
   "output_dir": "outputs",
