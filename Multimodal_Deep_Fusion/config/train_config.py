@@ -82,7 +82,6 @@ class TrainConfig(BaseModel):
     epochs: int = 200
     batch_size: int = 256
     learning_rate: float = 1e-3
-    weight_decay: float = 1e-4
     optimizer: Literal["adam", "adamw", "sgd"] = "adamw"
     monitor: Literal["accuracy", "f1_macro", "loss"] = "accuracy"
     early_stopping: bool = True

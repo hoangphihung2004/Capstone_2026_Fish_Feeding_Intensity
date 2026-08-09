@@ -27,7 +27,6 @@ def _log_run_configuration(cfg, root: Path) -> None:
     logger.info("  - Batch size:               %s", cfg.batch_size)
     logger.info("  - Optimizer:                %s", cfg.optimizer)
     logger.info("  - Learning rate:            %s", cfg.learning_rate)
-    logger.info("  - Weight decay:             %s", cfg.weight_decay)
     logger.info("  - Early stopping:           %s", cfg.early_stopping)
     logger.info("  - Monitor metric:           %s", cfg.monitor)
     logger.info("  - Dataset path:             %s", cfg.dataset.dataset_path)
