@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.optim import Adam, AdamW, SGD
+from torch.optim import Adam
 from sklearn import metrics as sklearn_metrics
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
 from tqdm import tqdm
@@ -29,11 +29,7 @@ logger = logging.getLogger(__name__)
 
 def _optimizer(parameters, cfg: TrainConfig):
     params = [param for param in parameters if param.requires_grad]
-    if cfg.optimizer == "adam":
-        return Adam(params, lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
-    if cfg.optimizer == "sgd":
-        return SGD(params, lr=cfg.learning_rate, weight_decay=cfg.weight_decay, momentum=0.9)
-    return AdamW(params, lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
+    return Adam(params, lr=cfg.learning_rate)
 
 
 def _score(metrics: Dict[str, float], monitor: str) -> float:
