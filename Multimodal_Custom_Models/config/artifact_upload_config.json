@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "source_dir": "/marimo/Capstone_2026_Fish_Feeding_Intensity",
+  "repo_id": "hoangphihung442004/Results_Multimodal_Custom_Models",
+  "repo_type": "dataset",
+  "path_in_repo": "",
+  "create_repo": true,
+  "include_source_code": true
+}
