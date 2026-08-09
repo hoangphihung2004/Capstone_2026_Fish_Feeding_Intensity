@@ -85,6 +85,42 @@ def _statistics_from_outputs(y_true: List[int], logits: List[List[float]], num_c
     }
 
 
+class EarlyStopping:
+    def __init__(self, patience: int = 30, delta: float = 0.0, verbose: bool = True) -> None:
+        self.patience = patience
+        self.delta = delta
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+
+    def reset(self) -> None:
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        logger.info("Early Stopping state has been reset.")
+
+    def step(self, score: float) -> bool:
+        if self.best_score is None:
+            self.best_score = score
+            self.counter = 0
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                logger.info("Early Stopping: %d/%d epochs without improvement.", self.counter, self.patience)
+            if self.counter >= self.patience:
+                self.early_stop = True
+                logger.warning(
+                    "Early Stopping triggered: Metric did not improve by delta=%s for %d consecutive epochs.",
+                    self.delta,
+                    self.patience,
+                )
+        else:
+            self.best_score = score
+            self.counter = 0
+        return self.early_stop
+
+
 class MultimodalHistoryLogger:
     def __init__(self, log_dir: str | Path) -> None:
         self.log_dir = Path(log_dir)
@@ -312,6 +348,11 @@ class MultimodalTrainer:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = _optimizer(self.model.parameters(), cfg)
         self.history_logger = MultimodalHistoryLogger(log_dir=self.output_dir)
+        self.early_stopping = cfg.early_stopping
+        if self.early_stopping:
+            self.early_stopper = EarlyStopping(patience=cfg.patience, delta=cfg.delta, verbose=True)
+        else:
+            self.early_stopper = None
 
         with (self.output_dir / "config_snapshot.json").open("w", encoding="utf-8") as f:
             json.dump(cfg.model_dump(), f, indent=2, ensure_ascii=False)
@@ -376,10 +417,12 @@ class MultimodalTrainer:
         best_loss = float("inf")
         best_epoch = 0
         best_val_statistics = None
-        bad_epochs = 0
         best_path = self.output_dir / "checkpoint" / "multimodal_best.pt"
         best_path.parent.mkdir(parents=True, exist_ok=True)
         train_start_time = time.perf_counter()
+
+        if self.early_stopping and self.early_stopper is not None:
+            self.early_stopper.reset()
 
         logger.info("Starting training pipeline (Monitor metric: %s)...", self.cfg.monitor)
 
@@ -419,7 +462,6 @@ class MultimodalTrainer:
             if improved:
                 best_score = current_score
                 best_epoch = epoch
-                bad_epochs = 0
                 torch.save(
                     {
                         "epoch": epoch,
@@ -445,9 +487,8 @@ class MultimodalTrainer:
                 is_best=improved,
             )
 
-            if not improved:
-                bad_epochs += 1
-                if self.cfg.early_stopping and bad_epochs >= self.cfg.patience:
+            if self.early_stopping and self.early_stopper is not None:
+                if self.early_stopper.step(current_score):
                     logger.info("Early stopping triggered at epoch %d!", epoch)
                     break
             logger.info(
