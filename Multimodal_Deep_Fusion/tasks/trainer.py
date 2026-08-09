@@ -341,8 +341,8 @@ class MultimodalTrainer:
         all_pred: List[int] = []
         all_logits: List[List[float]] = []
         loader = self.loaders[split]
-        desc = f"Epoch {epoch}/{self.cfg.epochs}" if epoch is not None else split
-        iterator = tqdm(loader, desc=desc, unit="batch", disable=not train)
+        desc = f"Epoch {epoch}/{self.cfg.epochs}" if train and epoch is not None else "Running model evaluation..."
+        iterator = tqdm(loader, desc=desc, unit="batch")
         for batch in iterator:
             waveform = batch["waveform"].to(self.device, non_blocking=True)
             video_form = batch["video_form"].to(self.device, non_blocking=True)
