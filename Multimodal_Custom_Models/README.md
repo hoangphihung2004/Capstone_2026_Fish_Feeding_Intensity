@@ -45,6 +45,8 @@ train_config.json
 splitter_config.json
 distillation_config.json
 run_info.json
+model_summary.json
+model_architecture.txt
 history.csv
 summary.csv
 result.csv

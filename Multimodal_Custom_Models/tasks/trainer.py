@@ -49,6 +49,24 @@ def _sync_device(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
+def _count_parameters(model: nn.Module) -> Dict[str, int]:
+    total = sum(param.numel() for param in model.parameters())
+    trainable = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    return {
+        "total": int(total),
+        "trainable": int(trainable),
+        "non_trainable": int(total - trainable),
+    }
+
+
+def _format_param_count(value: int) -> str:
+    if value >= 1_000_000:
+        return f"{value:,} ({value / 1_000_000:.3f}M)"
+    if value >= 1_000:
+        return f"{value:,} ({value / 1_000:.3f}K)"
+    return f"{value:,}"
+
+
 def _one_hot(labels: List[int], num_classes: int) -> np.ndarray:
     return np.eye(num_classes, dtype=np.float32)[np.asarray(labels, dtype=int)]
 
@@ -355,6 +373,9 @@ class MultimodalTrainer:
             self.video_teacher = self.video_teacher.to(self.device)
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = _optimizer(self._optimizer_parameters(), cfg)
+        self.model_param_counts = _count_parameters(self.model)
+        self.audio_teacher_param_counts = _count_parameters(self.audio_teacher) if self.audio_teacher is not None else None
+        self.video_teacher_param_counts = _count_parameters(self.video_teacher) if self.video_teacher is not None else None
         self.history_logger = MultimodalHistoryLogger(log_dir=self.output_dir)
         self.early_stopping = cfg.early_stopping
         if self.early_stopping:
@@ -385,8 +406,10 @@ class MultimodalTrainer:
                 indent=2,
                 ensure_ascii=False,
             )
+        self._save_model_artifacts()
         save_split_files(splits, self.output_dir / "splits")
         self._log_initial_state()
+        self._run_model_sanity_check()
 
     def _optimizer_parameters(self):
         params = list(self.model.parameters())
@@ -397,10 +420,52 @@ class MultimodalTrainer:
                 params.extend(self.video_teacher.parameters())
         return params
 
+    def _save_model_artifacts(self) -> None:
+        with (self.output_dir / "model_architecture.txt").open("w", encoding="utf-8") as f:
+            f.write(str(self.model))
+            f.write("\n")
+
+        summary = {
+            "model_name": self.cfg.model.name,
+            "device": str(self.device),
+            "input_shapes": {
+                "waveform": [2, self.cfg.audio_features.sample_rate * 2],
+                "video_form": [
+                    2,
+                    3,
+                    self.cfg.video_features.image_size,
+                    self.cfg.video_features.image_size,
+                ],
+            },
+            "parameters": self.model_param_counts,
+            "distillation": {
+                "enabled": self.cfg.distillation.enabled,
+                "mode": self.cfg.distillation.mode if self.cfg.distillation.enabled else "disabled",
+                "audio_teacher_parameters": self.audio_teacher_param_counts,
+                "video_teacher_parameters": self.video_teacher_param_counts,
+            },
+        }
+        with (self.output_dir / "model_summary.json").open("w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
     def _log_initial_state(self) -> None:
         logger.info("==================================================")
         logger.info("MultimodalTrainer successfully initialized:")
         logger.info("  - Model:                        %s", self.cfg.model.name)
+        logger.info("  - Total Parameters:             %s", _format_param_count(self.model_param_counts["total"]))
+        logger.info("  - Trainable Parameters:         %s", _format_param_count(self.model_param_counts["trainable"]))
+        logger.info("  - Non-trainable Parameters:     %s", _format_param_count(self.model_param_counts["non_trainable"]))
+        logger.info(
+            "  - Audio Input Shape:            [%d, %d]",
+            2,
+            self.cfg.audio_features.sample_rate * 2,
+        )
+        logger.info(
+            "  - Video Input Shape:            [%d, 3, %d, %d]",
+            2,
+            self.cfg.video_features.image_size,
+            self.cfg.video_features.image_size,
+        )
         logger.info("  - Monitor Metric:               '%s'", self.cfg.monitor)
         logger.info("  - Early Stopping Enabled:       %s", self.cfg.early_stopping)
         if self.cfg.early_stopping:
@@ -413,6 +478,45 @@ class MultimodalTrainer:
             logger.info("    * Audio Teacher:              %s", self.cfg.distillation.audio_teacher.name)
             logger.info("    * Video Teacher:              %s", self.cfg.distillation.video_teacher.name)
         logger.info("  - Precision:                    FP32")
+        logger.info("  - Architecture Snapshot:        '%s'", self.output_dir / "model_architecture.txt")
+        logger.info("  - Model Summary Snapshot:       '%s'", self.output_dir / "model_summary.json")
+        logger.info("==================================================")
+
+    def _run_model_sanity_check(self) -> None:
+        logger.info("==================================================")
+        logger.info("Running model sanity check before training...")
+        was_training = self.model.training
+        self.model.eval()
+        self.optimizer.zero_grad(set_to_none=True)
+
+        waveform = torch.zeros(2, self.cfg.audio_features.sample_rate * 2, device=self.device)
+        video_form = torch.zeros(
+            2,
+            3,
+            self.cfg.video_features.image_size,
+            self.cfg.video_features.image_size,
+            device=self.device,
+        )
+        target = torch.zeros(2, dtype=torch.long, device=self.device)
+
+        output = self.model(waveform=waveform, video_form=video_form)
+        if "clipwise_output" not in output:
+            raise KeyError("Model forward output must include key 'clipwise_output'.")
+        logits = output["clipwise_output"]
+        expected_shape = (2, self.cfg.num_classes)
+        if tuple(logits.shape) != expected_shape:
+            raise ValueError(f"Model logits shape mismatch: got {tuple(logits.shape)}, expected {expected_shape}.")
+        embedding = output.get("embedding")
+        loss = self.criterion(logits, target)
+        loss.backward()
+        self.optimizer.zero_grad(set_to_none=True)
+        self.model.train(was_training)
+
+        logger.info("  - Forward output shape:         %s", list(logits.shape))
+        if embedding is not None:
+            logger.info("  - Embedding shape:              %s", list(embedding.shape))
+        logger.info("  - Backward check:               passed")
+        logger.info("Model sanity check completed successfully.")
         logger.info("==================================================")
 
     def _compute_loss(
