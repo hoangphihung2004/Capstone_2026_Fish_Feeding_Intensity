@@ -28,7 +28,7 @@
     "type": "linear_concat",
     "proj_dim": 256,
     "hidden_dim": 256,
-    "dropout": 0.3,
+    "dropout": 0.2,
     "num_heads": 4,
     "activation": "relu",
     "use_batchnorm": true
