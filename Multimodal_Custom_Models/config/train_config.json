@@ -14,8 +14,8 @@
   "delta": 0.0,
   "output_dir": "outputs",
   "model": {
-    "name": "AVMobileAttnFiLMNet",
-    "pretrained": false,
+    "name": "AVMobileDIFMEfficientNet",
+    "pretrained": true,
     "checkpoint_path": ""
   },
   "dataset": {

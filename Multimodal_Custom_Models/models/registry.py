@@ -6,9 +6,11 @@ import torch
 
 from config import TrainConfig
 from models.av_mobile_attn_film_net import AVMobileAttnFiLMNet
+from models.av_mobile_difm_efficientnet import AVMobileDIFMEfficientNet
 
 
 MODEL_REGISTRY = {
+    "AVMobileDIFMEfficientNet": AVMobileDIFMEfficientNet,
     "AVMobileAttnFiLMNet": AVMobileAttnFiLMNet,
 }
 

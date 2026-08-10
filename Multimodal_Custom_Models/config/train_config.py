@@ -44,8 +44,8 @@ class SplitterConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    name: str = "AVMobileAttnFiLMNet"
-    pretrained: bool = False
+    name: str = "AVMobileDIFMEfficientNet"
+    pretrained: bool = True
     checkpoint_path: str = ""
 
 

@@ -374,6 +374,11 @@ class MultimodalTrainer:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = _optimizer(self._optimizer_parameters(), cfg)
         self.model_param_counts = _count_parameters(self.model)
+        audio_frontend = getattr(self.model, "audio_frontend", None)
+        self.audio_frontend_param_counts = _count_parameters(audio_frontend) if audio_frontend is not None else None
+        self.learnable_params_excluding_audio_frontend = self.model_param_counts["trainable"]
+        if self.audio_frontend_param_counts is not None:
+            self.learnable_params_excluding_audio_frontend -= self.audio_frontend_param_counts["trainable"]
         self.audio_teacher_param_counts = _count_parameters(self.audio_teacher) if self.audio_teacher is not None else None
         self.video_teacher_param_counts = _count_parameters(self.video_teacher) if self.video_teacher is not None else None
         self.history_logger = MultimodalHistoryLogger(log_dir=self.output_dir)
@@ -438,6 +443,8 @@ class MultimodalTrainer:
                 ],
             },
             "parameters": self.model_param_counts,
+            "learnable_parameters_excluding_audio_frontend": int(self.learnable_params_excluding_audio_frontend),
+            "audio_frontend_parameters": self.audio_frontend_param_counts,
             "distillation": {
                 "enabled": self.cfg.distillation.enabled,
                 "mode": self.cfg.distillation.mode if self.cfg.distillation.enabled else "disabled",
@@ -452,9 +459,28 @@ class MultimodalTrainer:
         logger.info("==================================================")
         logger.info("MultimodalTrainer successfully initialized:")
         logger.info("  - Model:                        %s", self.cfg.model.name)
-        logger.info("  - Total Parameters:             %s", _format_param_count(self.model_param_counts["total"]))
-        logger.info("  - Trainable Parameters:         %s", _format_param_count(self.model_param_counts["trainable"]))
-        logger.info("  - Non-trainable Parameters:     %s", _format_param_count(self.model_param_counts["non_trainable"]))
+        logger.info(
+            "  - Total Module Parameters:      %s",
+            _format_param_count(self.model_param_counts["total"]),
+        )
+        logger.info(
+            "  - Trainable Parameters:         %s",
+            _format_param_count(self.model_param_counts["trainable"]),
+        )
+        logger.info(
+            "  - Learnable Model Parameters:   %s",
+            _format_param_count(self.learnable_params_excluding_audio_frontend),
+        )
+        logger.info(
+            "  - Non-trainable Parameters:     %s",
+            _format_param_count(self.model_param_counts["non_trainable"]),
+        )
+        if self.audio_frontend_param_counts is not None:
+            logger.info(
+                "  - Audio Frontend Parameters:    %s total | %s trainable",
+                _format_param_count(self.audio_frontend_param_counts["total"]),
+                _format_param_count(self.audio_frontend_param_counts["trainable"]),
+            )
         logger.info(
             "  - Audio Input Shape:            [%d, %d]",
             2,
