@@ -25,7 +25,7 @@
     "checkpoint_path": ""
   },
   "fusion": {
-    "type": "raw_concat",
+    "type": "linear_concat",
     "proj_dim": 256,
     "hidden_dim": 256,
     "dropout": 0.3,
