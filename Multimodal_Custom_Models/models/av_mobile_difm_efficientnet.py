@@ -15,14 +15,32 @@ from features.audio_frontend import AudioFrontend
 from models.base import BaseMultimodalModel
 from models.blocks import (
     BottleneckTokenAttentionBlock,
-    CBAMBlock,
     ConvBNReLU,
     DepthwiseSeparableProjection,
     DynamicInteractionUnit,
     ECABlock,
     MobileV2Block,
-    SEBlock,
 )
+
+
+class ECARefinementBlock(nn.Module):
+    def __init__(self, channels: int, dropout: float = 0.0):
+        super().__init__()
+        self.attention = ECABlock(channels)
+        self.dropout = nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.attention(self.dropout(x))
+
+
+class ProjectECARefinementBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.projection = ConvBNReLU(in_channels, out_channels, kernel_size=1)
+        self.refinement = ECARefinementBlock(out_channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.refinement(self.projection(x))
 
 
 class AVMobileDIFMEfficientNet(BaseMultimodalModel):
@@ -51,21 +69,17 @@ class AVMobileDIFMEfficientNet(BaseMultimodalModel):
         self.audio_stage3 = MobileV2Block(32, 64)
         self.audio_stage4 = MobileV2Block(64, 128)
         self.audio_stage5 = MobileV2Block(128, 256)
-        self.audio_attn2 = ECABlock(32)
-        self.audio_attn3 = ECABlock(64)
-        self.audio_attn4 = SEBlock(128)
-        self.audio_attn5 = SEBlock(256)
+        self.audio_refine2 = ECARefinementBlock(32, dropout=0.2)
+        self.audio_refine3 = ECARefinementBlock(64, dropout=0.2)
+        self.audio_refine4 = ECARefinementBlock(128, dropout=0.2)
+        self.audio_refine5 = ECARefinementBlock(256, dropout=0.2)
 
         efficientnet = self._build_efficientnet(pretrained=pretrained)
         self.video_layers = nn.ModuleList(list(efficientnet.features.children())[:6])
-        self.video_proj2 = ConvBNReLU(24, 32, kernel_size=1)
-        self.video_proj3 = ConvBNReLU(40, 64, kernel_size=1)
-        self.video_proj4 = ConvBNReLU(80, 128, kernel_size=1)
-        self.video_proj5 = ConvBNReLU(112, 256, kernel_size=1)
-        self.video_attn2 = ECABlock(32)
-        self.video_attn3 = ECABlock(64)
-        self.video_attn4 = CBAMBlock(128)
-        self.video_attn5 = CBAMBlock(256)
+        self.video_refine2 = ProjectECARefinementBlock(24, 32)
+        self.video_refine3 = ProjectECARefinementBlock(40, 64)
+        self.video_refine4 = ProjectECARefinementBlock(80, 128)
+        self.video_refine5 = ProjectECARefinementBlock(112, 256)
 
         self.interaction2 = DynamicInteractionUnit(32)
         self.interaction3 = DynamicInteractionUnit(64)
@@ -110,23 +124,23 @@ class AVMobileDIFMEfficientNet(BaseMultimodalModel):
     def _forward_audio(self, waveform: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.audio_frontend(waveform)
         x = F.dropout(self.audio_stage1(x), p=0.2, training=self.training)
-        x2 = self.audio_attn2(F.dropout(self.audio_stage2(x), p=0.2, training=self.training))
-        x3 = self.audio_attn3(F.dropout(self.audio_stage3(x2), p=0.2, training=self.training))
-        x4 = self.audio_attn4(F.dropout(self.audio_stage4(x3), p=0.2, training=self.training))
-        x5 = self.audio_attn5(F.dropout(self.audio_stage5(x4), p=0.2, training=self.training))
+        x2 = self.audio_refine2(self.audio_stage2(x))
+        x3 = self.audio_refine3(self.audio_stage3(x2))
+        x4 = self.audio_refine4(self.audio_stage4(x3))
+        x5 = self.audio_refine5(self.audio_stage5(x4))
         return x2, x3, x4, x5
 
     def _forward_video(self, video_form: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         x = self.video_layers[0](video_form)
         x = self.video_layers[1](x)
         x = self.video_layers[2](x)
-        x2 = self.video_attn2(self.video_proj2(x))
+        x2 = self.video_refine2(x)
         x = self.video_layers[3](x)
-        x3 = self.video_attn3(self.video_proj3(x))
+        x3 = self.video_refine3(x)
         x = self.video_layers[4](x)
-        x4 = self.video_attn4(self.video_proj4(x))
+        x4 = self.video_refine4(x)
         x = self.video_layers[5](x)
-        x5 = self.video_attn5(self.video_proj5(x))
+        x5 = self.video_refine5(x)
         return x2, x3, x4, x5
 
     def forward(self, waveform: torch.Tensor, video_form: torch.Tensor) -> dict[str, torch.Tensor]:

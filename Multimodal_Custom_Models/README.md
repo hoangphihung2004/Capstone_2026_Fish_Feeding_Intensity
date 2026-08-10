@@ -33,10 +33,11 @@ AVMobileAttnFiLMNet
 
 Default model `AVMobileDIFMEfficientNet` uses the original log-mel audio frontend,
 a CNN14-MobileNetV2-style audio branch, a partial pretrained EfficientNet-B0 image
-branch, four dynamic interaction units, ECA/SE/CBAM attention, lightweight token
-self-attention, adaptive average pooling, and a single linear classifier. Its learnable
-model parameters are kept below 4M; frozen audio frontend parameters are reported
-separately in `model_summary.json`.
+branch, four dynamic interaction units, ECA-only refinement blocks, lightweight token
+self-attention, adaptive average pooling, and a single linear classifier. The default model
+does not mix ECA, SE, and CBAM in the same architecture, so its attention mechanism is
+straightforward to justify and ablate. Its learnable model parameters are kept below 4M;
+frozen audio frontend parameters are reported separately in `model_summary.json`.
 
 Outputs are saved under:
 
