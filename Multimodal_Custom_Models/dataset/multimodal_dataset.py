@@ -171,39 +171,13 @@ class MultimodalFishDataset(Dataset):
         self.video_cache: Optional[List[Dict[str, Any]]] = None
         self.transform = VideoTransform.get_transforms(image_size=image_size)[split]
 
-        self._preload_enabled_modalities()
+        if cache_audio:
+            self._preload_audio()
+        if cache_video:
+            self._preload_video()
 
     def __len__(self) -> int:
         return len(self.entries)
-
-    def _preload_enabled_modalities(self) -> None:
-        if self.cache_audio and self.cache_video:
-            logger.info(
-                "Preloading %s audio and video samples to RAM concurrently "
-                "(samples=%d, workers_per_modality=%d)...",
-                self.split,
-                len(self.entries),
-                self.preload_workers,
-            )
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {
-                    executor.submit(self._preload_audio): "audio",
-                    executor.submit(self._preload_video): "video",
-                }
-                for future in concurrent.futures.as_completed(futures):
-                    modality = futures[future]
-                    try:
-                        future.result()
-                    except Exception:
-                        logger.exception("Failed while preloading %s %s samples to RAM.", self.split, modality)
-                        raise
-            logger.info("Finished concurrent RAM preload for %s audio and video samples.", self.split)
-            return
-
-        if self.cache_audio:
-            self._preload_audio()
-        if self.cache_video:
-            self._preload_video()
 
     def _preload_audio(self) -> None:
         logger.info("Preloading %s audio samples to RAM (%d samples)...", self.split, len(self.entries))
