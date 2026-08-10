@@ -533,7 +533,9 @@ class MultimodalTrainer:
         if tuple(logits.shape) != expected_shape:
             raise ValueError(f"Model logits shape mismatch: got {tuple(logits.shape)}, expected {expected_shape}.")
         embedding = output.get("embedding")
-        loss = self.criterion(logits, target)
+        loss, _ = self._compute_loss(logits, target, waveform, video_form, train=True)
+        if not loss.requires_grad:
+            raise RuntimeError("Sanity check loss does not require gradients.")
         loss.backward()
         self.optimizer.zero_grad(set_to_none=True)
         self.model.train(was_training)
@@ -563,36 +565,45 @@ class MultimodalTrainer:
             return ce_loss, parts
 
         total_loss = self.cfg.distillation.hard_label_weight * ce_loss
-        teacher_grad = train and self.cfg.distillation.mode == "online"
-        with torch.set_grad_enabled(teacher_grad):
-            if self.audio_teacher is not None:
+        if self.audio_teacher is not None:
+            if self.cfg.distillation.mode == "offline":
+                with torch.no_grad():
+                    audio_logits = self.audio_teacher(waveform)["clipwise_output"]
+                audio_logits = audio_logits.detach()
+            else:
                 audio_logits = self.audio_teacher(waveform)["clipwise_output"]
-                audio_kd = kl_distillation_loss(
-                    logits,
-                    audio_logits.detach() if self.cfg.distillation.mode == "offline" else audio_logits,
-                    self.cfg.distillation.audio_teacher.temperature,
+            audio_kd = kl_distillation_loss(
+                logits,
+                audio_logits,
+                self.cfg.distillation.audio_teacher.temperature,
+            )
+            total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * audio_kd
+            parts["audio_kd_loss"] = float(audio_kd.detach().item())
+            if self.cfg.distillation.mode == "online":
+                total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * self.criterion(
+                    audio_logits,
+                    target,
                 )
-                total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * audio_kd
-                parts["audio_kd_loss"] = float(audio_kd.detach().item())
-                if self.cfg.distillation.mode == "online":
-                    total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * self.criterion(
-                        audio_logits,
-                        target,
-                    )
-            if self.video_teacher is not None:
+
+        if self.video_teacher is not None:
+            if self.cfg.distillation.mode == "offline":
+                with torch.no_grad():
+                    video_logits = self.video_teacher(video_form)["clipwise_output"]
+                video_logits = video_logits.detach()
+            else:
                 video_logits = self.video_teacher(video_form)["clipwise_output"]
-                video_kd = kl_distillation_loss(
-                    logits,
-                    video_logits.detach() if self.cfg.distillation.mode == "offline" else video_logits,
-                    self.cfg.distillation.video_teacher.temperature,
+            video_kd = kl_distillation_loss(
+                logits,
+                video_logits,
+                self.cfg.distillation.video_teacher.temperature,
+            )
+            total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * video_kd
+            parts["video_kd_loss"] = float(video_kd.detach().item())
+            if self.cfg.distillation.mode == "online":
+                total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * self.criterion(
+                    video_logits,
+                    target,
                 )
-                total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * video_kd
-                parts["video_kd_loss"] = float(video_kd.detach().item())
-                if self.cfg.distillation.mode == "online":
-                    total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * self.criterion(
-                        video_logits,
-                        target,
-                    )
         return total_loss, parts
 
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
