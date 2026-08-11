@@ -71,7 +71,7 @@ class GatedFusion(nn.Module):
         self.proj_audio = nn.Linear(dim_audio, cfg.proj_dim)
         self.proj_video = nn.Linear(dim_video, cfg.proj_dim)
         self.gate_layer = nn.Sequential(nn.Linear(cfg.proj_dim * 2, cfg.proj_dim), nn.Sigmoid())
-        self.classifier = _classifier_block(cfg.proj_dim, cfg.hidden_dim, num_classes, cfg)
+        self.classifier = _direct_classifier(cfg.proj_dim, num_classes, cfg)
 
     def forward(self, audio_feat: torch.Tensor, video_feat: torch.Tensor) -> torch.Tensor:
         z_a = self.proj_audio(audio_feat)
