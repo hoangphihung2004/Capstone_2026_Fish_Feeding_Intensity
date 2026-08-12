@@ -89,7 +89,7 @@ class SelfAttentionFusion(nn.Module):
         self.proj_video = nn.Linear(dim_video, cfg.proj_dim)
         self.attention = nn.MultiheadAttention(embed_dim=cfg.proj_dim, num_heads=cfg.num_heads, batch_first=True)
         self.norm = nn.LayerNorm(cfg.proj_dim)
-        self.classifier = _classifier_block(cfg.proj_dim * 2, cfg.hidden_dim, num_classes, cfg)
+        self.classifier = _direct_classifier(cfg.proj_dim * 2, num_classes, cfg)
 
     def forward(self, audio_feat: torch.Tensor, video_feat: torch.Tensor) -> torch.Tensor:
         z_a = self.proj_audio(audio_feat)

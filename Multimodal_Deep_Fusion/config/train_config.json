@@ -25,7 +25,7 @@
     "checkpoint_path": ""
   },
   "fusion": {
-    "type": "gated_fusion",
+    "type": "self_attention",
     "proj_dim": 256,
     "hidden_dim": 256,
     "dropout": 0.2,
