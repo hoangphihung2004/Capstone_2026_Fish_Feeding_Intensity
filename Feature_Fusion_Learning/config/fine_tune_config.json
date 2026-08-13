@@ -12,7 +12,7 @@
   "trial_n_jobs": 8,
   "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
   "feature_selection": {
-    "enabled": false,
+    "enabled": true,
     "strategy": "global",
     "selector": "RF",
     "ratio": 0.2,
