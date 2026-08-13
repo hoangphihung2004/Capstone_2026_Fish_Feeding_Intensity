@@ -129,16 +129,20 @@ def get_models(selected_models: Iterable[str] | None = None):
     return {name: models[name] for name in selected_models}
 
 
-def get_random_params(param_grid, n_iter):
+def get_random_params(param_grid, n_iter, include_default=False):
     keys, values = zip(*param_grid.items())
     values = [list(value) for value in values]
     total_combinations = prod(len(value) for value in values)
+    params_list = []
+    seen = set()
+
+    if include_default:
+        params_list.append({})
 
     if n_iter >= total_combinations:
         all_params = list(product(*values))
     else:
         all_params = []
-        seen = set()
         while len(all_params) < n_iter:
             value = tuple(random.choice(options) for options in values)
             if value in seen:
@@ -146,7 +150,6 @@ def get_random_params(param_grid, n_iter):
             seen.add(value)
             all_params.append(value)
 
-    params_list = []
     for value in all_params:
         params_list.append(dict(zip(keys, value)))
 
@@ -169,12 +172,23 @@ def _evaluate_params(index, model_name, model, params, x_train, y_train, x_val, 
     return index, params, acc
 
 
-def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_val, y_val, trial_n_jobs=1):
+def fine_tune_model(
+    model_name,
+    model,
+    param_grid,
+    n_iter,
+    x_train,
+    y_train,
+    x_val,
+    y_val,
+    trial_n_jobs=1,
+    include_default=False,
+):
     best_param = None
     best_acc = -1
     best_index = None
     trial_n_jobs = max(1, int(trial_n_jobs))
-    params_list = get_random_params(param_grid, n_iter)
+    params_list = get_random_params(param_grid, n_iter, include_default=include_default)
     start_time = time.time()
 
     if trial_n_jobs == 1:

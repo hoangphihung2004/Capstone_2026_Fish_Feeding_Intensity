@@ -15,7 +15,7 @@
     "enabled": false,
     "selector": "RF",
     "ratio": 0.2,
-    "n_trials": 100,
+    "n_trials": 20,
     "trial_n_jobs": 8
   },
   "output_dir": "outputs"

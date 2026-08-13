@@ -24,7 +24,7 @@ Edit only `config/fine_tune_config.json` for feature inputs and model selection:
     "enabled": false,
     "selector": "RF",
     "ratio": 0.2,
-    "n_trials": 100,
+    "n_trials": 20,
     "trial_n_jobs": 8
   },
   "output_dir": "outputs"
@@ -33,7 +33,7 @@ Edit only `config/fine_tune_config.json` for feature inputs and model selection:
 
 `trial_n_jobs` controls how many hyperparameter trials run in parallel. It does not change the number of trials or the search space.
 
-Enable `feature_selection` to tune an RF or LGBM selector, rank features by `feature_importances_`, keep the top `ratio` features, and then run the normal model fine tuning on the selected feature matrix. `n_trials` and `trial_n_jobs` under `feature_selection` apply only to the selector.
+Enable `feature_selection` to tune an RF or LGBM selector, rank features by `feature_importances_`, keep the top `ratio` features, and then run the normal model fine tuning on the selected feature matrix. The selector first evaluates the default RF/LGBM parameters, then evaluates `n_trials` random parameter sets, so `n_trials: 20` means 21 selector candidates total. `n_trials` and `trial_n_jobs` under `feature_selection` apply only to the selector.
 
 Set Hugging Face upload in `config/artifact_upload_config.json`. Leave `source_dir`, `zip_path`, and `path_in_repo` empty to use the default source folder and generated artifact name. Set `repo_id` before running if upload is required.
 
@@ -53,7 +53,7 @@ outputs/
     result.csv
     run_info.json
     feature_selection/
-      RF_ratio_0.2_trials_100/
+      RF_ratio_0.2_trials_20/
         feature_importances.csv
         selected_features.csv
         selection_info.json

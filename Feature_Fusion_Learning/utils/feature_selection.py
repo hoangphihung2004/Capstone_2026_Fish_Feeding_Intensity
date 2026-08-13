@@ -20,6 +20,8 @@ DEFAULT_SELECTION_INFO = {
     "selected_num_features": "",
     "best_params": {},
     "tuning_time_seconds": 0.0,
+    "include_default_params": False,
+    "candidate_count": "",
     "artifact_dir": "",
 }
 
@@ -104,6 +106,7 @@ def select_features(feature_set, config, output_dir):
         feature_set.x_val,
         feature_set.y_val,
         trial_n_jobs=selection_config["trial_n_jobs"],
+        include_default=True,
     )
 
     best_selector = clone(selector_model)
@@ -144,6 +147,8 @@ def select_features(feature_set, config, output_dir):
         "selected_num_features": selected_num_features,
         "best_params": best_param,
         "tuning_time_seconds": tuning_time,
+        "include_default_params": True,
+        "candidate_count": selection_config["n_trials"] + 1,
         "artifact_dir": "",
     }
     _, info = write_feature_selection_outputs(output_dir, selection_config, importance_rows, selected_rows, info)
