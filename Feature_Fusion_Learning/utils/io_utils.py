@@ -66,6 +66,7 @@ def write_cv_summary(fold_result_paths, output_path):
     optional_group_cols = [
         "Feature Selection Enabled",
         "Feature Selector",
+        "Feature Selection Strategy",
         "Feature Selection Ratio",
         "Feature Selection Trials",
         "Original Number Feature",

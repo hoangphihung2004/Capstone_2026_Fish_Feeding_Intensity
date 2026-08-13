@@ -22,6 +22,30 @@ class SplitFeatures:
     label_names: Dict[int, str]
 
 
+def concat_split_features(feature_sets, feature_name: str) -> SplitFeatures:
+    if not feature_sets:
+        raise ValueError("feature_sets must not be empty.")
+
+    reference = feature_sets[0]
+    for feature_set in feature_sets[1:]:
+        for split in SPLIT_ORDER:
+            y_reference = getattr(reference, f"y_{split}")
+            y_current = getattr(feature_set, f"y_{split}")
+            if not np.array_equal(y_reference, y_current):
+                raise ValueError(f"Cannot concatenate feature sets because y_{split} does not match.")
+
+    return SplitFeatures(
+        x_train=np.concatenate([feature_set.x_train for feature_set in feature_sets], axis=1),
+        y_train=reference.y_train,
+        x_val=np.concatenate([feature_set.x_val for feature_set in feature_sets], axis=1),
+        y_val=reference.y_val,
+        x_test=np.concatenate([feature_set.x_test for feature_set in feature_sets], axis=1),
+        y_test=reference.y_test,
+        feature_name=feature_name,
+        label_names=reference.label_names,
+    )
+
+
 def feature_run_dir(feature_root: str, mode: str, fold: int | None = None) -> Path:
     root = Path(feature_root)
     if mode == "holdout":
@@ -119,16 +143,18 @@ def split_single_modality(features: np.ndarray, metadata: pd.DataFrame, feature_
     )
 
 
-def merge_modalities(
+def split_aligned_modalities(
     audio_features: np.ndarray,
     audio_metadata: pd.DataFrame,
     video_features: np.ndarray,
     video_metadata: pd.DataFrame,
-) -> SplitFeatures:
+):
     audio_y_col = label_column(audio_metadata)
     video_y_col = label_column(video_metadata)
     label_names = label_names_from_metadata(audio_metadata) or label_names_from_metadata(video_metadata)
-    outputs = {}
+    audio_outputs = {}
+    video_outputs = {}
+    label_outputs = {}
 
     for split in SPLIT_ORDER:
         a = audio_metadata[audio_metadata["split"] == split].copy()
@@ -162,21 +188,41 @@ def merge_modalities(
             )
 
         merged = merged.sort_values(["_fusion_key", "feature_index_audio", "feature_index_video"])
-        x_audio = audio_features[merged["feature_index_audio"].astype(int).to_numpy()]
-        x_video = video_features[merged["feature_index_video"].astype(int).to_numpy()]
-        outputs[f"x_{split}"] = np.concatenate([x_audio, x_video], axis=1)
-        outputs[f"y_{split}"] = merged["_target_label_audio"].to_numpy()
+        audio_outputs[f"x_{split}"] = audio_features[merged["feature_index_audio"].astype(int).to_numpy()]
+        video_outputs[f"x_{split}"] = video_features[merged["feature_index_video"].astype(int).to_numpy()]
+        label_outputs[f"y_{split}"] = merged["_target_label_audio"].to_numpy()
 
-    return SplitFeatures(
-        x_train=outputs["x_train"],
-        y_train=outputs["y_train"],
-        x_val=outputs["x_val"],
-        y_val=outputs["y_val"],
-        x_test=outputs["x_test"],
-        y_test=outputs["y_test"],
-        feature_name="audio_video",
+    audio_set = SplitFeatures(
+        x_train=audio_outputs["x_train"],
+        y_train=label_outputs["y_train"],
+        x_val=audio_outputs["x_val"],
+        y_val=label_outputs["y_val"],
+        x_test=audio_outputs["x_test"],
+        y_test=label_outputs["y_test"],
+        feature_name="audio",
         label_names=label_names,
     )
+    video_set = SplitFeatures(
+        x_train=video_outputs["x_train"],
+        y_train=label_outputs["y_train"],
+        x_val=video_outputs["x_val"],
+        y_val=label_outputs["y_val"],
+        x_test=video_outputs["x_test"],
+        y_test=label_outputs["y_test"],
+        feature_name="video",
+        label_names=label_names,
+    )
+    return audio_set, video_set
+
+
+def merge_modalities(
+    audio_features: np.ndarray,
+    audio_metadata: pd.DataFrame,
+    video_features: np.ndarray,
+    video_metadata: pd.DataFrame,
+) -> SplitFeatures:
+    audio_set, video_set = split_aligned_modalities(audio_features, audio_metadata, video_features, video_metadata)
+    return concat_split_features([audio_set, video_set], "audio_video")
 
 
 def load_features_for_run(config: dict, mode: str, fold: int | None = None) -> SplitFeatures:
@@ -199,3 +245,26 @@ def load_features_for_run(config: dict, mode: str, fold: int | None = None) -> S
     audio_features, audio_metadata = read_feature_table(audio_run_dir)
     video_features, video_metadata = read_feature_table(video_run_dir)
     return merge_modalities(audio_features, audio_metadata, video_features, video_metadata)
+
+
+def load_modality_features_for_run(config: dict, mode: str, fold: int | None = None):
+    feature_mode = config["feature_mode"]
+    if feature_mode == "audio":
+        run_dir = feature_run_dir(config["audio_feature_root"], mode=mode, fold=fold)
+        features, metadata = read_feature_table(run_dir)
+        return {"audio": split_single_modality(features, metadata, "audio")}
+
+    if feature_mode == "video":
+        run_dir = feature_run_dir(config["video_feature_root"], mode=mode, fold=fold)
+        features, metadata = read_feature_table(run_dir)
+        return {"video": split_single_modality(features, metadata, "video")}
+
+    if feature_mode != "audio_video":
+        raise ValueError("feature_mode must be one of: audio, video, audio_video")
+
+    audio_run_dir = feature_run_dir(config["audio_feature_root"], mode=mode, fold=fold)
+    video_run_dir = feature_run_dir(config["video_feature_root"], mode=mode, fold=fold)
+    audio_features, audio_metadata = read_feature_table(audio_run_dir)
+    video_features, video_metadata = read_feature_table(video_run_dir)
+    audio_set, video_set = split_aligned_modalities(audio_features, audio_metadata, video_features, video_metadata)
+    return {"audio": audio_set, "video": video_set}

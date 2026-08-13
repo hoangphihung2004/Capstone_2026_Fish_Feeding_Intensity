@@ -14,7 +14,9 @@ from utils.evaluation import save_confusion_matrix
 from utils.feature_selection import DEFAULT_SELECTION_INFO
 from utils.feature_selection import feature_selection_enabled
 from utils.feature_selection import select_features
+from utils.feature_selection import select_features_by_modality
 from utils.feature_loader import load_features_for_run
+from utils.feature_loader import load_modality_features_for_run
 from utils.io_utils import load_json
 from utils.io_utils import write_cv_summary
 from utils.io_utils import write_json
@@ -63,6 +65,7 @@ def result_row(
         "Number Feature": feature_set.x_train.shape[1],
         "Feature Selection Enabled": selection_info["enabled"],
         "Feature Selector": selection_info["selector"],
+        "Feature Selection Strategy": selection_info["strategy"],
         "Feature Selection Ratio": selection_info["ratio"],
         "Feature Selection Trials": selection_info["n_trials"],
         "Feature Selection Trial Jobs": selection_info["trial_n_jobs"],
@@ -90,15 +93,40 @@ def result_row(
 
 
 def run_one_feature_set(config, mode, fold=None):
-    feature_set = load_features_for_run(config, mode=mode, fold=fold)
     output_dir = mode_output_dir(config, mode, fold=fold)
     confusion_dir = output_dir / "confusion_matrices"
     output_dir.mkdir(parents=True, exist_ok=True)
     selection_info = dict(DEFAULT_SELECTION_INFO)
+    run_label = mode if fold is None else f"{mode}/fold_{fold}"
+
+    print(f"[run:{run_label}] loading features")
 
     if feature_selection_enabled(config):
-        feature_set, selection_info = select_features(feature_set, config, output_dir)
+        strategy = config.get("feature_selection", {}).get("strategy", "global")
+        print(f"[run:{run_label}] feature selection enabled with strategy={strategy}")
+        if strategy == "modality":
+            modality_feature_sets = load_modality_features_for_run(config, mode=mode, fold=fold)
+            for modality_name, modality_feature_set in modality_feature_sets.items():
+                print(
+                    f"[run:{run_label}] loaded {modality_name}: "
+                    f"train={modality_feature_set.x_train.shape}, "
+                    f"val={modality_feature_set.x_val.shape}, "
+                    f"test={modality_feature_set.x_test.shape}"
+                )
+            feature_set, selection_info = select_features_by_modality(modality_feature_sets, config, output_dir)
+        else:
+            feature_set = load_features_for_run(config, mode=mode, fold=fold)
+            print(
+                f"[run:{run_label}] loaded fused features: "
+                f"train={feature_set.x_train.shape}, val={feature_set.x_val.shape}, test={feature_set.x_test.shape}"
+            )
+            feature_set, selection_info = select_features(feature_set, config, output_dir)
     else:
+        feature_set = load_features_for_run(config, mode=mode, fold=fold)
+        print(
+            f"[run:{run_label}] loaded features: "
+            f"train={feature_set.x_train.shape}, val={feature_set.x_val.shape}, test={feature_set.x_test.shape}"
+        )
         num_features = int(feature_set.x_train.shape[1])
         selection_info["original_num_features"] = num_features
         selection_info["selected_num_features"] = num_features
@@ -106,11 +134,18 @@ def run_one_feature_set(config, mode, fold=None):
     models = get_models(config.get("models"))
     trial_n_jobs = int(config.get("trial_n_jobs", 1))
     rows = []
+    print(
+        f"[run:{run_label}] final feature matrix: "
+        f"train={feature_set.x_train.shape}, val={feature_set.x_val.shape}, test={feature_set.x_test.shape}"
+    )
+    print(f"[run:{run_label}] training models: {', '.join(models.keys())}")
 
     for model_name, model_info in models.items():
         model, param_grid, n_iter, use_scaler = model_info
+        print(f"[run:{run_label}] fine tuning model {model_name} ({n_iter} random trials)")
 
         if use_scaler:
+            print(f"[run:{run_label}] normalizing data for {model_name}")
             x_train_use, x_val_use, x_test_use = normalize_data(
                 feature_set.x_train,
                 feature_set.x_val,
@@ -135,6 +170,7 @@ def run_one_feature_set(config, mode, fold=None):
 
         best_model = clone(model)
         best_model.set_params(**best_param)
+        print(f"[run:{run_label}] best params for {model_name}: {best_param}")
 
         start_time = time.time()
         best_model.fit(x_train_use, feature_set.y_train)
@@ -145,6 +181,11 @@ def run_one_feature_set(config, mode, fold=None):
 
         val_metrics = get_metrics(feature_set.y_val, y_pred_val)
         test_metrics = get_metrics(feature_set.y_test, y_pred_test)
+        print(
+            f"[run:{run_label}] {model_name} metrics: "
+            f"val_acc={val_metrics['Accuracy']:.4f}, test_acc={test_metrics['Accuracy']:.4f}, "
+            f"test_f1_macro={test_metrics['F1-score (Macro)']:.4f}"
+        )
         save_confusion_matrix(
             feature_set.y_test,
             y_pred_test,
