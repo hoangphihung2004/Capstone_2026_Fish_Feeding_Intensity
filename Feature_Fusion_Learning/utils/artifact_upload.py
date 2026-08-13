@@ -23,7 +23,9 @@ def build_artifact_name(fine_config, timestamp=None):
     if selection_config.get("enabled", False):
         selection_parts = [
             "FS",
+            "strategy",
             safe_filename_part(selection_config.get("strategy", "global")),
+            "selector",
             safe_filename_part(selection_config.get("selector", "selector")).upper(),
             "ratio",
             safe_filename_part(f"{float(selection_config.get('ratio', 1.0)):g}"),

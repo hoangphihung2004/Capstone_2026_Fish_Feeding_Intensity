@@ -51,6 +51,8 @@ For modality-level selection, use:
 
 Set Hugging Face upload in `config/artifact_upload_config.json`. Leave `source_dir`, `zip_path`, and `path_in_repo` empty to use the default source folder and generated artifact name. Set `repo_id` before running if upload is required.
 
+When feature selection is enabled, the uploaded zip name includes the strategy, selector, ratio, and selector trials, for example `FeatureFineTuning_AFFIA3K_CNN6_EfficientNetB0_audio_video_FS_strategy_modality_selector_RF_ratio_0.2_trials_20_20260813_153000.zip`.
+
 ## Run
 
 ```bash
