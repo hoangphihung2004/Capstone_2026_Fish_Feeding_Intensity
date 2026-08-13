@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -27,11 +28,21 @@ def load_json(path):
         return json.load(f)
 
 
+def json_default(value):
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def write_json(data, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, default=json_default)
 
 
 def write_result_csv(rows, path):
@@ -52,7 +63,16 @@ def write_cv_summary(fold_result_paths, output_path):
         raise ValueError("No fold result files were provided for CV summary.")
 
     all_results = pd.concat(frames, ignore_index=True)
+    optional_group_cols = [
+        "Feature Selection Enabled",
+        "Feature Selector",
+        "Feature Selection Ratio",
+        "Feature Selection Trials",
+        "Original Number Feature",
+        "Selected Number Feature",
+    ]
     group_cols = ["Dataset", "Feature Mode", "Feature", "Number Feature", "Model"]
+    group_cols.extend([col for col in optional_group_cols if col in all_results.columns])
     rows = []
 
     for keys, group in all_results.groupby(group_cols, dropna=False):

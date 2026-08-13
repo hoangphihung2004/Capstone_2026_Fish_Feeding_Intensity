@@ -11,6 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from utils.artifact_upload import upload_artifact_if_enabled
 from utils.evaluation import get_metrics
 from utils.evaluation import save_confusion_matrix
+from utils.feature_selection import DEFAULT_SELECTION_INFO
+from utils.feature_selection import feature_selection_enabled
+from utils.feature_selection import select_features
 from utils.feature_loader import load_features_for_run
 from utils.io_utils import load_json
 from utils.io_utils import write_cv_summary
@@ -37,7 +40,19 @@ def mode_output_dir(config, mode, fold=None):
     raise ValueError(f"Unsupported mode: {mode}")
 
 
-def result_row(config, mode, fold, feature_set, model_name, tuning_time, training_time, val_metrics, test_metrics, best_param):
+def result_row(
+    config,
+    mode,
+    fold,
+    feature_set,
+    model_name,
+    tuning_time,
+    training_time,
+    val_metrics,
+    test_metrics,
+    best_param,
+    selection_info,
+):
     return {
         "Dataset": config.get("dataset_tag", ""),
         "Mode": mode,
@@ -46,6 +61,14 @@ def result_row(config, mode, fold, feature_set, model_name, tuning_time, trainin
         "Model": model_name,
         "Feature": feature_set.feature_name,
         "Number Feature": feature_set.x_train.shape[1],
+        "Feature Selection Enabled": selection_info["enabled"],
+        "Feature Selector": selection_info["selector"],
+        "Feature Selection Ratio": selection_info["ratio"],
+        "Feature Selection Trials": selection_info["n_trials"],
+        "Feature Selection Trial Jobs": selection_info["trial_n_jobs"],
+        "Feature Selection Tuning Time (s)": selection_info["tuning_time_seconds"],
+        "Original Number Feature": selection_info["original_num_features"],
+        "Selected Number Feature": selection_info["selected_num_features"],
         "Tuning Time (s)": tuning_time,
         "Training Time (s)": training_time,
         "Precision Val (Weighted)": val_metrics["Precision (Weighted)"],
@@ -71,6 +94,14 @@ def run_one_feature_set(config, mode, fold=None):
     output_dir = mode_output_dir(config, mode, fold=fold)
     confusion_dir = output_dir / "confusion_matrices"
     output_dir.mkdir(parents=True, exist_ok=True)
+    selection_info = dict(DEFAULT_SELECTION_INFO)
+
+    if feature_selection_enabled(config):
+        feature_set, selection_info = select_features(feature_set, config, output_dir)
+    else:
+        num_features = int(feature_set.x_train.shape[1])
+        selection_info["original_num_features"] = num_features
+        selection_info["selected_num_features"] = num_features
 
     models = get_models(config.get("models"))
     trial_n_jobs = int(config.get("trial_n_jobs", 1))
@@ -134,6 +165,7 @@ def run_one_feature_set(config, mode, fold=None):
                 val_metrics,
                 test_metrics,
                 best_param,
+                selection_info,
             )
         )
 
@@ -152,6 +184,7 @@ def run_one_feature_set(config, mode, fold=None):
             "num_features": int(feature_set.x_train.shape[1]),
             "models": list(models.keys()),
             "trial_n_jobs": trial_n_jobs,
+            "feature_selection": selection_info,
         },
         output_dir / "run_info.json",
     )

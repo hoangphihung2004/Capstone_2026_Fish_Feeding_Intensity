@@ -4,6 +4,7 @@ import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import product
+from math import prod
 from typing import Iterable
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -78,7 +79,7 @@ def get_models(selected_models: Iterable[str] | None = None):
     param_lgbm = {
         "boosting_type": ["gbdt", "dart"],
         "num_leaves": np.random.randint(15, 50, size=34),
-        "max_depth": [None] + list(range(5, 41)),
+        "max_depth": [-1] + list(range(5, 41)),
         "learning_rate": [0.001, 0.01, 0.1, 1, 3, 10],
         "n_estimators": np.random.randint(50, 501, size=300),
         "class_weight": ["balanced", None],
@@ -130,10 +131,20 @@ def get_models(selected_models: Iterable[str] | None = None):
 
 def get_random_params(param_grid, n_iter):
     keys, values = zip(*param_grid.items())
-    all_params = list(product(*values))
+    values = [list(value) for value in values]
+    total_combinations = prod(len(value) for value in values)
 
-    if n_iter < len(all_params):
-        all_params = random.sample(all_params, n_iter)
+    if n_iter >= total_combinations:
+        all_params = list(product(*values))
+    else:
+        all_params = []
+        seen = set()
+        while len(all_params) < n_iter:
+            value = tuple(random.choice(options) for options in values)
+            if value in seen:
+                continue
+            seen.add(value)
+            all_params.append(value)
 
     params_list = []
     for value in all_params:

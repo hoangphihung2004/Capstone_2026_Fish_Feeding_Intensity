@@ -18,6 +18,17 @@ def build_artifact_name(fine_config, timestamp=None):
     timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     dataset_tag = safe_filename_part(fine_config.get("dataset_tag", "dataset"))
     feature_mode = safe_filename_part(fine_config["feature_mode"])
+    selection_config = fine_config.get("feature_selection", {})
+    selection_parts = []
+    if selection_config.get("enabled", False):
+        selection_parts = [
+            "FS",
+            safe_filename_part(selection_config.get("selector", "selector")).upper(),
+            "ratio",
+            safe_filename_part(f"{float(selection_config.get('ratio', 1.0)):g}"),
+            "trials",
+            safe_filename_part(selection_config.get("n_trials", "unknown")),
+        ]
 
     if fine_config["feature_mode"] == "audio_video":
         parts = [
@@ -26,7 +37,6 @@ def build_artifact_name(fine_config, timestamp=None):
             safe_filename_part(fine_config.get("audio_model_name", "audio")),
             safe_filename_part(fine_config.get("video_model_name", "video")),
             feature_mode,
-            timestamp,
         ]
     elif fine_config["feature_mode"] == "audio":
         parts = [
@@ -34,7 +44,6 @@ def build_artifact_name(fine_config, timestamp=None):
             dataset_tag,
             safe_filename_part(fine_config.get("audio_model_name", "audio")),
             feature_mode,
-            timestamp,
         ]
     else:
         parts = [
@@ -42,9 +51,10 @@ def build_artifact_name(fine_config, timestamp=None):
             dataset_tag,
             safe_filename_part(fine_config.get("video_model_name", "video")),
             feature_mode,
-            timestamp,
         ]
 
+    parts.extend(selection_parts)
+    parts.append(timestamp)
     return "_".join(parts) + ".zip"
 
 
