@@ -13,7 +13,7 @@
   "models": ["LR", "KNN", "SVM", "RF", "ET", "LGBM"],
   "feature_selection": {
     "enabled": true,
-    "strategy": "global",
+    "strategy": "modality",
     "selector": "RF",
     "ratio": 0.2,
     "n_trials": 20,
