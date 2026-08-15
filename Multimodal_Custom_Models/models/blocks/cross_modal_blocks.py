@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class CrossFiLMBlock(nn.Module):
@@ -78,4 +79,69 @@ class DynamicInteractionUnit(nn.Module):
         video_gate = self.video_gate(joint_desc).unsqueeze(-1).unsqueeze(-1)
         audio_out = audio_feat + audio_gate * audio_modulated
         video_out = video_feat + video_gate * video_modulated
+        return audio_out, video_out
+
+
+class LightweightCrossAttentionUnit(nn.Module):
+    """
+    Lightweight Multi-Scale Cross-Attention Unit using Depthwise Separable Projections.
+    Enables Audio Queries to attend to Video Keys/Values, and Video Queries to attend to Audio Keys/Values.
+    """
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.q_proj_a = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+        self.k_proj_v = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+        self.v_proj_v = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+
+        self.q_proj_v = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+        self.k_proj_a = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+        self.v_proj_a = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+        )
+
+        self.gate_a = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
+        self.gate_v = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, audio_feat: torch.Tensor, video_feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Global descriptors for Query-Key cross attention
+        q_a = self.q_proj_a(audio_feat)
+        k_v = self.pool(self.k_proj_v(video_feat))
+        v_v = self.pool(self.v_proj_v(video_feat))
+
+        attn_a = torch.sigmoid(q_a * k_v)
+        audio_cross = attn_a * v_v
+
+        q_v = self.q_proj_v(video_feat)
+        k_a = self.pool(self.k_proj_a(audio_feat))
+        v_a = self.pool(self.v_proj_a(audio_feat))
+
+        attn_v = torch.sigmoid(q_v * k_a)
+        video_cross = attn_v * v_a
+
+        audio_out = audio_feat + self.gate_a(audio_feat) * audio_cross
+        video_out = video_feat + self.gate_v(video_feat) * video_cross
         return audio_out, video_out
