@@ -60,7 +60,7 @@ class DistillationConfig(BaseModel):
     enabled: bool = False
     mode: Literal["offline", "online"] = "offline"
     cutoff_enabled: bool = True
-    cutoff_epoch: int = 140
+    cutoff_epoch: int = 150
     hard_label_weight: float = 1.0
     alpha_logit: float = 1.0
     beta_feature: float = 2.0

@@ -612,9 +612,10 @@ class MultimodalTrainer:
         dist_cfg = self.cfg.distillation
         is_cutoff = False
         if dist_cfg.enabled and getattr(dist_cfg, "cutoff_enabled", False) and epoch is not None:
-            cutoff_epoch = getattr(dist_cfg, "cutoff_epoch", 140)
+            cutoff_epoch = getattr(dist_cfg, "cutoff_epoch", 150)
             if epoch >= cutoff_epoch:
                 is_cutoff = True
+
 
         if not dist_cfg.enabled or is_cutoff or (self.audio_teacher is None and self.video_teacher is None):
             ce_loss = self.criterion(logits, target)
