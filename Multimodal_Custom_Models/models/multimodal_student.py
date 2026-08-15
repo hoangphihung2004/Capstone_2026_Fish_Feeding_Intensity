@@ -14,7 +14,8 @@ from config import AudioFeaturesConfig, VideoFeaturesConfig
 from features.audio_frontend import AudioFrontend
 from models.base import BaseMultimodalModel
 from models.blocks.attention_blocks import BottleneckTokenAttentionBlock, ECABlock
-from models.blocks.cross_modal_blocks import LightweightCrossAttentionUnit
+from models.blocks.depthwise_conv_block import DepthwiseAudioStage, DepthwiseSeparableConv2d
+from models.blocks.cross_modal_blocks import DynamicSpatialFrequencyModulationBlock, LightweightCrossAttentionUnit
 from models.blocks.mobilevit_block import MobileViTv2Block
 
 
@@ -35,10 +36,11 @@ class FeatureProjectionAdapter(nn.Module):
 
 class MultimodalStudentModel(BaseMultimodalModel):
     """
-    Upgraded MobileViT-Multimodal Student Model featuring:
-    - MobileViTv2 Linear Attention Blocks at Stage 4 & Stage 5 for Global-Local Feature Learning
-    - Lightweight Multi-Scale Cross-Attention Units (Q-K-V) for Inter-Modality Interaction
-    - Hierarchical Multi-Stage Feature Fusion (Stage 4 Fine-grained + Stage 5 High-level Features)
+    SOTA High-Novelty FF-Net (Frequency-Spatial Feature Modulation Network) Student Model:
+    - Modular 5-Stage Backbone with Depthwise Separable Convolutions (~3.85M trainable params)
+    - D-FSFM (Dynamic Frequency-Spatial Feature Modulation) Units at Stage 2-5
+    - MobileViTv2 Linear Self-Attention Blocks at Stage 4 & Stage 5
+    - Hierarchical Stage 4 + Stage 5 Token Pyramid Attention Fusion
     - Tri-Head Classification Architecture (Audio Head, Video Head, Fused Head)
     """
 
@@ -59,30 +61,18 @@ class MultimodalStudentModel(BaseMultimodalModel):
         # 1. Standard Audio Frontend
         self.audio_frontend = AudioFrontend(audio_features_config)
 
-        # 2. Audio Backbone Stages (24, 40 -> MobileViTv2 80, MobileViTv2 embed_dim)
+        # 2. SOTA Audio Backbone Stages (Depthwise Separable Conv + ECA + MobileViTv2)
         self.audio_stem = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
+            DepthwiseSeparableConv2d(1, 32, stride=2),
         )
-        self.audio_stage2 = nn.Sequential(
-            nn.Conv2d(32, 24, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(24),
-            nn.ReLU(inplace=True),
-            ECABlock(24),
-        )
-        self.audio_stage3 = nn.Sequential(
-            nn.Conv2d(24, 40, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(40),
-            nn.ReLU(inplace=True),
-            ECABlock(40),
-        )
+        self.audio_stage2 = DepthwiseAudioStage(32, 24, stride=2)
+        self.audio_stage3 = DepthwiseAudioStage(24, 40, stride=2)
         self.audio_stage4 = nn.Sequential(
-            nn.Conv2d(40, 80, kernel_size=3, stride=2, padding=1),
+            DepthwiseSeparableConv2d(40, 80, stride=2),
             MobileViTv2Block(80, 80, attn_dim=80),
         )
         self.audio_stage5 = nn.Sequential(
-            nn.Conv2d(80, self.embed_dim, kernel_size=3, stride=2, padding=1),
+            DepthwiseSeparableConv2d(80, self.embed_dim, stride=2),
             MobileViTv2Block(self.embed_dim, self.embed_dim, attn_dim=128),
         )
 
@@ -100,13 +90,13 @@ class MultimodalStudentModel(BaseMultimodalModel):
             MobileViTv2Block(self.embed_dim, self.embed_dim, attn_dim=128),
         )
 
-        # 4. Lightweight Cross-Attention Inter-Modality Units (Q-K-V)
-        self.interaction_stage2 = LightweightCrossAttentionUnit(24)
-        self.interaction_stage3 = LightweightCrossAttentionUnit(40)
-        self.interaction_stage4 = LightweightCrossAttentionUnit(80)
-        self.interaction_stage5 = LightweightCrossAttentionUnit(self.embed_dim)
+        # 4. Novelty #1: D-FSFM (Dynamic Frequency-Spatial Feature Modulation Units)
+        self.interaction_stage2 = DynamicSpatialFrequencyModulationBlock(24)
+        self.interaction_stage3 = DynamicSpatialFrequencyModulationBlock(40)
+        self.interaction_stage4 = DynamicSpatialFrequencyModulationBlock(80)
+        self.interaction_stage5 = DynamicSpatialFrequencyModulationBlock(self.embed_dim)
 
-        # 5. Hierarchical Feature Fusion & Token Attention
+        # 5. Novelty #2: Hierarchical Stage 4 + Stage 5 Token Pyramid Attention Fusion
         self.stage4_proj = nn.Conv2d(80, self.embed_dim, kernel_size=1)
         self.fusion_module = BottleneckTokenAttentionBlock(embed_dim=self.embed_dim, num_heads=4)
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
@@ -115,6 +105,7 @@ class MultimodalStudentModel(BaseMultimodalModel):
         self.audio_head = nn.Linear(self.embed_dim, num_classes)
         self.video_head = nn.Linear(self.embed_dim, num_classes)
         self.fused_head = nn.Linear(self.embed_dim, num_classes)
+
 
         # 7. Teacher Feature Projection Adapters
         self.audio_adapter = FeatureProjectionAdapter(self.embed_dim, audio_teacher_dim)

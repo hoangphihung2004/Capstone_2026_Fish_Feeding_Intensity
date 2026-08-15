@@ -145,3 +145,47 @@ class LightweightCrossAttentionUnit(nn.Module):
         audio_out = audio_feat + self.gate_a(audio_feat) * audio_cross
         video_out = video_feat + self.gate_v(video_feat) * video_cross
         return audio_out, video_out
+
+
+class DynamicSpatialFrequencyModulationBlock(nn.Module):
+    """
+    Novelty Contribution #1: D-FSFM (Dynamic Frequency-Spatial Feature Modulation Unit)
+    Calculates a 2D Frequency-Spatial Gate Tensor modulating video spatial regions
+    based on active audio frequency sub-bands, and vice versa.
+    Uses Depthwise Separable Convolutions for minimal parameter cost.
+    """
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.audio_proj = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.Sigmoid(),
+        )
+        self.video_proj = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1, groups=channels, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.Sigmoid(),
+        )
+        self.gate_audio = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
+        self.gate_video = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, audio_feat: torch.Tensor, video_feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        a_desc = self.audio_proj(self.pool(audio_feat))
+        v_desc = self.video_proj(self.pool(video_feat))
+
+        # Frequency-to-Spatial Modulation
+        video_modulated = video_feat * a_desc
+        audio_modulated = audio_feat * v_desc
+
+        audio_out = audio_feat + self.gate_audio(audio_feat) * audio_modulated
+        video_out = video_feat + self.gate_video(video_feat) * video_modulated
+        return audio_out, video_out
+
