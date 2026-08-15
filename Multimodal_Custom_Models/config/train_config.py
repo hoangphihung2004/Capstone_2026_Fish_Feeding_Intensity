@@ -98,6 +98,11 @@ class SWAConfig(BaseModel):
     anneal_epochs: int = 10
 
 
+class LabelSmoothingConfig(BaseModel):
+    enabled: bool = True
+    value: float = 0.05
+
+
 class TrainConfig(BaseModel):
     seed: int = 42
     device: str = "cuda"
@@ -114,9 +119,10 @@ class TrainConfig(BaseModel):
     delta: float = 0.0
     loss_type: Literal["cross_entropy", "weighted_cross_entropy", "focal_loss"] = "weighted_cross_entropy"
     focal_gamma: float = 2.0
-    label_smoothing: float = 0.05
+    label_smoothing: LabelSmoothingConfig = Field(default_factory=LabelSmoothingConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     swa: SWAConfig = Field(default_factory=SWAConfig)
+
     output_dir: str = "outputs"
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
