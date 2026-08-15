@@ -1,21 +1,22 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import torch
 
 from config import TrainConfig
-from models.av_mobile_attn_film_net import AVMobileAttnFiLMNet
-from models.av_mobile_difm_efficientnet import AVMobileDIFMEfficientNet
+from models.multimodal_student import MultimodalStudentModel
 
+logger = logging.getLogger(__name__)
 
 MODEL_REGISTRY = {
-    "AVMobileDIFMEfficientNet": AVMobileDIFMEfficientNet,
-    "AVMobileAttnFiLMNet": AVMobileAttnFiLMNet,
+    "MultimodalStudentModel": MultimodalStudentModel,
+    "multimodal_student": MultimodalStudentModel,
 }
 
 
-def build_model(cfg: TrainConfig):
+def build_model(cfg: TrainConfig) -> torch.nn.Module:
     if cfg.model.name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model '{cfg.model.name}'. Available models: {sorted(MODEL_REGISTRY)}")
     model_cls = MODEL_REGISTRY[cfg.model.name]
@@ -32,4 +33,5 @@ def build_model(cfg: TrainConfig):
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint.get("model_state_dict", checkpoint.get("state_dict", checkpoint))
         model.load_state_dict(state_dict, strict=True)
+        logger.info("Loaded model checkpoint: %s", checkpoint_path)
     return model

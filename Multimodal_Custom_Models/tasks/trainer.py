@@ -19,7 +19,7 @@ from config import TrainConfig
 from dataset import save_split_files
 from models import build_model
 from models.teacher_registry import build_audio_teacher, build_video_teacher
-from utils.distillation import kl_distillation_loss
+from utils.distillation import compute_multimodal_distillation_loss
 from utils.metrics import (
     CLASS_NAMES,
     save_confusion_outputs,
@@ -291,13 +291,11 @@ class MultimodalHistoryLogger:
 
     def plot_history(self) -> None:
         import matplotlib
-
         matplotlib.use("Agg")
         logging.getLogger("matplotlib").setLevel(logging.WARNING)
         import matplotlib.pyplot as plt
 
-        epochs = []
-        train_losses, val_losses = [], []
+        epochs, train_losses, val_losses = [], [], []
         train_accs, val_accs = [], []
         train_maps, val_maps = [], []
         with self.history_csv_path.open("r", encoding="utf-8") as f:
@@ -481,31 +479,16 @@ class MultimodalTrainer:
                 _format_param_count(self.audio_frontend_param_counts["total"]),
                 _format_param_count(self.audio_frontend_param_counts["trainable"]),
             )
-        logger.info(
-            "  - Audio Input Shape:            [%d, %d]",
-            2,
-            self.cfg.audio_features.sample_rate * 2,
-        )
-        logger.info(
-            "  - Video Input Shape:            [%d, 3, %d, %d]",
-            2,
-            self.cfg.video_features.image_size,
-            self.cfg.video_features.image_size,
-        )
         logger.info("  - Monitor Metric:               '%s'", self.cfg.monitor)
         logger.info("  - Early Stopping Enabled:       %s", self.cfg.early_stopping)
         if self.cfg.early_stopping:
             logger.info("    * Patience:                   %s epochs", self.cfg.patience)
             logger.info("    * Delta:                      %s", self.cfg.delta)
-        logger.info("  - Checkpoint Dir:               '%s'", self.output_dir / "checkpoint")
         logger.info("  - Distillation Enabled:         %s", self.cfg.distillation.enabled)
         if self.cfg.distillation.enabled:
             logger.info("    * Mode:                       %s", self.cfg.distillation.mode)
             logger.info("    * Audio Teacher:              %s", self.cfg.distillation.audio_teacher.name)
             logger.info("    * Video Teacher:              %s", self.cfg.distillation.video_teacher.name)
-        logger.info("  - Precision:                    FP32")
-        logger.info("  - Architecture Snapshot:        '%s'", self.output_dir / "model_architecture.txt")
-        logger.info("  - Model Summary Snapshot:       '%s'", self.output_dir / "model_summary.json")
         logger.info("==================================================")
 
     def _run_model_sanity_check(self) -> None:
@@ -532,8 +515,7 @@ class MultimodalTrainer:
         expected_shape = (2, self.cfg.num_classes)
         if tuple(logits.shape) != expected_shape:
             raise ValueError(f"Model logits shape mismatch: got {tuple(logits.shape)}, expected {expected_shape}.")
-        embedding = output.get("embedding")
-        loss, _ = self._compute_loss(logits, target, waveform, video_form, train=True)
+        loss, _ = self._compute_loss(output, target, waveform, video_form, train=True)
         if not loss.requires_grad:
             raise RuntimeError("Sanity check loss does not require gradients.")
         loss.backward()
@@ -541,88 +523,65 @@ class MultimodalTrainer:
         self.model.train(was_training)
 
         logger.info("  - Forward output shape:         %s", list(logits.shape))
-        if embedding is not None:
-            logger.info("  - Embedding shape:              %s", list(embedding.shape))
         logger.info("  - Backward check:               passed")
         logger.info("Model sanity check completed successfully.")
         logger.info("==================================================")
 
     def _compute_loss(
         self,
-        logits: torch.Tensor,
+        student_output: dict[str, torch.Tensor] | torch.Tensor,
         target: torch.Tensor,
         waveform: torch.Tensor,
         video_form: torch.Tensor,
         train: bool,
     ) -> tuple[torch.Tensor, Dict[str, float]]:
-        ce_loss = self.criterion(logits, target)
-        parts = {
-            "ce_loss": float(ce_loss.detach().item()),
-            "audio_kd_loss": 0.0,
-            "video_kd_loss": 0.0,
-        }
-        if not self.cfg.distillation.enabled:
-            return ce_loss, parts
+        if isinstance(student_output, torch.Tensor):
+            logits = student_output
+            student_dict = {"clipwise_output": logits, "logits_fused": logits}
+        else:
+            student_dict = student_output
+            logits = student_dict.get("logits_fused", student_dict["clipwise_output"])
 
-        total_loss = self.cfg.distillation.hard_label_weight * ce_loss
-        if self.audio_teacher is not None:
-            if self.cfg.distillation.mode == "offline":
-                with torch.no_grad():
-                    audio_logits = self.audio_teacher(waveform)["clipwise_output"]
-                audio_logits = audio_logits.detach()
-            else:
-                audio_logits = self.audio_teacher(waveform)["clipwise_output"]
-            audio_kd = kl_distillation_loss(
-                logits,
-                audio_logits,
-                self.cfg.distillation.audio_teacher.temperature,
-            )
-            total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * audio_kd
-            parts["audio_kd_loss"] = float(audio_kd.detach().item())
-            if self.cfg.distillation.mode == "online":
-                total_loss = total_loss + self.cfg.distillation.audio_teacher.loss_weight * self.criterion(
-                    audio_logits,
-                    target,
-                )
+        if not self.cfg.distillation.enabled or (self.audio_teacher is None and self.video_teacher is None):
+            ce_loss = self.criterion(logits, target)
+            return ce_loss, {"ce_loss": float(ce_loss.detach().item()), "audio_kd_loss": 0.0, "video_kd_loss": 0.0}
 
-        if self.video_teacher is not None:
-            if self.cfg.distillation.mode == "offline":
-                with torch.no_grad():
-                    video_logits = self.video_teacher(video_form)["clipwise_output"]
-                video_logits = video_logits.detach()
-            else:
-                video_logits = self.video_teacher(video_form)["clipwise_output"]
-            video_kd = kl_distillation_loss(
-                logits,
-                video_logits,
-                self.cfg.distillation.video_teacher.temperature,
-            )
-            total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * video_kd
-            parts["video_kd_loss"] = float(video_kd.detach().item())
-            if self.cfg.distillation.mode == "online":
-                total_loss = total_loss + self.cfg.distillation.video_teacher.loss_weight * self.criterion(
-                    video_logits,
-                    target,
-                )
-        return total_loss, parts
+        # Distillation enabled with dual teachers
+        with torch.no_grad():
+            t_audio_out = self.audio_teacher(waveform) if self.audio_teacher is not None else {"logits": logits}
+            t_video_out = self.video_teacher(video_form) if self.video_teacher is not None else {"logits": logits}
+
+        alpha_logit = getattr(self.cfg.distillation, "alpha_logit", 1.0)
+        beta_feature = getattr(self.cfg.distillation, "beta_feature", 2.0)
+        temperature = getattr(self.cfg.distillation.audio_teacher, "temperature", 4.0)
+
+        total_loss, loss_stats = compute_multimodal_distillation_loss(
+            student_outputs=student_dict,
+            teacher_audio_outputs=t_audio_out,
+            teacher_video_outputs=t_video_out,
+            targets=target,
+            temperature=temperature,
+            alpha_logit=alpha_logit,
+            beta_feature=beta_feature,
+        )
+        return total_loss, loss_stats
 
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
         self.model.train(train)
-        teacher_train = train and self.cfg.distillation.enabled and self.cfg.distillation.mode == "online"
         if self.audio_teacher is not None:
-            self.audio_teacher.train(teacher_train)
+            self.audio_teacher.eval()
         if self.video_teacher is not None:
-            self.video_teacher.train(teacher_train)
+            self.video_teacher.eval()
+
         total_loss = 0.0
         total_ce_loss = 0.0
-        total_audio_kd_loss = 0.0
-        total_video_kd_loss = 0.0
         all_true: List[int] = []
         all_pred: List[int] = []
         all_logits: List[List[float]] = []
         loader = self.loaders[split]
         desc = f"Epoch {epoch}/{self.cfg.epochs}" if train and epoch is not None else "Running model evaluation..."
         iterator = tqdm(loader, desc=desc, unit="batch")
+
         for batch in iterator:
             waveform = batch["waveform"].to(self.device, non_blocking=True)
             video_form = batch["video_form"].to(self.device, non_blocking=True)
@@ -630,8 +589,8 @@ class MultimodalTrainer:
 
             with torch.set_grad_enabled(train):
                 output = self.model(waveform=waveform, video_form=video_form)
-                logits = output["clipwise_output"]
-                loss, loss_parts = self._compute_loss(logits, target, waveform, video_form, train)
+                logits = output["clipwise_output"] if isinstance(output, dict) else output
+                loss, loss_parts = self._compute_loss(output, target, waveform, video_form, train)
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
                     loss.backward()
@@ -639,9 +598,7 @@ class MultimodalTrainer:
 
             pred = torch.argmax(logits, dim=1)
             total_loss += float(loss.item()) * target.size(0)
-            total_ce_loss += loss_parts["ce_loss"] * target.size(0)
-            total_audio_kd_loss += loss_parts["audio_kd_loss"] * target.size(0)
-            total_video_kd_loss += loss_parts["video_kd_loss"] * target.size(0)
+            total_ce_loss += loss_parts.get("ce_loss", float(loss.item())) * target.size(0)
             all_true.extend(target.detach().cpu().numpy().astype(int).tolist())
             all_pred.extend(pred.detach().cpu().numpy().astype(int).tolist())
             all_logits.extend(torch.softmax(logits.detach(), dim=1).cpu().numpy().astype(float).tolist())
@@ -651,8 +608,6 @@ class MultimodalTrainer:
         metrics = _statistics_from_outputs(all_true, all_logits, self.cfg.num_classes)
         metrics["loss"] = total_loss / max(1, len(all_true))
         metrics["ce_loss"] = total_ce_loss / max(1, len(all_true))
-        metrics["audio_kd_loss"] = total_audio_kd_loss / max(1, len(all_true))
-        metrics["video_kd_loss"] = total_video_kd_loss / max(1, len(all_true))
         return metrics
 
     def fit(self) -> Dict[str, float]:
@@ -690,6 +645,7 @@ class MultimodalTrainer:
                 best_mAP = float(np.mean(val_metrics["average_precision"]))
                 best_loss = float(val_metrics["loss"])
                 best_val_statistics = val_metrics
+
             logger.info(
                 (
                     "Epoch %d: Train Loss = %.5f | Train Acc = %.4f | Train mAP = %.4f | "
@@ -703,20 +659,6 @@ class MultimodalTrainer:
                 row["val_accuracy"],
                 row["val_mAP"],
             )
-            if self.cfg.distillation.enabled:
-                logger.info(
-                    (
-                        "Epoch %d distillation loss: Train CE = %.5f | Train Audio KD = %.5f | "
-                        "Train Video KD = %.5f | Val CE = %.5f | Val Audio KD = %.5f | Val Video KD = %.5f"
-                    ),
-                    epoch,
-                    float(train_metrics["ce_loss"]),
-                    float(train_metrics["audio_kd_loss"]),
-                    float(train_metrics["video_kd_loss"]),
-                    float(val_metrics["ce_loss"]),
-                    float(val_metrics["audio_kd_loss"]),
-                    float(val_metrics["video_kd_loss"]),
-                )
 
             if improved:
                 best_score = current_score
@@ -750,13 +692,6 @@ class MultimodalTrainer:
                 if self.early_stopper.step(current_score):
                     logger.info("Early stopping triggered at epoch %d!", epoch)
                     break
-            logger.info(
-                "Current best: Epoch %d | Loss: %.5f | Accuracy: %.4f | mAP: %.4f",
-                best_epoch,
-                best_loss,
-                best_acc,
-                best_mAP,
-            )
 
         training_time = time.perf_counter() - train_start_time
         try:

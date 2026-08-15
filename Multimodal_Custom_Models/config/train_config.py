@@ -44,7 +44,7 @@ class SplitterConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    name: str = "AVMobileDIFMEfficientNet"
+    name: str = "MultimodalStudentModel"
     pretrained: bool = True
     checkpoint_path: str = ""
 
@@ -60,6 +60,9 @@ class DistillationConfig(BaseModel):
     enabled: bool = False
     mode: Literal["offline", "online"] = "offline"
     hard_label_weight: float = 1.0
+    alpha_logit: float = 1.0
+    beta_feature: float = 2.0
+    lambda_aux: float = 0.3
     audio_teacher: TeacherConfig = Field(default_factory=lambda: TeacherConfig(name="Cnn14MobileV2"))
     video_teacher: TeacherConfig = Field(default_factory=lambda: TeacherConfig(name="EfficientNetB0"))
 

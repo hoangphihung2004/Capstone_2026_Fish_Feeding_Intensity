@@ -1,71 +1,46 @@
-import os
-import sys
-from pathlib import Path
-from typing import Dict
-
-# Ensure project root is in sys.path
-project_root = str(Path(__file__).resolve().parent.parent)
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+from __future__ import annotations
 
 import logging
 import torch
 import torch.nn as nn
 from .base_backbone import BaseBackbone
 
-# Logging configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
 class AudioModel(nn.Module):
     """
     Unified AudioModel Wrapper class.
-    Connects AudioFrontend (GPU spectrogram extractor) with a CNN Backbone model complying with BaseBackbone contract.
-    Accepts 1D raw waveform input and returns classification logits for the 4 feeding intensity classes.
+    Connects AudioFrontend (GPU spectrogram extractor) with a CNN Backbone model.
+    Returns dictionary with classification logits 'clipwise_output' and feature representations 'feature'.
     """
     def __init__(self, frontend: nn.Module, backbone: BaseBackbone) -> None:
-        """
-        Initialize AudioModel wrapper.
-
-        Args:
-            frontend (nn.Module): Audio preprocessing/spectrogram extractor (e.g. AudioFrontend).
-            backbone (BaseBackbone): CNN backbone model inheriting from BaseBackbone.
-        """
         super(AudioModel, self).__init__()
-        
-        # Type safety validation to enforce compliance with BaseBackbone interface contract
         assert isinstance(backbone, BaseBackbone), "Error: Provided backbone model must inherit from BaseBackbone!"
-        
         self.frontend = frontend
         self.backbone = backbone
+        self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())
 
-        logger.info("==================================================")
-        logger.info("Initialized unified AudioModel wrapper:")
-        logger.info(f"  - Frontend: {self.frontend.__class__.__name__}")
-        logger.info(f"  - Backbone: {self.backbone.__class__.__name__}")
-        logger.info("==================================================")
+    def get_name(self) -> str:
+        return self.model_name
 
-    def forward(self, input_tensor: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """
-        Forward Pass of the unified AudioModel.
-
-        Args:
-            input_tensor (torch.Tensor): Raw audio waveforms [Batch, Num_Samples].
-
-        Returns:
-            Dict[str, torch.Tensor]: Dictionary containing classification logits 'clipwise_output' [Batch, Num_Classes].
-        """
-        # Phase 1: Transform raw waveforms into 2D Mel-spectrograms on GPU [Batch, 1, H, W]
+    def forward(self, input_tensor: torch.Tensor) -> dict[str, torch.Tensor]:
         features = self.frontend(input_tensor)
+        
+        # Check if backbone supports separate feature extraction
+        if hasattr(self.backbone, "forward_features"):
+            feature_vec, logits = self.backbone.forward_features(features)
+        else:
+            logits = self.backbone(features)
+            feature_vec = logits
 
-        # Phase 2: Feature extraction and classification through CNN Backbone
-        logits = self.backbone(features)
+        if isinstance(logits, dict):
+            logits = logits.get("clipwise_output", logits)
+        elif isinstance(logits, (tuple, list)):
+            logits = logits[0]
 
-        # Format output dictionary to align with Trainer expectation
         return {
-            "clipwise_output": logits
+            "clipwise_output": logits,
+            "logits": logits,
+            "feature": feature_vec,
         }
