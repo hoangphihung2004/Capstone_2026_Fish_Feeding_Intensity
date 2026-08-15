@@ -382,9 +382,10 @@ class MultimodalTrainer:
         for c in range(num_classes):
             cnt = class_counts.get(c, 1)
             w = total_train / (num_classes * cnt)
-            if c == 2:  # Priority boost for medium class (Class 2 bottleneck)
-                w *= 1.35
+            if c == 2:  # Balanced boost for Class 2 (medium) to harmonize Precision & Recall
+                w *= 1.15
             weights.append(w)
+
 
         self.class_weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
         loss_type = getattr(cfg, "loss_type", "weighted_cross_entropy")
