@@ -59,7 +59,7 @@ class TeacherConfig(BaseModel):
 class DistillationConfig(BaseModel):
     enabled: bool = False
     mode: Literal["offline", "online"] = "offline"
-    cutoff_enabled: bool = True
+    cutoff_enabled: bool = False
     cutoff_epoch: int = 150
     hard_label_weight: float = 1.0
     alpha_logit: float = 1.0
@@ -85,7 +85,7 @@ class DatasetConfig(BaseModel):
 
 
 class SchedulerConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     type: Literal["cosine_warmup", "none"] = "cosine_warmup"
     warmup_epochs: int = 10
     eta_min: float = 1e-6
@@ -99,7 +99,7 @@ class SWAConfig(BaseModel):
 
 
 class LabelSmoothingConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     value: float = 0.05
 
 
