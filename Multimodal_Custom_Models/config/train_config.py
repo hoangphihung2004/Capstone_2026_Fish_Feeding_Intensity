@@ -59,12 +59,15 @@ class TeacherConfig(BaseModel):
 class DistillationConfig(BaseModel):
     enabled: bool = False
     mode: Literal["offline", "online"] = "offline"
+    cutoff_enabled: bool = True
+    cutoff_epoch: int = 140
     hard_label_weight: float = 1.0
     alpha_logit: float = 1.0
     beta_feature: float = 2.0
     lambda_aux: float = 0.3
     audio_teacher: TeacherConfig = Field(default_factory=lambda: TeacherConfig(name="Cnn14MobileV2"))
     video_teacher: TeacherConfig = Field(default_factory=lambda: TeacherConfig(name="EfficientNetB0"))
+
 
 
 class DatasetConfig(BaseModel):
