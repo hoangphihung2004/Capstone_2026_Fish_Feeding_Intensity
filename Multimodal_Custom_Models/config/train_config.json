@@ -14,7 +14,10 @@
   "delta": 0.0,
   "loss_type": "weighted_cross_entropy",
   "focal_gamma": 2.0,
-  "label_smoothing": 0.05,
+  "label_smoothing": {
+    "enabled": true,
+    "value": 0.05
+  },
   "scheduler": {
     "enabled": true,
     "type": "cosine_warmup",

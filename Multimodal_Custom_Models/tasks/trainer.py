@@ -388,7 +388,16 @@ class MultimodalTrainer:
         self.class_weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
         loss_type = getattr(cfg, "loss_type", "weighted_cross_entropy")
         focal_gamma = getattr(cfg, "focal_gamma", 2.0)
-        label_smoothing = float(getattr(cfg, "label_smoothing", 0.0))
+        ls_cfg = getattr(cfg, "label_smoothing", None)
+        if isinstance(ls_cfg, (int, float)):
+            label_smoothing = float(ls_cfg)
+        elif hasattr(ls_cfg, "enabled"):
+            label_smoothing = float(getattr(ls_cfg, "value", 0.05)) if getattr(ls_cfg, "enabled", False) else 0.0
+        elif isinstance(ls_cfg, dict):
+            label_smoothing = float(ls_cfg.get("value", 0.05)) if ls_cfg.get("enabled", False) else 0.0
+        else:
+            label_smoothing = 0.0
+
 
         if loss_type == "cross_entropy":
             self.criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
