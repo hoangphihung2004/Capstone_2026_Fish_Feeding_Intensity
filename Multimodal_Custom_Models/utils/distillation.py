@@ -21,8 +21,17 @@ def compute_feature_alignment_loss(
     student_proj_feat: torch.Tensor,
     teacher_feat: torch.Tensor,
 ) -> torch.Tensor:
-    """Computes Feature Alignment Loss using Cosine Distance."""
+    """Computes Feature Alignment Loss using Cosine Distance with dynamic dimension matching."""
+    if student_proj_feat.dim() == 2 and teacher_feat.dim() == 2:
+        if student_proj_feat.shape[1] != teacher_feat.shape[1]:
+            student_proj_feat = F.interpolate(
+                student_proj_feat.unsqueeze(1),
+                size=teacher_feat.shape[1],
+                mode="linear",
+                align_corners=False,
+            ).squeeze(1)
     return (1.0 - F.cosine_similarity(student_proj_feat, teacher_feat, dim=-1)).mean()
+
 
 
 def compute_multimodal_distillation_loss(

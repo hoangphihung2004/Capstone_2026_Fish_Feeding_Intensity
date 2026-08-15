@@ -76,7 +76,7 @@ class PANNS_Cnn14(BaseBackbone):
         init_layer(self.fc_audioset)
         init_layer(self.fc1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_features(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         x = self.conv_block1(x, pool_size=(2, 2), pool_type='avg')
         x = F.dropout(x, p=0.2, training=self.training)
         x = self.conv_block2(x, pool_size=(2, 2), pool_type='avg')
@@ -96,8 +96,12 @@ class PANNS_Cnn14(BaseBackbone):
         x = x1 + x2
         
         x = F.dropout(x, p=0.2, training=self.training)
-        x = F.relu_(self.fc1(x))
-        x = F.dropout(x, p=0.2, training=self.training)
+        feature_vec = F.relu_(self.fc1(x))
+        x = F.dropout(feature_vec, p=0.2, training=self.training)
         clipwise_output = self.fc_audioset(x)
-        
+        return feature_vec, clipwise_output
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, clipwise_output = self.forward_features(x)
         return clipwise_output
+
