@@ -367,6 +367,9 @@ class MultimodalTrainer:
         self.video_teacher = build_video_teacher(cfg)
         if self.audio_teacher is not None:
             self.audio_teacher = self.audio_teacher.to(self.device)
+        if self.video_teacher is not None:
+            self.video_teacher = self.video_teacher.to(self.device)
+
         train_samples = splits.get("train", [])
         class_counts = {}
         for s in train_samples:
