@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -387,17 +388,53 @@ class MultimodalTrainer:
         self.class_weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
         loss_type = getattr(cfg, "loss_type", "weighted_cross_entropy")
         focal_gamma = getattr(cfg, "focal_gamma", 2.0)
+        label_smoothing = float(getattr(cfg, "label_smoothing", 0.0))
+
         if loss_type == "cross_entropy":
-            self.criterion = nn.CrossEntropyLoss()
-            logger.info("  - Loss function: Standard unweighted CrossEntropyLoss")
+            self.criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+            logger.info("  - Loss function: Standard unweighted CrossEntropyLoss (label_smoothing=%.2f)", label_smoothing)
         elif loss_type == "focal_loss":
-            self.criterion = FocalLoss(alpha=self.class_weights, gamma=focal_gamma)
-            logger.info("  - Loss function: Weighted FocalLoss (gamma=%.1f) with class weights: %s", focal_gamma, [round(w, 4) for w in weights])
+            self.criterion = FocalLoss(alpha=self.class_weights, gamma=focal_gamma, label_smoothing=label_smoothing)
+            logger.info("  - Loss function: Weighted FocalLoss (gamma=%.1f, label_smoothing=%.2f) with class weights: %s", focal_gamma, label_smoothing, [round(w, 4) for w in weights])
         else:
-            self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-            logger.info("  - Loss function: Dynamic Weighted CrossEntropyLoss: %s", [round(w, 4) for w in weights])
+            self.criterion = nn.CrossEntropyLoss(weight=self.class_weights, label_smoothing=label_smoothing)
+            logger.info("  - Loss function: Dynamic Weighted CrossEntropyLoss (label_smoothing=%.2f): %s", label_smoothing, [round(w, 4) for w in weights])
 
         self.optimizer = _optimizer(self._optimizer_parameters(), cfg)
+
+        # 1. LR Scheduler setup (Cosine Annealing + Warmup)
+        self.scheduler_cfg = getattr(cfg, "scheduler", None)
+        self.scheduler = None
+        if self.scheduler_cfg and getattr(self.scheduler_cfg, "enabled", False):
+            if getattr(self.scheduler_cfg, "type", "cosine_warmup") == "cosine_warmup":
+                warmup_epochs = getattr(self.scheduler_cfg, "warmup_epochs", 10)
+                eta_min = getattr(self.scheduler_cfg, "eta_min", 1e-6)
+                total_epochs = cfg.epochs
+                base_lr = cfg.learning_rate
+
+                def lr_lambda(epoch: int) -> float:
+                    if epoch < warmup_epochs:
+                        return (epoch + 1) / float(warmup_epochs)
+                    progress = (epoch - warmup_epochs) / float(max(1, total_epochs - warmup_epochs))
+                    cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+                    min_ratio = eta_min / base_lr
+                    return min_ratio + (1.0 - min_ratio) * cosine_decay
+
+                self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
+                logger.info("  - LR Scheduler: CosineAnnealingLR with %d warmup epochs (eta_min=%.1e)", warmup_epochs, eta_min)
+
+        # 2. SWA setup (Stochastic Weight Averaging)
+        self.swa_cfg = getattr(cfg, "swa", None)
+        self.swa_model = None
+        self.swa_scheduler = None
+        if self.swa_cfg and getattr(self.swa_cfg, "enabled", False):
+            from torch.optim.swa_utils import AveragedModel, SWALR
+            self.swa_model = AveragedModel(self.model)
+            swa_lr = getattr(self.swa_cfg, "lr", 1e-5)
+            anneal_epochs = getattr(self.swa_cfg, "anneal_epochs", 10)
+            self.swa_scheduler = SWALR(self.optimizer, swa_lr=swa_lr, anneal_epochs=anneal_epochs)
+            logger.info("  - SWA: Stochastic Weight Averaging enabled starting at epoch %d (swa_lr=%.1e)", self.swa_cfg.start_epoch, swa_lr)
+
 
 
         self.model_param_counts = _count_parameters(self.model)
@@ -721,16 +758,53 @@ class MultimodalTrainer:
                 is_best=improved,
             )
 
+            # Stepping LR Scheduler / SWA
+            if self.swa_model is not None and self.swa_cfg and getattr(self.swa_cfg, "enabled", False) and epoch >= getattr(self.swa_cfg, "start_epoch", 150):
+                self.swa_model.update_parameters(self.model)
+                if self.swa_scheduler is not None:
+                    self.swa_scheduler.step()
+            elif self.scheduler is not None:
+                self.scheduler.step()
+
             if self.early_stopping and self.early_stopper is not None:
                 if self.early_stopper.step(current_score):
                     logger.info("Early stopping triggered at epoch %d!", epoch)
                     break
 
         training_time = time.perf_counter() - train_start_time
+
+        # Final SWA Evaluation and Checkpoint Saving
+        if self.swa_model is not None and self.swa_cfg and getattr(self.swa_cfg, "enabled", False):
+            logger.info("==================================================")
+            logger.info("Updating BatchNorm statistics for SWA model...")
+            from torch.optim.swa_utils import update_bn
+            update_bn(self.loaders["train"], self.swa_model, device=self.device)
+
+            logger.info("Running final evaluation on SWA model...")
+            original_model = self.model
+            self.model = self.swa_model.module
+            swa_val_metrics = self._run_epoch("val", train=False)
+            swa_test_metrics = self._run_epoch("test", train=False)
+            self.model = original_model
+
+            swa_path = self.output_dir / "checkpoint" / "model_swa.pt"
+            torch.save(
+                {
+                    "model_state_dict": self.swa_model.module.state_dict(),
+                    "config": self.cfg.model_dump(),
+                    "val_metrics": {k: v for k, v in swa_val_metrics.items() if not k.startswith("y_")},
+                    "test_metrics": {k: v for k, v in swa_test_metrics.items() if not k.startswith("y_")},
+                },
+                swa_path,
+            )
+            logger.info("SWA Model Val Acc = %.4f | Test Acc = %.4f (Saved to '%s')", swa_val_metrics["accuracy"], swa_test_metrics["accuracy"], swa_path)
+            logger.info("==================================================")
+
         try:
             self.history_logger.plot_history()
         except Exception as exc:
             logger.warning("Warning: Failed to generate learning curves plot: %s", str(exc))
+
 
         logger.info("==================================================")
         logger.info("Training complete. Starting evaluation on Test split...")

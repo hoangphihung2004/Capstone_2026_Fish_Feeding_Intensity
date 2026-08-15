@@ -81,6 +81,20 @@ class DatasetConfig(BaseModel):
     cv_val_ratio: float = 0.2
 
 
+class SchedulerConfig(BaseModel):
+    enabled: bool = True
+    type: Literal["cosine_warmup", "none"] = "cosine_warmup"
+    warmup_epochs: int = 10
+    eta_min: float = 1e-6
+
+
+class SWAConfig(BaseModel):
+    enabled: bool = False
+    start_epoch: int = 150
+    lr: float = 1e-5
+    anneal_epochs: int = 10
+
+
 class TrainConfig(BaseModel):
     seed: int = 42
     device: str = "cuda"
@@ -97,12 +111,16 @@ class TrainConfig(BaseModel):
     delta: float = 0.0
     loss_type: Literal["cross_entropy", "weighted_cross_entropy", "focal_loss"] = "weighted_cross_entropy"
     focal_gamma: float = 2.0
+    label_smoothing: float = 0.05
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    swa: SWAConfig = Field(default_factory=SWAConfig)
     output_dir: str = "outputs"
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig)
     distillation: DistillationConfig = Field(default_factory=DistillationConfig)
+
 
     @classmethod
     def from_json(cls, path: str | Path) -> "TrainConfig":
