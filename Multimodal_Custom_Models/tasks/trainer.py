@@ -367,10 +367,25 @@ class MultimodalTrainer:
         self.video_teacher = build_video_teacher(cfg)
         if self.audio_teacher is not None:
             self.audio_teacher = self.audio_teacher.to(self.device)
-        if self.video_teacher is not None:
-            self.video_teacher = self.video_teacher.to(self.device)
-        self.criterion = nn.CrossEntropyLoss()
+        train_samples = splits.get("train", [])
+        class_counts = {}
+        for s in train_samples:
+            lbl = int(s.get("label", s.get("target", 0)))
+            class_counts[lbl] = class_counts.get(lbl, 0) + 1
+        num_classes = cfg.num_classes
+        total_train = len(train_samples) if len(train_samples) > 0 else 1
+        weights = []
+        for c in range(num_classes):
+            cnt = class_counts.get(c, 1)
+            w = total_train / (num_classes * cnt)
+            if c == 2:  # Priority boost for medium class
+                w *= 1.2
+            weights.append(w)
+        self.class_weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
+        self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+        logger.info("  - Dynamic Class Weights initialized: %s", [round(w, 4) for w in weights])
         self.optimizer = _optimizer(self._optimizer_parameters(), cfg)
+
         self.model_param_counts = _count_parameters(self.model)
         audio_frontend = getattr(self.model, "audio_frontend", None)
         self.audio_frontend_param_counts = _count_parameters(audio_frontend) if audio_frontend is not None else None
@@ -563,7 +578,9 @@ class MultimodalTrainer:
             temperature=temperature,
             alpha_logit=alpha_logit,
             beta_feature=beta_feature,
+            class_weights=self.class_weights,
         )
+
         return total_loss, loss_stats
 
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:

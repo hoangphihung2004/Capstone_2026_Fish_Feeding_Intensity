@@ -43,6 +43,7 @@ def compute_multimodal_distillation_loss(
     alpha_logit: float = 1.0,
     beta_feature: float = 2.0,
     lambda_aux: float = 0.3,
+    class_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Computes formal multi-head multi-level distillation loss for multimodal student models:
@@ -50,13 +51,14 @@ def compute_multimodal_distillation_loss(
     2. Logit KD Loss: KL Divergence for Audio Head vs Audio Teacher and Video Head vs Video Teacher
     3. Feature KD Loss: Cosine Distance for Projected Audio/Video Features vs Teacher Features
     """
-    ce_loss_fn = nn.CrossEntropyLoss()
+    ce_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
 
     # 1. Supervised Task Losses
     l_ce_fused = ce_loss_fn(student_outputs["logits_fused"], targets)
     l_ce_audio = ce_loss_fn(student_outputs["logits_audio"], targets)
     l_ce_video = ce_loss_fn(student_outputs["logits_video"], targets)
     loss_ce = l_ce_fused + lambda_aux * (l_ce_audio + l_ce_video)
+
 
     # 2. Logit-Level KD Losses
     t_audio_logits = teacher_audio_outputs.get("logits", teacher_audio_outputs.get("clipwise_output"))

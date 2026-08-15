@@ -3,14 +3,14 @@
   "device": "cuda",
   "num_classes": 4,
   "evaluation_mode": "holdout",
-  "epochs": 200,
+  "epochs": 300,
   "batch_size": 256,
-  "learning_rate": 0.001,
+  "learning_rate": 0.0001,
   "weight_decay": 0.0001,
   "optimizer": "adamw",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 30,
+  "patience": 70,
   "delta": 0.0,
   "output_dir": "outputs",
   "model": {
@@ -48,23 +48,24 @@
     "image_size": 224
   },
   "distillation": {
-    "enabled": false,
+    "enabled": true,
     "mode": "offline",
     "hard_label_weight": 1.0,
     "alpha_logit": 1.0,
     "beta_feature": 2.0,
     "lambda_aux": 0.3,
     "audio_teacher": {
-      "name": "Cnn14MobileV2",
-      "checkpoint_path": "",
+      "name": "PANNS_Cnn6",
+      "checkpoint_path": "/marimo/Capstone_2026_Fish_Feeding_Intensity/Multimodal_Custom_Models/PANNS_Cnn6/DL_audio/checkpoint/panns_cnn6/audio_best.pt",
       "temperature": 4.0,
-      "loss_weight": 0.3
+      "loss_weight": 0.5
     },
     "video_teacher": {
       "name": "EfficientNetB0",
-      "checkpoint_path": "",
+      "checkpoint_path": "/marimo/Capstone_2026_Fish_Feeding_Intensity/Multimodal_Custom_Models/EfficientNetB0/U_FFIA_video/checkpoint/efficientnet_b0/video_best.pt",
       "temperature": 4.0,
-      "loss_weight": 0.3
+      "loss_weight": 0.5
     }
   }
 }
+
