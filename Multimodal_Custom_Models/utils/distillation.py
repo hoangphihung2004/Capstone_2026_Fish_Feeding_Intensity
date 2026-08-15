@@ -36,35 +36,47 @@ def compute_feature_alignment_loss(
 
 class FocalLoss(nn.Module):
     """
-    Formal Multi-class Focal Loss with optional class weights (alpha) and focusing parameter (gamma).
+    Formal Multi-class Focal Loss with optional class weights (alpha), focusing parameter (gamma),
+    and label smoothing support.
     FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
     """
-    def __init__(self, alpha: torch.Tensor | None = None, gamma: float = 2.0, reduction: str = "mean") -> None:
+    def __init__(self, alpha: torch.Tensor | None = None, gamma: float = 2.0, reduction: str = "mean", label_smoothing: float = 0.0) -> None:
         super().__init__()
         self.alpha = alpha
         self.gamma = float(gamma)
         self.reduction = reduction
+        self.label_smoothing = float(label_smoothing)
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        num_classes = inputs.size(1)
         log_pt = F.log_softmax(inputs, dim=1)
         pt = torch.exp(log_pt)
 
-        log_pt = log_pt.gather(1, targets.unsqueeze(1)).squeeze(1)
-        pt = pt.gather(1, targets.unsqueeze(1)).squeeze(1)
-
-        focal_weight = (1.0 - pt) ** self.gamma
-
-        if self.alpha is not None:
-            alpha_t = self.alpha.to(inputs.device).gather(0, targets)
-            loss = -alpha_t * focal_weight * log_pt
+        if self.label_smoothing > 0.0:
+            with torch.no_grad():
+                smooth_targets = torch.full_like(log_pt, self.label_smoothing / num_classes)
+                smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.label_smoothing + (self.label_smoothing / num_classes))
+            focal_weight = (1.0 - pt) ** self.gamma
+            loss = -(smooth_targets * focal_weight * log_pt).sum(dim=1)
+            if self.alpha is not None:
+                alpha_t = self.alpha.to(inputs.device).gather(0, targets)
+                loss = alpha_t * loss
         else:
-            loss = -focal_weight * log_pt
+            log_pt_target = log_pt.gather(1, targets.unsqueeze(1)).squeeze(1)
+            pt_target = pt.gather(1, targets.unsqueeze(1)).squeeze(1)
+            focal_weight = (1.0 - pt_target) ** self.gamma
+            if self.alpha is not None:
+                alpha_t = self.alpha.to(inputs.device).gather(0, targets)
+                loss = -alpha_t * focal_weight * log_pt_target
+            else:
+                loss = -focal_weight * log_pt_target
 
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
             return loss.sum()
         return loss
+
 
 
 def compute_multimodal_distillation_loss(

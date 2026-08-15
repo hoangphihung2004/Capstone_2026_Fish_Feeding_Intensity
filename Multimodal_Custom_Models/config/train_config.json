@@ -14,6 +14,19 @@
   "delta": 0.0,
   "loss_type": "weighted_cross_entropy",
   "focal_gamma": 2.0,
+  "label_smoothing": 0.05,
+  "scheduler": {
+    "enabled": true,
+    "type": "cosine_warmup",
+    "warmup_epochs": 10,
+    "eta_min": 1e-6
+  },
+  "swa": {
+    "enabled": false,
+    "start_epoch": 150,
+    "lr": 1e-5,
+    "anneal_epochs": 10
+  },
   "output_dir": "outputs",
   "model": {
     "name": "MultimodalStudentModel",
