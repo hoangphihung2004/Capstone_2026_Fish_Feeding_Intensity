@@ -93,8 +93,10 @@ class TrainConfig(BaseModel):
     optimizer: Literal["adam", "adamw", "sgd"] = "adamw"
     monitor: Literal["accuracy", "f1_macro", "loss"] = "accuracy"
     early_stopping: bool = True
-    patience: int = 30
+    patience: int = 70
     delta: float = 0.0
+    loss_type: Literal["cross_entropy", "weighted_cross_entropy", "focal_loss"] = "weighted_cross_entropy"
+    focal_gamma: float = 2.0
     output_dir: str = "outputs"
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)

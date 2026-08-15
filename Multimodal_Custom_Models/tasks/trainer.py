@@ -19,7 +19,7 @@ from config import TrainConfig
 from dataset import save_split_files
 from models import build_model
 from models.teacher_registry import build_audio_teacher, build_video_teacher
-from utils.distillation import compute_multimodal_distillation_loss
+from utils.distillation import FocalLoss, compute_multimodal_distillation_loss
 from utils.metrics import (
     CLASS_NAMES,
     save_confusion_outputs,
@@ -382,9 +382,20 @@ class MultimodalTrainer:
                 w *= 1.2
             weights.append(w)
         self.class_weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
-        self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-        logger.info("  - Dynamic Class Weights initialized: %s", [round(w, 4) for w in weights])
+        loss_type = getattr(cfg, "loss_type", "weighted_cross_entropy")
+        focal_gamma = getattr(cfg, "focal_gamma", 2.0)
+        if loss_type == "cross_entropy":
+            self.criterion = nn.CrossEntropyLoss()
+            logger.info("  - Loss function: Standard unweighted CrossEntropyLoss")
+        elif loss_type == "focal_loss":
+            self.criterion = FocalLoss(alpha=self.class_weights, gamma=focal_gamma)
+            logger.info("  - Loss function: Weighted FocalLoss (gamma=%.1f) with class weights: %s", focal_gamma, [round(w, 4) for w in weights])
+        else:
+            self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+            logger.info("  - Loss function: Dynamic Weighted CrossEntropyLoss: %s", [round(w, 4) for w in weights])
+
         self.optimizer = _optimizer(self._optimizer_parameters(), cfg)
+
 
         self.model_param_counts = _count_parameters(self.model)
         audio_frontend = getattr(self.model, "audio_frontend", None)
@@ -579,7 +590,9 @@ class MultimodalTrainer:
             alpha_logit=alpha_logit,
             beta_feature=beta_feature,
             class_weights=self.class_weights,
+            task_loss_fn=self.criterion,
         )
+
 
         return total_loss, loss_stats
 

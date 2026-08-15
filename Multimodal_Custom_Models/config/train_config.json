@@ -12,6 +12,8 @@
   "early_stopping": true,
   "patience": 70,
   "delta": 0.0,
+  "loss_type": "weighted_cross_entropy",
+  "focal_gamma": 2.0,
   "output_dir": "outputs",
   "model": {
     "name": "MultimodalStudentModel",

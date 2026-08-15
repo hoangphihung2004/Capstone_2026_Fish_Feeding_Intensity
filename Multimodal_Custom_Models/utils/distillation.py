@@ -34,6 +34,39 @@ def compute_feature_alignment_loss(
 
 
 
+class FocalLoss(nn.Module):
+    """
+    Formal Multi-class Focal Loss with optional class weights (alpha) and focusing parameter (gamma).
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    """
+    def __init__(self, alpha: torch.Tensor | None = None, gamma: float = 2.0, reduction: str = "mean") -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = float(gamma)
+        self.reduction = reduction
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        log_pt = F.log_softmax(inputs, dim=1)
+        pt = torch.exp(log_pt)
+
+        log_pt = log_pt.gather(1, targets.unsqueeze(1)).squeeze(1)
+        pt = pt.gather(1, targets.unsqueeze(1)).squeeze(1)
+
+        focal_weight = (1.0 - pt) ** self.gamma
+
+        if self.alpha is not None:
+            alpha_t = self.alpha.to(inputs.device).gather(0, targets)
+            loss = -alpha_t * focal_weight * log_pt
+        else:
+            loss = -focal_weight * log_pt
+
+        if self.reduction == "mean":
+            return loss.mean()
+        elif self.reduction == "sum":
+            return loss.sum()
+        return loss
+
+
 def compute_multimodal_distillation_loss(
     student_outputs: dict[str, torch.Tensor],
     teacher_audio_outputs: dict[str, torch.Tensor],
@@ -44,20 +77,25 @@ def compute_multimodal_distillation_loss(
     beta_feature: float = 2.0,
     lambda_aux: float = 0.3,
     class_weights: torch.Tensor | None = None,
+    task_loss_fn: nn.Module | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     Computes formal multi-head multi-level distillation loss for multimodal student models:
-    1. Task Supervised Loss: Cross-Entropy for 3 heads (Primary Fused Head + Aux Audio & Video Heads)
+    1. Task Supervised Loss: Cross-Entropy / Weighted CE / Focal Loss for 3 heads (Fused + Aux Audio & Video)
     2. Logit KD Loss: KL Divergence for Audio Head vs Audio Teacher and Video Head vs Video Teacher
     3. Feature KD Loss: Cosine Distance for Projected Audio/Video Features vs Teacher Features
     """
-    ce_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    if task_loss_fn is not None:
+        ce_loss_fn = task_loss_fn
+    else:
+        ce_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
 
     # 1. Supervised Task Losses
     l_ce_fused = ce_loss_fn(student_outputs["logits_fused"], targets)
     l_ce_audio = ce_loss_fn(student_outputs["logits_audio"], targets)
     l_ce_video = ce_loss_fn(student_outputs["logits_video"], targets)
     loss_ce = l_ce_fused + lambda_aux * (l_ce_audio + l_ce_video)
+
 
 
     # 2. Logit-Level KD Losses
