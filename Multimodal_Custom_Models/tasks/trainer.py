@@ -653,7 +653,31 @@ class MultimodalTrainer:
 
         return total_loss, loss_stats
 
+    def _update_swa_bn(self) -> None:
+        if self.swa_model is None:
+            return
+        momenta = {}
+        for module in self.swa_model.modules():
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.running_mean.zero_()
+                module.running_var.fill_(1)
+                momenta[module] = module.momentum
+                module.momentum = None
+
+        was_training = self.swa_model.training
+        self.swa_model.train()
+        with torch.no_grad():
+            for batch in self.loaders["train"]:
+                waveform = batch["waveform"].to(self.device, non_blocking=True)
+                video_form = batch["video_form"].to(self.device, non_blocking=True)
+                self.swa_model(waveform=waveform, video_form=video_form)
+
+        for module, momentum in momenta.items():
+            module.momentum = momentum
+        self.swa_model.train(was_training)
+
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
+
         self.model.train(train)
         if self.audio_teacher is not None:
             self.audio_teacher.eval()
@@ -795,10 +819,10 @@ class MultimodalTrainer:
         if self.swa_model is not None and self.swa_cfg and getattr(self.swa_cfg, "enabled", False):
             logger.info("==================================================")
             logger.info("Updating BatchNorm statistics for SWA model...")
-            from torch.optim.swa_utils import update_bn
-            update_bn(self.loaders["train"], self.swa_model, device=self.device)
+            self._update_swa_bn()
 
             logger.info("Running final evaluation on SWA model...")
+
             original_model = self.model
             self.model = self.swa_model.module
             swa_val_metrics = self._run_epoch("val", train=False)
