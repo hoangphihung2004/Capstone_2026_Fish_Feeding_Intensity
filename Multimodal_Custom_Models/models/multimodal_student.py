@@ -13,9 +13,10 @@ except ImportError:
 from config import AudioFeaturesConfig, VideoFeaturesConfig
 from features.audio_frontend import AudioFrontend
 from models.base import BaseMultimodalModel
+from models.blocks.adaptive_gate_block import AdaptiveConfidenceGate
 from models.blocks.attention_blocks import BottleneckTokenAttentionBlock, ECABlock
 from models.blocks.depthwise_conv_block import DepthwiseAudioStage, DepthwiseSeparableConv2d
-from models.blocks.cross_modal_blocks import DynamicSpatialFrequencyModulationBlock, LightweightCrossAttentionUnit
+from models.blocks.mbt_block import MBTCrossAttentionBlock
 from models.blocks.mobilevit_block import MobileViTv2Block
 
 
@@ -36,9 +37,10 @@ class FeatureProjectionAdapter(nn.Module):
 
 class MultimodalStudentModel(BaseMultimodalModel):
     """
-    SOTA High-Novelty FF-Net (Frequency-Spatial Feature Modulation Network) Student Model:
+    SOTA FF-MBT (Frequency-Spatial Feature Modulation & Multimodal Bottleneck Transformer Network):
     - Modular 5-Stage Backbone with Depthwise Separable Convolutions (~3.85M trainable params)
-    - D-FSFM (Dynamic Frequency-Spatial Feature Modulation) Units at Stage 2-5
+    - NeurIPS MBT Bottleneck Cross-Attention Blocks (K=4 tokens) at Stage 4 & Stage 5
+    - IEEE Uncertainty-Aware Adaptive Confidence Gated Fusion (g_a, g_v)
     - MobileViTv2 Linear Self-Attention Blocks at Stage 4 & Stage 5
     - Hierarchical Stage 4 + Stage 5 Token Pyramid Attention Fusion
     - Tri-Head Classification Architecture (Audio Head, Video Head, Fused Head)
@@ -90,24 +92,24 @@ class MultimodalStudentModel(BaseMultimodalModel):
             MobileViTv2Block(self.embed_dim, self.embed_dim, attn_dim=128),
         )
 
-        # 4. Novelty #1: D-FSFM (Dynamic Frequency-Spatial Feature Modulation Units)
-        self.interaction_stage2 = DynamicSpatialFrequencyModulationBlock(24)
-        self.interaction_stage3 = DynamicSpatialFrequencyModulationBlock(40)
-        self.interaction_stage4 = DynamicSpatialFrequencyModulationBlock(80)
-        self.interaction_stage5 = DynamicSpatialFrequencyModulationBlock(self.embed_dim)
+        # 4. SOTA NeurIPS MBT Bottleneck Cross-Attention Blocks (K=4 Bottleneck Tokens)
+        self.mbt_stage4 = MBTCrossAttentionBlock(80, num_bottlenecks=4)
+        self.mbt_stage5 = MBTCrossAttentionBlock(self.embed_dim, num_bottlenecks=4)
 
-        # 5. Novelty #2: Hierarchical Stage 4 + Stage 5 Token Pyramid Attention Fusion
+        # 5. SOTA IEEE Uncertainty-Aware Adaptive Gated Fusion Module
+        self.adaptive_gate = AdaptiveConfidenceGate(self.embed_dim)
+
+        # 6. Hierarchical Stage 4 + Stage 5 Token Pyramid Attention Fusion
         self.stage4_proj = nn.Conv2d(80, self.embed_dim, kernel_size=1)
         self.fusion_module = BottleneckTokenAttentionBlock(embed_dim=self.embed_dim, num_heads=4)
         self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # 6. Tri-Head Classifiers
+        # 7. Tri-Head Classifiers
         self.audio_head = nn.Linear(self.embed_dim, num_classes)
         self.video_head = nn.Linear(self.embed_dim, num_classes)
         self.fused_head = nn.Linear(self.embed_dim, num_classes)
 
-
-        # 7. Teacher Feature Projection Adapters
+        # 8. Teacher Feature Projection Adapters
         self.audio_adapter = FeatureProjectionAdapter(self.embed_dim, audio_teacher_dim)
         self.video_adapter = FeatureProjectionAdapter(self.embed_dim, video_teacher_dim)
 
@@ -126,33 +128,36 @@ class MultimodalStudentModel(BaseMultimodalModel):
         a = self.audio_stem(a)
         v = self.video_stem(video_form)
 
-        # Step B: Multi-Stage Feature Extraction & Cross-Attention Interaction
+        # Step B: Modality-Independent Stage 2 & 3
         a = self.audio_stage2(a)
         v = self.video_stage2(v)
-        a, v = self.interaction_stage2(a, v)
 
         a = self.audio_stage3(a)
         v = self.video_stage3(v)
-        a, v = self.interaction_stage3(a, v)
 
+        # Step C: Stage 4 Extraction & MBT Bottleneck Cross-Attention Interaction
         a = self.audio_stage4(a)
         v = self.video_stage4(v)
-        a, v = self.interaction_stage4(a, v)
-        a4, v4 = a, v  # Save Stage 4 features for Hierarchical Fusion
+        a, v = self.mbt_stage4(a, v)
+        a4, v4 = a, v  # Save Stage 4 features for Hierarchical Token Pyramid Fusion
 
+        # Step D: Stage 5 Extraction & MBT Bottleneck Cross-Attention Interaction
         a = self.audio_stage5(a)
         v = self.video_stage5(v)
-        a, v = self.interaction_stage5(a, v)
+        a, v = self.mbt_stage5(a, v)
 
-        # Step C: Global Pooling for Single-Modality Features
+        # Step E: Global Pooling for Single-Modality Features
         f_audio = self.global_pool(a).flatten(1)
         f_video = self.global_pool(v).flatten(1)
 
-        # Step D: Single-Modality Classification Heads
+        # Step F: Single-Modality Heads
         logits_audio = self.audio_head(f_audio)
         logits_video = self.video_head(f_video)
 
-        # Step E: Hierarchical Token Attention Fusion (Stage 4 + Stage 5 Tokens)
+        # Step G: Uncertainty-Aware Adaptive Gated Fusion
+        f_adaptive, g_audio, g_video = self.adaptive_gate(f_audio, f_video)
+
+        # Step H: Hierarchical Token Attention Fusion (Stage 4 + Stage 5 Tokens)
         a4_proj = self.stage4_proj(a4)
         v4_proj = self.stage4_proj(v4)
 
@@ -161,12 +166,14 @@ class MultimodalStudentModel(BaseMultimodalModel):
         tokens = torch.cat([a_tokens, v_tokens], dim=1)
 
         attended_tokens = self.fusion_module(tokens)
-        f_fused = attended_tokens.mean(dim=1)
+        f_token_fused = attended_tokens.mean(dim=1)
 
-        # Step F: Fused Multimodal Head
+        f_fused = f_adaptive + f_token_fused
+
+        # Step I: Fused Multimodal Head
         logits_fused = self.fused_head(f_fused)
 
-        # Step G: Feature Projection for Distillation
+        # Step J: Feature Projection for Distillation
         proj_f_audio = self.audio_adapter(f_audio)
         proj_f_video = self.video_adapter(f_video)
 
@@ -180,6 +187,8 @@ class MultimodalStudentModel(BaseMultimodalModel):
             "f_fused": f_fused,
             "proj_f_audio": proj_f_audio,
             "proj_f_video": proj_f_video,
+            "gate_audio": g_audio,
+            "gate_video": g_video,
         }
 
     def get_name(self) -> str:
