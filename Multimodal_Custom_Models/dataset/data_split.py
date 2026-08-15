@@ -626,11 +626,7 @@ class FishDataSplitter(BaseDataSplitter):
     def get_file_list(self, split_name: str) -> List[str]:
         # Preserve the original get_wav_name logic from U-FFIA source code for raw data scanning
         path = self.audio_path
-        if os.path.isdir(os.path.join(path, "audio")):
-            path = os.path.join(path, "audio")
         audio: List[str] = []
-        if not os.path.exists(path):
-            return audio
         l1 = sorted(os.listdir(path), key=_stable_path_key)
         for folder_name in l1:
             folder_path = os.path.join(path, folder_name)
@@ -644,7 +640,6 @@ class FishDataSplitter(BaseDataSplitter):
                 wav_dir = os.path.join(session_path, split_name, '*.wav')
                 audio.extend(sorted(glob.glob(wav_dir), key=_sample_identity_key))
         return audio
-
 
     def _resolve_video_path(self, audio_path: str) -> str:
         """Automatically resolve the corresponding video path from an audio path."""
@@ -670,12 +665,8 @@ class FishDataSplitter(BaseDataSplitter):
 
         if os.path.exists(reconstructed_video):
             return reconstructed_video
-        # Fallback for nested video/video directory structure
-        if "/video/" in reconstructed_video and not "/video/video/" in reconstructed_video:
-            nested_video = reconstructed_video.replace("/video/", "/video/video/")
-            if os.path.exists(nested_video):
-                return nested_video
         return ""
+
 
 
     def _require_video_path(self, audio_path: str) -> str:
