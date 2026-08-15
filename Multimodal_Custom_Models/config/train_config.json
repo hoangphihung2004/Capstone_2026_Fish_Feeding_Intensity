@@ -15,11 +15,11 @@
   "loss_type": "weighted_cross_entropy",
   "focal_gamma": 2.0,
   "label_smoothing": {
-    "enabled": true,
+    "enabled": false,
     "value": 0.05
   },
   "scheduler": {
-    "enabled": true,
+    "enabled": false,
     "type": "cosine_warmup",
     "warmup_epochs": 10,
     "eta_min": 1e-6
@@ -68,7 +68,7 @@
   "distillation": {
     "enabled": true,
     "mode": "offline",
-    "cutoff_enabled": true,
+    "cutoff_enabled": false,
     "cutoff_epoch": 150,
     "hard_label_weight": 1.0,
     "alpha_logit": 1.0,
