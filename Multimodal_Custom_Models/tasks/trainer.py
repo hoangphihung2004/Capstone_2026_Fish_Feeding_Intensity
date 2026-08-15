@@ -600,6 +600,7 @@ class MultimodalTrainer:
         waveform: torch.Tensor,
         video_form: torch.Tensor,
         train: bool,
+        epoch: int | None = None,
     ) -> tuple[torch.Tensor, Dict[str, float]]:
         if isinstance(student_output, torch.Tensor):
             logits = student_output
@@ -608,7 +609,14 @@ class MultimodalTrainer:
             student_dict = student_output
             logits = student_dict.get("logits_fused", student_dict["clipwise_output"])
 
-        if not self.cfg.distillation.enabled or (self.audio_teacher is None and self.video_teacher is None):
+        dist_cfg = self.cfg.distillation
+        is_cutoff = False
+        if dist_cfg.enabled and getattr(dist_cfg, "cutoff_enabled", False) and epoch is not None:
+            cutoff_epoch = getattr(dist_cfg, "cutoff_epoch", 140)
+            if epoch >= cutoff_epoch:
+                is_cutoff = True
+
+        if not dist_cfg.enabled or is_cutoff or (self.audio_teacher is None and self.video_teacher is None):
             ce_loss = self.criterion(logits, target)
             return ce_loss, {"ce_loss": float(ce_loss.detach().item()), "audio_kd_loss": 0.0, "video_kd_loss": 0.0}
 
@@ -632,7 +640,6 @@ class MultimodalTrainer:
             class_weights=self.class_weights,
             task_loss_fn=self.criterion,
         )
-
 
         return total_loss, loss_stats
 
@@ -660,7 +667,8 @@ class MultimodalTrainer:
             with torch.set_grad_enabled(train):
                 output = self.model(waveform=waveform, video_form=video_form)
                 logits = output["clipwise_output"] if isinstance(output, dict) else output
-                loss, loss_parts = self._compute_loss(output, target, waveform, video_form, train)
+                loss, loss_parts = self._compute_loss(output, target, waveform, video_form, train, epoch=epoch)
+
                 if train:
                     self.optimizer.zero_grad(set_to_none=True)
                     loss.backward()
