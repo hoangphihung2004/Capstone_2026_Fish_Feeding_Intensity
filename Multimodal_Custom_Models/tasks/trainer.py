@@ -622,29 +622,28 @@ class MultimodalTrainer:
 
 
         if not dist_cfg.enabled or is_cutoff or (self.audio_teacher is None and self.video_teacher is None):
-            ce_loss = self.criterion(logits, target)
-            return ce_loss, {"ce_loss": float(ce_loss.detach().item()), "audio_kd_loss": 0.0, "video_kd_loss": 0.0}
+            total_loss = self.criterion(logits, target)
+            loss_stats = {"ce_loss": float(total_loss.detach().item()), "audio_kd_loss": 0.0, "video_kd_loss": 0.0}
+        else:
+            with torch.no_grad():
+                t_audio_out = self.audio_teacher(waveform) if self.audio_teacher is not None else {"logits": logits}
+                t_video_out = self.video_teacher(video_form) if self.video_teacher is not None else {"logits": logits}
 
-        # Distillation enabled with dual teachers
-        with torch.no_grad():
-            t_audio_out = self.audio_teacher(waveform) if self.audio_teacher is not None else {"logits": logits}
-            t_video_out = self.video_teacher(video_form) if self.video_teacher is not None else {"logits": logits}
+            alpha_logit = getattr(self.cfg.distillation, "alpha_logit", 1.0)
+            beta_feature = getattr(self.cfg.distillation, "beta_feature", 2.0)
+            temperature = getattr(self.cfg.distillation.audio_teacher, "temperature", 4.0)
 
-        alpha_logit = getattr(self.cfg.distillation, "alpha_logit", 1.0)
-        beta_feature = getattr(self.cfg.distillation, "beta_feature", 2.0)
-        temperature = getattr(self.cfg.distillation.audio_teacher, "temperature", 4.0)
-
-        total_loss, loss_stats = compute_multimodal_distillation_loss(
-            student_outputs=student_dict,
-            teacher_audio_outputs=t_audio_out,
-            teacher_video_outputs=t_video_out,
-            targets=target,
-            temperature=temperature,
-            alpha_logit=alpha_logit,
-            beta_feature=beta_feature,
-            class_weights=self.class_weights,
-            task_loss_fn=self.criterion,
-        )
+            total_loss, loss_stats = compute_multimodal_distillation_loss(
+                student_outputs=student_dict,
+                teacher_audio_outputs=t_audio_out,
+                teacher_video_outputs=t_video_out,
+                targets=target,
+                temperature=temperature,
+                alpha_logit=alpha_logit,
+                beta_feature=beta_feature,
+                class_weights=self.class_weights,
+                task_loss_fn=self.criterion,
+            )
 
         # Add Ordinal Distance Loss if enabled
         ord_cfg = getattr(self.cfg, "ordinal_loss", None)
@@ -660,6 +659,7 @@ class MultimodalTrainer:
             loss_stats["ordinal_loss"] = float(ord_loss.detach().item())
 
         return total_loss, loss_stats
+
 
 
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
