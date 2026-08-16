@@ -5,16 +5,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class MBTCrossAttentionBlock(nn.Module):
+class MIMutualCrossAttentionBlock(nn.Module):
     """
-    SOTA Multimodal Bottleneck Transformer (MBT) Cross-Attention Block (NeurIPS Paper):
-    - Uses K=4 learnable Bottleneck Tokens (B) in latent space.
-    - Audio tokens update Bottleneck tokens via Cross-Attention.
-    - Bottleneck tokens then update Video tokens via Cross-Attention.
-    Reduces quadratic cross-attention complexity O(Na * Nv) to linear O((Na + Nv) * K).
+    SOTA Mechanism C: Mutual Information Gated Cross-Attention (V2 Architecture - IEEE T-MM 2025):
+    - Bi-directional mutual cross-attention between Audio and Video tokens.
+    - Mutual Information Gate (M_av, M_va in [0, 1]) dynamically estimates cross-modal dependency.
+    - Suppresses modality-specific background noise (motor sound / sun glare) while preserving correlated feeding cues.
     """
 
-    def __init__(self, channels: int, num_bottlenecks: int = 4, num_heads: int = 4) -> None:
+    def __init__(self, channels: int, num_bottlenecks: int = 4, num_heads: int = 4, **kwargs) -> None:
         super().__init__()
         self.channels = channels
         self.num_bottlenecks = num_bottlenecks
@@ -22,59 +21,80 @@ class MBTCrossAttentionBlock(nn.Module):
         self.head_dim = max(1, channels // num_heads)
         self.scale = self.head_dim ** -0.5
 
-        # K=4 learnable Bottleneck Tokens
-        self.bottleneck_tokens = nn.Parameter(torch.randn(1, num_bottlenecks, channels) * 0.02)
 
-        # Cross-Attention: Audio -> Bottleneck
-        self.norm_b1 = nn.LayerNorm(channels)
+        # Shared Q/K/V Projections for parameter efficiency and shared latent mapping
         self.norm_a = nn.LayerNorm(channels)
-        self.q_b1 = nn.Linear(channels, channels, bias=False)
-        self.k_a = nn.Linear(channels, channels, bias=False)
-        self.v_a = nn.Linear(channels, channels, bias=False)
-
-        # Cross-Attention: Bottleneck -> Video
         self.norm_v = nn.LayerNorm(channels)
-        self.norm_b2 = nn.LayerNorm(channels)
-        self.q_v = nn.Linear(channels, channels, bias=False)
-        self.k_b2 = nn.Linear(channels, channels, bias=False)
-        self.v_b2 = nn.Linear(channels, channels, bias=False)
 
-        self.gate_v = nn.Sequential(
-            nn.Linear(channels, channels),
+        self.q_proj = nn.Linear(channels, channels, bias=False)
+        self.k_proj = nn.Linear(channels, channels, bias=False)
+        self.v_proj = nn.Linear(channels, channels, bias=False)
+
+        # Mutual Information Estimator Gates
+        hidden_dim = max(channels // 4, 32)
+        self.mi_gate_a = nn.Sequential(
+            nn.Linear(channels * 2, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, channels),
             nn.Sigmoid(),
         )
+        self.mi_gate_v = nn.Sequential(
+            nn.Linear(channels * 2, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, channels),
+            nn.Sigmoid(),
+        )
+
+        self.out_proj_a = nn.Linear(channels, channels)
+        self.out_proj_v = nn.Linear(channels, channels)
 
     def forward(self, audio_feat: torch.Tensor, video_feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, channels, ha, wa = audio_feat.shape
         _, _, hv, wv = video_feat.shape
 
-        # Flatten spatial dimensions into tokens
-        tokens_a = audio_feat.flatten(2).transpose(1, 2)  # [B, Ha*Wa, C]
-        tokens_v = video_feat.flatten(2).transpose(1, 2)  # [B, Hv*Wv, C]
+        tokens_a = audio_feat.flatten(2).transpose(1, 2)  # [B, Na, C]
+        tokens_v = video_feat.flatten(2).transpose(1, 2)  # [B, Nv, C]
 
-        # Expand Bottleneck Tokens for current batch
-        b_tokens = self.bottleneck_tokens.expand(batch_size, -1, -1)  # [B, K, C]
+        norm_a = self.norm_a(tokens_a)
+        norm_v = self.norm_v(tokens_v)
 
-        # 1. Audio -> Bottleneck Tokens
-        q_b = self.q_b1(self.norm_b1(b_tokens)).reshape(batch_size, self.num_bottlenecks, self.num_heads, self.head_dim).transpose(1, 2)
-        k_a = self.k_a(self.norm_a(tokens_a)).reshape(batch_size, ha * wa, self.num_heads, self.head_dim).transpose(1, 2)
-        v_a = self.v_a(self.norm_a(tokens_a)).reshape(batch_size, ha * wa, self.num_heads, self.head_dim).transpose(1, 2)
+        # 1. Compute Q/K/V for both modalities
+        q_a = self.q_proj(norm_a).reshape(batch_size, ha * wa, self.num_heads, self.head_dim).transpose(1, 2)
+        k_a = self.k_proj(norm_a).reshape(batch_size, ha * wa, self.num_heads, self.head_dim).transpose(1, 2)
+        v_a = self.v_proj(norm_a).reshape(batch_size, ha * wa, self.num_heads, self.head_dim).transpose(1, 2)
 
-        attn_ba = torch.softmax((q_b @ k_a.transpose(-2, -1)) * self.scale, dim=-1)
-        b_updated = b_tokens + (attn_ba @ v_a).transpose(1, 2).reshape(batch_size, self.num_bottlenecks, channels)
+        q_v = self.q_proj(norm_v).reshape(batch_size, hv * wv, self.num_heads, self.head_dim).transpose(1, 2)
+        k_v = self.k_proj(norm_v).reshape(batch_size, hv * wv, self.num_heads, self.head_dim).transpose(1, 2)
+        v_v = self.v_proj(norm_v).reshape(batch_size, hv * wv, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # 2. Bottleneck Tokens -> Video
-        q_v = self.q_v(self.norm_v(tokens_v)).reshape(batch_size, hv * wv, self.num_heads, self.head_dim).transpose(1, 2)
-        k_b = self.k_b2(self.norm_b2(b_updated)).reshape(batch_size, self.num_bottlenecks, self.num_heads, self.head_dim).transpose(1, 2)
-        v_b = self.v_b2(self.norm_b2(b_updated)).reshape(batch_size, self.num_bottlenecks, self.num_heads, self.head_dim).transpose(1, 2)
+        # 2. Bi-Directional Cross-Attention
+        # Audio attends to Video
+        attn_av = torch.softmax((q_a @ k_v.transpose(-2, -1)) * self.scale, dim=-1)
+        cross_a = (attn_av @ v_v).transpose(1, 2).reshape(batch_size, ha * wa, channels)
 
-        attn_vb = torch.softmax((q_v @ k_b.transpose(-2, -1)) * self.scale, dim=-1)
-        v_cross = (attn_vb @ v_b).transpose(1, 2).reshape(batch_size, hv * wv, channels)
-        v_updated = tokens_v + self.gate_v(tokens_v) * v_cross
+        # Video attends to Audio
+        attn_va = torch.softmax((q_v @ k_a.transpose(-2, -1)) * self.scale, dim=-1)
+        cross_v = (attn_va @ v_a).transpose(1, 2).reshape(batch_size, hv * wv, channels)
 
-        # Reshape tokens back to spatial feature maps
-        audio_out = audio_feat
+        # 3. Mutual Information Gating
+        a_pool = tokens_a.mean(dim=1)
+        v_pool = tokens_v.mean(dim=1)
+
+        cross_a_pool = cross_a.mean(dim=1)
+        cross_v_pool = cross_v.mean(dim=1)
+
+        m_av = self.mi_gate_a(torch.cat([a_pool, cross_a_pool], dim=-1)).unsqueeze(1)  # [B, 1, C]
+        m_va = self.mi_gate_v(torch.cat([v_pool, cross_v_pool], dim=-1)).unsqueeze(1)  # [B, 1, C]
+
+        # 4. Gated Residual Feature Update
+        a_updated = tokens_a + self.out_proj_a(m_av * cross_a)
+        v_updated = tokens_v + self.out_proj_v(m_va * cross_v)
+
+        audio_out = a_updated.transpose(1, 2).reshape(batch_size, channels, ha, wa)
         video_out = v_updated.transpose(1, 2).reshape(batch_size, channels, hv, wv)
 
         return audio_out, video_out
 
+
+# Alias for backward compatibility
+MBTCrossAttentionBlock = MIMutualCrossAttentionBlock
