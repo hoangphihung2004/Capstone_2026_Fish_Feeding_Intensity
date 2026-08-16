@@ -91,6 +91,12 @@ class SchedulerConfig(BaseModel):
     eta_min: float = 1e-6
 
 
+class OrdinalLossConfig(BaseModel):
+    enabled: bool = False
+    weight: float = 0.1
+    distance_power: float = 2.0
+
+
 class LabelSmoothingConfig(BaseModel):
     enabled: bool = False
     value: float = 0.05
@@ -114,8 +120,10 @@ class TrainConfig(BaseModel):
     focal_gamma: float = 2.0
     label_smoothing: LabelSmoothingConfig = Field(default_factory=LabelSmoothingConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
+    ordinal_loss: OrdinalLossConfig = Field(default_factory=OrdinalLossConfig)
 
     output_dir: str = "outputs"
+
 
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset: DatasetConfig = Field(default_factory=DatasetConfig)

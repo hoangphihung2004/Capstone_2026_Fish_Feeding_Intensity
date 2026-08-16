@@ -24,6 +24,12 @@
     "warmup_epochs": 10,
     "eta_min": 1e-6
   },
+  "ordinal_loss": {
+    "enabled": false,
+    "weight": 0.1,
+    "distance_power": 2.0
+  },
+
 
   "output_dir": "outputs",
   "model": {

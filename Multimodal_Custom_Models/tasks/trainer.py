@@ -644,6 +644,22 @@ class MultimodalTrainer:
             task_loss_fn=self.criterion,
         )
 
+        # Add Ordinal Distance Loss if enabled
+        ord_cfg = getattr(self.cfg, "ordinal_loss", None)
+        if ord_cfg and getattr(ord_cfg, "enabled", False):
+            probs = F.softmax(logits, dim=-1)
+            num_classes = logits.shape[-1]
+            class_indices = torch.arange(num_classes, device=logits.device, dtype=torch.float32)
+            power = getattr(ord_cfg, "distance_power", 2.0)
+            dist_matrix = (class_indices.unsqueeze(0) - target.unsqueeze(1).float()).abs() ** power
+            ord_loss = (probs * dist_matrix).sum(dim=-1).mean()
+            ord_weight = getattr(ord_cfg, "weight", 0.1)
+            total_loss = total_loss + ord_weight * ord_loss
+            loss_stats["ordinal_loss"] = float(ord_loss.detach().item())
+
+        return total_loss, loss_stats
+
+
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
 
 
