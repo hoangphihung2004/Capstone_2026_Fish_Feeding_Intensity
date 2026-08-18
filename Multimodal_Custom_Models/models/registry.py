@@ -33,5 +33,9 @@ def build_model(cfg: TrainConfig) -> torch.nn.Module:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = checkpoint.get("model_state_dict", checkpoint.get("state_dict", checkpoint))
         model.load_state_dict(state_dict, strict=True)
-        logger.info("Loaded model checkpoint: %s", checkpoint_path)
+        logger.info("==================================================")
+        logger.info("WARM-RESTART FINE-TUNING MODE ACTIVATED!")
+        logger.info("  - Loaded model weights from checkpoint: %s", checkpoint_path)
+        logger.info("==================================================")
     return model
+

@@ -695,10 +695,15 @@ class MultimodalTrainer:
         best_path.parent.mkdir(parents=True, exist_ok=True)
         train_start_time = time.perf_counter()
 
-        if self.early_stopping and self.early_stopper is not None:
-            self.early_stopper.reset()
+        if self.cfg.model.checkpoint_path:
+            logger.info("==================================================")
+            logger.info("WARM-RESTART FINE-TUNING MODE ACTIVATED!")
+            logger.info("  - Loaded Model Weights From: %s", self.cfg.model.checkpoint_path)
+            logger.info("  - Reset Optimizer Learning Rate: %.1e", self.cfg.learning_rate)
+            logger.info("==================================================")
+        else:
+            logger.info("Starting standard training pipeline (Monitor metric: %s)...", self.cfg.monitor)
 
-        logger.info("Starting training pipeline (Monitor metric: %s)...", self.cfg.monitor)
 
         for epoch in range(self.cfg.epochs):
             train_metrics = self._run_epoch("train", train=True, epoch=epoch)
