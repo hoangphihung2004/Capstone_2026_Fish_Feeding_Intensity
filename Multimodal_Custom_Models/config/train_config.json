@@ -25,12 +25,6 @@
     "warmup_epochs": 10,
     "eta_min": 1e-6
   },
-  "swa": {
-    "enabled": false,
-    "start_epoch": 150,
-    "lr": 1e-5,
-    "anneal_epochs": 10
-  },
   "output_dir": "outputs",
   "model": {
     "name": "MultimodalStudentModel",

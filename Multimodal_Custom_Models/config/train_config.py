@@ -91,13 +91,6 @@ class SchedulerConfig(BaseModel):
     eta_min: float = 1e-6
 
 
-class SWAConfig(BaseModel):
-    enabled: bool = False
-    start_epoch: int = 150
-    lr: float = 1e-5
-    anneal_epochs: int = 10
-
-
 class LabelSmoothingConfig(BaseModel):
     enabled: bool = False
     value: float = 0.05
@@ -121,7 +114,6 @@ class TrainConfig(BaseModel):
     focal_gamma: float = 2.0
     label_smoothing: LabelSmoothingConfig = Field(default_factory=LabelSmoothingConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
-    swa: SWAConfig = Field(default_factory=SWAConfig)
 
     output_dir: str = "outputs"
     model: ModelConfig = Field(default_factory=ModelConfig)

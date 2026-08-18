@@ -431,22 +431,6 @@ class MultimodalTrainer:
                     return min_ratio + (1.0 - min_ratio) * cosine_decay
 
                 self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
-                logger.info("  - LR Scheduler: CosineAnnealingLR with %d warmup epochs (eta_min=%.1e)", warmup_epochs, eta_min)
-
-        # 2. SWA setup (Stochastic Weight Averaging)
-        self.swa_cfg = getattr(cfg, "swa", None)
-        self.swa_model = None
-        self.swa_scheduler = None
-        if self.swa_cfg and getattr(self.swa_cfg, "enabled", False):
-            from torch.optim.swa_utils import AveragedModel, SWALR
-            self.swa_model = AveragedModel(self.model)
-            swa_lr = getattr(self.swa_cfg, "lr", 1e-5)
-            anneal_epochs = getattr(self.swa_cfg, "anneal_epochs", 10)
-            self.swa_scheduler = SWALR(self.optimizer, swa_lr=swa_lr, anneal_epochs=anneal_epochs)
-            logger.info("  - SWA: Stochastic Weight Averaging enabled starting at epoch %d (swa_lr=%.1e)", self.swa_cfg.start_epoch, swa_lr)
-
-
-
         self.model_param_counts = _count_parameters(self.model)
         audio_frontend = getattr(self.model, "audio_frontend", None)
         self.audio_frontend_param_counts = _count_parameters(audio_frontend) if audio_frontend is not None else None
@@ -654,29 +638,6 @@ class MultimodalTrainer:
 
         return total_loss, loss_stats
 
-    def _update_swa_bn(self) -> None:
-        if self.swa_model is None:
-            return
-        momenta = {}
-        for module in self.swa_model.modules():
-            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-                module.running_mean.zero_()
-                module.running_var.fill_(1)
-                momenta[module] = module.momentum
-                module.momentum = None
-
-        was_training = self.swa_model.training
-        self.swa_model.train()
-        with torch.no_grad():
-            for batch in self.loaders["train"]:
-                waveform = batch["waveform"].to(self.device, non_blocking=True)
-                video_form = batch["video_form"].to(self.device, non_blocking=True)
-                self.swa_model(waveform=waveform, video_form=video_form)
-
-        for module, momentum in momenta.items():
-            module.momentum = momentum
-        self.swa_model.train(was_training)
-
     def _run_epoch(self, split: str, train: bool, epoch: int | None = None) -> Dict[str, float | List[int]]:
 
         self.model.train(train)
@@ -801,12 +762,8 @@ class MultimodalTrainer:
                 is_best=improved,
             )
 
-            # Stepping LR Scheduler / SWA
-            if self.swa_model is not None and self.swa_cfg and getattr(self.swa_cfg, "enabled", False) and epoch >= getattr(self.swa_cfg, "start_epoch", 150):
-                self.swa_model.update_parameters(self.model)
-                if self.swa_scheduler is not None:
-                    self.swa_scheduler.step()
-            elif self.scheduler is not None:
+            # Stepping LR Scheduler
+            if self.scheduler is not None:
                 self.scheduler.step()
 
             if self.early_stopping and self.early_stopper is not None:
@@ -816,38 +773,10 @@ class MultimodalTrainer:
 
         training_time = time.perf_counter() - train_start_time
 
-        # Final SWA Evaluation and Checkpoint Saving
-        if self.swa_model is not None and self.swa_cfg and getattr(self.swa_cfg, "enabled", False):
-            logger.info("==================================================")
-            logger.info("Updating BatchNorm statistics for SWA model...")
-            self._update_swa_bn()
-
-            logger.info("Running final evaluation on SWA model...")
-
-            original_model = self.model
-            self.model = self.swa_model.module
-            swa_val_metrics = self._run_epoch("val", train=False)
-            swa_test_metrics = self._run_epoch("test", train=False)
-            self.model = original_model
-
-            swa_path = self.output_dir / "checkpoint" / "model_swa.pt"
-            torch.save(
-                {
-                    "model_state_dict": self.swa_model.module.state_dict(),
-                    "config": self.cfg.model_dump(),
-                    "val_metrics": {k: v for k, v in swa_val_metrics.items() if not k.startswith("y_")},
-                    "test_metrics": {k: v for k, v in swa_test_metrics.items() if not k.startswith("y_")},
-                },
-                swa_path,
-            )
-            logger.info("SWA Model Val Acc = %.4f | Test Acc = %.4f (Saved to '%s')", swa_val_metrics["accuracy"], swa_test_metrics["accuracy"], swa_path)
-            logger.info("==================================================")
-
         try:
             self.history_logger.plot_history()
         except Exception as exc:
             logger.warning("Warning: Failed to generate learning curves plot: %s", str(exc))
-
 
         logger.info("==================================================")
         logger.info("Training complete. Starting evaluation on Test split...")
