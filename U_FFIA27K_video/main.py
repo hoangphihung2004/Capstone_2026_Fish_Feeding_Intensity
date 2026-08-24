@@ -29,6 +29,10 @@ from models import (
     SwinTiny,
     VideoModel,
     ViTBase16,
+    MobileViTXXS,
+    MobileViTXS,
+    MobileViTv2_050,
+    MobileViTv2_075,
 )
 from tasks import VideoTrainer
 
@@ -55,6 +59,10 @@ MODEL_REGISTRY = {
     "SwinTiny": SwinTiny,
     "ViTBase16": ViTBase16,
     "ConvNeXtTiny": ConvNeXtTiny,
+    "MobileViTXXS": MobileViTXXS,
+    "MobileViTXS": MobileViTXS,
+    "MobileViTv2_050": MobileViTv2_050,
+    "MobileViTv2_075": MobileViTv2_075,
 }
 
 
