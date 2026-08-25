@@ -31,13 +31,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _get_image_cache_subdir(image_size: int) -> str:
-    return f"single_frame_size_{image_size}"
+def _get_image_cache_subdir(image_size: int, frame_policy: str) -> str:
+    return f"single_frame_size_{image_size}_{frame_policy}"
 
 
-def _resolve_image_cache_dir(video_cache_dir: Optional[str], image_size: int) -> str:
+def _resolve_image_cache_dir(video_cache_dir: Optional[str], image_size: int, frame_policy: str) -> str:
     cache_root = os.path.normpath(video_cache_dir or DEFAULT_IMAGE_CACHE_ROOT)
-    cache_subdir = _get_image_cache_subdir(image_size=image_size)
+    cache_subdir = _get_image_cache_subdir(image_size=image_size, frame_policy=frame_policy)
 
     if os.path.basename(cache_root) == cache_subdir:
         return cache_root
@@ -90,7 +90,8 @@ def _load_image_from_disk_cache(
 def _save_image_to_disk_cache(
     cache_path: Optional[str],
     sample: Dict[str, Any],
-    image_size: int
+    image_size: int,
+    frame_policy: str
 ) -> None:
     if cache_path is None:
         return
@@ -104,7 +105,7 @@ def _save_image_to_disk_cache(
         "_cache_meta": {
             "image_size": image_size,
             "format": "uint8_CHW",
-            "frame_policy": "center",
+            "frame_policy": frame_policy,
         },
     }
 
@@ -121,7 +122,27 @@ def _save_image_to_disk_cache(
                 pass
 
 
-def _decode_center_image(video_path: str, label: Any, image_size: int) -> Dict[str, Any]:
+def _get_target_frame_index(full_vid_length: int, frame_policy: str, split: str) -> int:
+    if full_vid_length == 0:
+        return 0
+    if frame_policy == "quarter":
+        return full_vid_length // 4
+    elif frame_policy == "center":
+        return full_vid_length // 2
+    elif frame_policy == "three_quarters":
+        return 3 * full_vid_length // 4
+    elif frame_policy == "end":
+        return full_vid_length - 1
+    elif frame_policy == "random":
+        if split == "train":
+            import random
+            return random.randint(0, full_vid_length - 1)
+        else:
+            return full_vid_length // 2
+    else:
+        return full_vid_length // 2
+
+def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: str, split: str) -> Dict[str, Any]:
     from decord import VideoReader, cpu, gpu
 
     try:
@@ -134,7 +155,7 @@ def _decode_center_image(video_path: str, label: Any, image_size: int) -> Dict[s
     if full_vid_length == 0:
         image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
     else:
-        frame_index = full_vid_length // 2
+        frame_index = _get_target_frame_index(full_vid_length, frame_policy, split)
         image = vr.get_batch([frame_index]).asnumpy()[0]  # [H, W, C] RGB
         image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
 
@@ -145,14 +166,14 @@ def _decode_center_image(video_path: str, label: Any, image_size: int) -> Dict[s
     }
 
 
-def _decode_center_image_cv2(video_path: str, label: Any, image_size: int) -> Dict[str, Any]:
+def _decode_image_cv2(video_path: str, label: Any, image_size: int, frame_policy: str, split: str) -> Dict[str, Any]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.error(f"Error: Could not open video file: '{video_path}'")
         image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
     else:
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_index = max(frame_count // 2, 0)
+        frame_index = _get_target_frame_index(frame_count, frame_policy, split)
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
         if not ret:
@@ -177,7 +198,8 @@ def _load_or_create_image_sample(
     image_size: int,
     use_disk_cache: bool,
     image_cache_dir: Optional[str],
-    split: str
+    split: str,
+    frame_policy: str
 ) -> Dict[str, Any]:
     cache_path = _get_image_cache_path(image_cache_dir, split, index) if use_disk_cache else None
 
@@ -191,15 +213,16 @@ def _load_or_create_image_sample(
         return cached_sample
 
     try:
-        sample = _decode_center_image(video_path=video_path, label=label, image_size=image_size)
+        sample = _decode_image(video_path=video_path, label=label, image_size=image_size, frame_policy=frame_policy, split=split)
     except Exception as exc:
         logger.warning(f"Decord failed for '{video_path}', falling back to OpenCV. Error: {exc}")
-        sample = _decode_center_image_cv2(video_path=video_path, label=label, image_size=image_size)
+        sample = _decode_image_cv2(video_path=video_path, label=label, image_size=image_size, frame_policy=frame_policy, split=split)
 
     _save_image_to_disk_cache(
         cache_path=cache_path,
         sample=sample,
-        image_size=image_size
+        image_size=image_size,
+        frame_policy=frame_policy
     )
     return sample
 
@@ -216,6 +239,7 @@ class FishVideoDataLoader:
         prefetch_factor: Optional[int] = None,
         cache_mode: str = "disk",
         image_size: int = 224,
+        frame_policy: str = "center",
         splitter_config: Optional[SplitterConfig] = None
     ) -> None:
         self.batch_size = batch_size
@@ -225,8 +249,9 @@ class FishVideoDataLoader:
         if self.cache_mode not in VALID_CACHE_MODES:
             raise ValueError(f"Invalid cache_mode='{cache_mode}'. Expected one of {sorted(VALID_CACHE_MODES)}.")
         self.image_size = image_size
+        self.frame_policy = frame_policy
         self.image_cache_root = DEFAULT_IMAGE_CACHE_ROOT
-        self.image_cache_dir = _resolve_image_cache_dir(video_cache_dir=None, image_size=image_size)
+        self.image_cache_dir = _resolve_image_cache_dir(video_cache_dir=None, image_size=image_size, frame_policy=frame_policy)
 
         if self.dataloader_workers == -1:
             max_cpu = os.cpu_count()
@@ -320,18 +345,10 @@ class FishVideoDataLoader:
                     raise ValueError(f"Missing video path for split='{self.split}', index={index}.")
 
                 try:
-                    sample = _decode_center_image(
-                        video_path=video_name,
-                        label=target_val,
-                        image_size=self.parent.image_size
-                    )
+                    sample = _decode_image(video_path=video_name, label=target_val, image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
                 except Exception as exc:
                     logger.warning(f"Decord failed for '{video_name}', falling back to OpenCV. Error: {exc}")
-                    sample = _decode_center_image_cv2(
-                        video_path=video_name,
-                        label=target_val,
-                        image_size=self.parent.image_size
-                    )
+                    sample = _decode_image_cv2(video_path=video_name, label=target_val, image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
 
                 return index, sample
 
@@ -363,11 +380,7 @@ class FishVideoDataLoader:
                         except Exception as exc:
                             logger.error(f"Error preloading image index {idx}: {exc}")
                             item = self.data_dict[idx]
-                            cache[idx] = _decode_center_image_cv2(
-                                video_path=item[1],
-                                label=item[2],
-                                image_size=self.parent.image_size
-                            )
+                            cache[idx] = _decode_image_cv2(video_path=item[1], label=item[2], image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
                             total_bytes += cache[idx]["image_form"].nbytes
                         pbar.update(1)
                     pbar.close()
@@ -381,11 +394,7 @@ class FishVideoDataLoader:
                         except Exception as exc:
                             logger.error(f"Error preloading image index {idx}: {exc}")
                             item = self.data_dict[idx]
-                            cache[idx] = _decode_center_image_cv2(
-                                video_path=item[1],
-                                label=item[2],
-                                image_size=self.parent.image_size
-                            )
+                            cache[idx] = _decode_image_cv2(video_path=item[1], label=item[2], image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
                             total_bytes += cache[idx]["image_form"].nbytes
 
             self.image_cache = cache
@@ -417,22 +426,15 @@ class FishVideoDataLoader:
                     image_size=self.parent.image_size,
                     use_disk_cache=True,
                     image_cache_dir=self.parent.image_cache_dir,
-                    split=self.split
+                    split=self.split,
+                    frame_policy=self.parent.frame_policy
                 )
             else:
                 try:
-                    sample = _decode_center_image(
-                        video_path=video_name,
-                        label=target_val,
-                        image_size=self.parent.image_size
-                    )
+                    sample = _decode_image(video_path=video_name, label=target_val, image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
                 except Exception as exc:
                     logger.warning(f"Decord failed for '{video_name}', falling back to OpenCV. Error: {exc}")
-                    sample = _decode_center_image_cv2(
-                        video_path=video_name,
-                        label=target_val,
-                        image_size=self.parent.image_size
-                    )
+                    sample = _decode_image_cv2(video_path=video_name, label=target_val, image_size=self.parent.image_size, frame_policy=self.parent.frame_policy, split=self.split)
 
             image = self.transform(sample['image_form'])
             target = np.eye(4)[sample['target']] if isinstance(sample['target'], (int, np.integer)) else sample['target']

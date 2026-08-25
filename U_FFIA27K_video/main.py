@@ -286,6 +286,7 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
         prefetch_factor=config.prefetch_factor,
         cache_mode=config.cache_mode,
         image_size=config.video_features.image_size,
+        frame_policy=config.video_features.frame_policy,
         splitter_config=config.dataset_splitter
     )
 

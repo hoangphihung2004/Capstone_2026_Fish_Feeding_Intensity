@@ -28,6 +28,7 @@ class VideoFeaturesConfig(BaseModel):
     Single image extraction parameters.
     """
     image_size: int = Field(default=224, description="Target width and height for extracted images.")
+    frame_policy: str = Field(default="center", description="Frame extraction policy: 'quarter', 'center', 'three_quarters', 'end', or 'random'.")
 
 
 class ModelConfig(BaseModel):
