@@ -176,6 +176,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
+        config.video_features.frame_policy,
         timestamp,
     ]
     safe_stem = "_".join(safe_filename_part(part) for part in filename_parts)
