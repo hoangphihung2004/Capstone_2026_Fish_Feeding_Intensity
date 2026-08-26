@@ -35,6 +35,10 @@ class VideoModel(nn.Module):
         """
         super(VideoModel, self).__init__()
 
+        # Adapt first conv to 6 channels BEFORE wrapping
+        from models.surgery import adapt_first_conv_to_6ch
+        adapt_first_conv_to_6ch(backbone)
+
         self.backbone = backbone
         self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())
 

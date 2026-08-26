@@ -153,16 +153,24 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
     full_vid_length = len(vr)
 
     if full_vid_length == 0:
-        image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
+        channels = 6 if frame_policy == "quarter_end_concat" else 3
+        image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
     else:
-        frame_index = _get_target_frame_index(full_vid_length, frame_policy, split)
-        image = vr.get_batch([frame_index]).asnumpy()[0]  # [H, W, C] RGB
-        image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
+        if frame_policy == "quarter_end_concat":
+            frame_q = full_vid_length // 4
+            frame_e = full_vid_length - 1 if full_vid_length > 0 else 0
+            batch = vr.get_batch([frame_q, frame_e]).asnumpy()  # [2, H, W, 3] RGB
+            image = np.concatenate((batch[0], batch[1]), axis=-1)  # [H, W, 6]
+            image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
+        else:
+            frame_index = _get_target_frame_index(full_vid_length, frame_policy, split)
+            image = vr.get_batch([frame_index]).asnumpy()[0]  # [H, W, C] RGB
+            image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
 
     return {
-        "video_name": video_path,
-        "image_form": image_uint8,
-        "target": label,
+        'video_name': video_path,
+        'video_form': image_uint8,
+        'target': label
     }
 
 

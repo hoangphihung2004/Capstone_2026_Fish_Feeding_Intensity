@@ -1,7 +1,7 @@
 {
   "epochs": 250,
   "batch_size": 256,
-  "learning_rate": 1e-4,
+  "learning_rate": 0.0001,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
   "early_stopping": true,
@@ -14,7 +14,7 @@
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
-    "seed":42,
+    "seed": 42,
     "test_sample_per_class": 700,
     "save_results": true,
     "include_video": true,
@@ -26,6 +26,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frame_policy": "end"
+    "frame_policy": "quarter_end_concat"
   }
 }
