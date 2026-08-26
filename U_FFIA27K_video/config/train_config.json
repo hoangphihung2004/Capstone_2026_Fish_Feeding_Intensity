@@ -26,6 +26,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frame_policy": "center"
+    "frame_policy": "end"
   }
 }
