@@ -175,21 +175,44 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
 
 
 def _decode_image_cv2(video_path: str, label: Any, image_size: int, frame_policy: str, split: str) -> Dict[str, Any]:
+    import cv2
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.error(f"Error: Could not open video file: '{video_path}'")
-        image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
+        channels = 6 if frame_policy == "quarter_end_concat" else 3
+        image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
     else:
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_index = _get_target_frame_index(frame_count, frame_policy, split)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        ret, frame = cap.read()
-        if not ret:
-            image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
+        if frame_count == 0:
+            channels = 6 if frame_policy == "quarter_end_concat" else 3
+            image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
         else:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-            image_uint8 = frame.transpose(2, 0, 1).astype(np.uint8)
+            if frame_policy == "quarter_end_concat":
+                frame_q = frame_count // 4
+                frame_e = frame_count - 1 if frame_count > 0 else 0
+                
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_q)
+                ret_q, frame_q_img = cap.read()
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_e)
+                ret_e, frame_e_img = cap.read()
+                
+                if not ret_q or not ret_e:
+                    image_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
+                else:
+                    frame_q_img = cv2.resize(cv2.cvtColor(frame_q_img, cv2.COLOR_BGR2RGB), (image_size, image_size))
+                    frame_e_img = cv2.resize(cv2.cvtColor(frame_e_img, cv2.COLOR_BGR2RGB), (image_size, image_size))
+                    image = np.concatenate((frame_q_img, frame_e_img), axis=-1)
+                    image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
+            else:
+                frame_index = _get_target_frame_index(frame_count, frame_policy, split)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ret, frame = cap.read()
+                if not ret:
+                    image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
+                else:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+                    image_uint8 = frame.transpose(2, 0, 1).astype(np.uint8)
         cap.release()
 
     return {
