@@ -169,7 +169,7 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
 
     return {
         'video_name': video_path,
-        'video_form': image_uint8,
+        'image_form': image_uint8,
         'target': label
     }
 
