@@ -43,7 +43,7 @@ class VideoTransform:
     @staticmethod
     def get_transforms(image_size: int = 224):
         return {
-            \'train\': VideoTransform(image_size=image_size, split=\'train\'),
-            \'val\': VideoTransform(image_size=image_size, split=\'val\'),
-            \'test\': VideoTransform(image_size=image_size, split=\'test\'),
+            'train': VideoTransform(image_size=image_size, split='train'),
+            'val': VideoTransform(image_size=image_size, split='val'),
+            'test': VideoTransform(image_size=image_size, split='test'),
         }
