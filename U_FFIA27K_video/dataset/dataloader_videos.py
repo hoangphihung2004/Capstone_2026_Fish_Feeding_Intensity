@@ -131,11 +131,11 @@ def _get_multi_frame_indices(full_vid_length: int, frame_policy: str) -> list:
     tq = 3 * full_vid_length // 4
     e = full_vid_length - 1 if full_vid_length > 0 else 0
 
-    if frame_policy == "quarter_end":
+    if frame_policy == "6_channels":
         return [q, e]
-    elif frame_policy == "quarter_center_end":
+    elif frame_policy == "9_channels":
         return [q, c, e]
-    elif frame_policy == "quarter_center_three_quarters_end":
+    elif frame_policy == "12_channels":
         return [q, c, tq, e]
     else:
         raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
@@ -150,11 +150,11 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
 
     full_vid_length = len(vr)
     
-    if frame_policy == "quarter_end":
+    if frame_policy == "6_channels":
         channels = 6
-    elif frame_policy == "quarter_center_end":
+    elif frame_policy == "9_channels":
         channels = 9
-    elif frame_policy == "quarter_center_three_quarters_end":
+    elif frame_policy == "12_channels":
         channels = 12
     else:
         raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
@@ -178,11 +178,12 @@ def _decode_image_cv2(video_path: str, label: Any, image_size: int, frame_policy
     import cv2
     import numpy as np
     
-    if frame_policy == "quarter_end":
+    # Pre-calculate expected channels to handle empty videos safely
+    if frame_policy == "6_channels":
         channels = 6
-    elif frame_policy == "quarter_center_end":
+    elif frame_policy == "9_channels":
         channels = 9
-    elif frame_policy == "quarter_center_three_quarters_end":
+    elif frame_policy == "12_channels":
         channels = 12
     else:
         raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")

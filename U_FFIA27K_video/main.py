@@ -300,11 +300,11 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
     
     # Determine target channels based on policy
     policy = config.video_features.frame_policy
-    if policy == "quarter_end":
+    if policy == "6_channels":
         target_channels = 6
-    elif policy == "quarter_center_end":
+    elif policy == "9_channels":
         target_channels = 9
-    elif policy == "quarter_center_three_quarters_end":
+    elif policy == "12_channels":
         target_channels = 12
     else:
         target_channels = 3

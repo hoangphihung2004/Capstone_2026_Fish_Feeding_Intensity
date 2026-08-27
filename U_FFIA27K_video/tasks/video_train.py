@@ -318,11 +318,11 @@ logger.info("Measuring model Inference Latency on device...")
             img_size = self.config.video_features.image_size
             
             policy = self.config.video_features.frame_policy
-            if policy == "quarter_end":
+            if policy == "6_channels":
                 channels = 6
-            elif policy == "quarter_center_end":
+            elif policy == "9_channels":
                 channels = 9
-            elif policy == "quarter_center_three_quarters_end":
+            elif policy == "12_channels":
                 channels = 12
             else:
                 channels = 3

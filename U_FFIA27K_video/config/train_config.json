@@ -26,6 +26,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frame_policy": "quarter_end"
+    "frame_policy": "6_channels"
   }
 }
