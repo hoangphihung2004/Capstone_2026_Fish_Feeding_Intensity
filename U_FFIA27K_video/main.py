@@ -297,9 +297,43 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
 
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
+    
+    # Determine target channels based on policy
+    policy = config.video_features.frame_policy
+    if policy == "quarter_end":
+        target_channels = 6
+    elif policy == "quarter_center_end":
+        target_channels = 9
+    elif policy == "quarter_center_three_quarters_end":
+        target_channels = 12
+    else:
+        target_channels = 3
+        
     backbone = build_backbone(config)
-    model = VideoModel(backbone=backbone)
+    model = VideoModel(backbone=backbone, target_channels=target_channels)
     model = model.to(device)
+
+    # Log Parameters and FLOPs for the adapted model
+    try:
+        from thop import profile
+        
+        total_params = sum(p.numel() for p in model.parameters())
+        params_m = total_params / 1e6
+        
+        img_size = config.video_features.image_size
+        dummy_input = torch.randn(1, target_channels, img_size, img_size).to(device)
+        
+        macs, _ = profile(model, inputs=(dummy_input,), verbose=False)
+        flops = macs * 2
+        gflops = flops / 1e9
+        
+        logger.info(f"Model Architecture Stats:")
+        logger.info(f"  - Parameters: {params_m:.2f} M")
+        logger.info(f"  - FLOPs:      {gflops:.2f} GFLOPs")
+    except ImportError:
+        logger.warning("Could not calculate FLOPs. Please install 'thop' library (pip install thop).")
+    except Exception as e:
+        logger.warning(f"Error calculating model stats: {e}")
 
     model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
     if config.dataset_splitter.evaluation_mode == "cross_validation":
