@@ -316,8 +316,9 @@ class VideoTrainer:
             logger.info("Measuring model Inference Latency on device...")
             timer = InferenceTimer(model=self.model, device=self.device)
             img_size = self.config.video_features.image_size
+            channels = 6 if self.config.video_features.frame_policy == "quarter_end_concat" else 3
             latency_ms = timer.measure_latency_per_sample(
-                input_shape=(1, 3, img_size, img_size),
+                input_shape=(1, channels, img_size, img_size),
                 warm_up_steps=10,
                 num_steps=50
             )
