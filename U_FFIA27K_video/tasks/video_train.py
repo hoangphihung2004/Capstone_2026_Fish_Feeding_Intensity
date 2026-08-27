@@ -313,12 +313,22 @@ class VideoTrainer:
             logger.info(f"Detailed Classification Report:\n{test_statistics['message']}")
 
             # Measure model inference latency
-            logger.info("Measuring model Inference Latency on device...")
+logger.info("Measuring model Inference Latency on device...")
             timer = InferenceTimer(model=self.model, device=self.device)
             img_size = self.config.video_features.image_size
-            channels = 6 if self.config.video_features.frame_policy == "quarter_end_concat" else 3
+            
+            policy = self.config.video_features.frame_policy
+            if policy == "quarter_end":
+                channels = 6
+            elif policy == "quarter_center_end":
+                channels = 9
+            elif policy == "quarter_center_three_quarters_end":
+                channels = 12
+            else:
+                channels = 3
+                
             latency_ms = timer.measure_latency_per_sample(
-                input_shape=(1, channels, img_size, img_size),
+                input_shape=(1, channels, img_size, img_size),,
                 warm_up_steps=10,
                 num_steps=50
             )

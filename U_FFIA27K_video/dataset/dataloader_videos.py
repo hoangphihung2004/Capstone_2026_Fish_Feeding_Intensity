@@ -122,25 +122,23 @@ def _save_image_to_disk_cache(
                 pass
 
 
-def _get_target_frame_index(full_vid_length: int, frame_policy: str, split: str) -> int:
+def _get_multi_frame_indices(full_vid_length: int, frame_policy: str) -> list:
     if full_vid_length == 0:
-        return 0
-    if frame_policy == "quarter":
-        return full_vid_length // 4
-    elif frame_policy == "center":
-        return full_vid_length // 2
-    elif frame_policy == "three_quarters":
-        return 3 * full_vid_length // 4
-    elif frame_policy == "end":
-        return full_vid_length - 1
-    elif frame_policy == "random":
-        if split == "train":
-            import random
-            return random.randint(0, full_vid_length - 1)
-        else:
-            return full_vid_length // 2
+        return [0]
+    
+    q = full_vid_length // 4
+    c = full_vid_length // 2
+    tq = 3 * full_vid_length // 4
+    e = full_vid_length - 1 if full_vid_length > 0 else 0
+
+    if frame_policy == "quarter_end":
+        return [q, e]
+    elif frame_policy == "quarter_center_end":
+        return [q, c, e]
+    elif frame_policy == "quarter_center_three_quarters_end":
+        return [q, c, tq, e]
     else:
-        return full_vid_length // 2
+        raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
 
 def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: str, split: str) -> Dict[str, Any]:
     from decord import VideoReader, cpu, gpu
@@ -151,21 +149,24 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
         vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0))
 
     full_vid_length = len(vr)
+    
+    if frame_policy == "quarter_end":
+        channels = 6
+    elif frame_policy == "quarter_center_end":
+        channels = 9
+    elif frame_policy == "quarter_center_three_quarters_end":
+        channels = 12
+    else:
+        raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
 
     if full_vid_length == 0:
-        channels = 6 if frame_policy == "quarter_end_concat" else 3
         image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
     else:
-        if frame_policy == "quarter_end_concat":
-            frame_q = full_vid_length // 4
-            frame_e = full_vid_length - 1 if full_vid_length > 0 else 0
-            batch = vr.get_batch([frame_q, frame_e]).asnumpy()  # [2, H, W, 3] RGB
-            image = np.concatenate((batch[0], batch[1]), axis=-1)  # [H, W, 6]
-            image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
-        else:
-            frame_index = _get_target_frame_index(full_vid_length, frame_policy, split)
-            image = vr.get_batch([frame_index]).asnumpy()[0]  # [H, W, C] RGB
-            image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
+        indices = _get_multi_frame_indices(full_vid_length, frame_policy)
+        batch = vr.get_batch(indices).asnumpy()  # [N, H, W, 3] RGB
+        frames = [batch[i] for i in range(len(indices))]
+        image = np.concatenate(frames, axis=-1)  # [H, W, Channels]
+        image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
 
     return {
         'video_name': video_path,
@@ -173,46 +174,45 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
         'target': label
     }
 
-
 def _decode_image_cv2(video_path: str, label: Any, image_size: int, frame_policy: str, split: str) -> Dict[str, Any]:
     import cv2
+    import numpy as np
+    
+    if frame_policy == "quarter_end":
+        channels = 6
+    elif frame_policy == "quarter_center_end":
+        channels = 9
+    elif frame_policy == "quarter_center_three_quarters_end":
+        channels = 12
+    else:
+        raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.error(f"Error: Could not open video file: '{video_path}'")
-        channels = 6 if frame_policy == "quarter_end_concat" else 3
         image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
     else:
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if frame_count == 0:
-            channels = 6 if frame_policy == "quarter_end_concat" else 3
             image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
         else:
-            if frame_policy == "quarter_end_concat":
-                frame_q = frame_count // 4
-                frame_e = frame_count - 1 if frame_count > 0 else 0
-                
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_q)
-                ret_q, frame_q_img = cap.read()
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_e)
-                ret_e, frame_e_img = cap.read()
-                
-                if not ret_q or not ret_e:
-                    image_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
-                else:
-                    frame_q_img = cv2.resize(cv2.cvtColor(frame_q_img, cv2.COLOR_BGR2RGB), (image_size, image_size))
-                    frame_e_img = cv2.resize(cv2.cvtColor(frame_e_img, cv2.COLOR_BGR2RGB), (image_size, image_size))
-                    image = np.concatenate((frame_q_img, frame_e_img), axis=-1)
-                    image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
-            else:
-                frame_index = _get_target_frame_index(frame_count, frame_policy, split)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            indices = _get_multi_frame_indices(frame_count, frame_policy)
+            frames = []
+            valid = True
+            for idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
                 if not ret:
-                    image_uint8 = np.zeros((3, image_size, image_size), dtype=np.uint8)
-                else:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-                    image_uint8 = frame.transpose(2, 0, 1).astype(np.uint8)
+                    valid = False
+                    break
+                frame = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (image_size, image_size))
+                frames.append(frame)
+            
+            if not valid:
+                image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
+            else:
+                image = np.concatenate(frames, axis=-1)
+                image_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
         cap.release()
 
     return {

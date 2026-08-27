@@ -9,19 +9,16 @@ class VideoTransform:
         self.split = split
 
     def __call__(self, image: np.ndarray) -> torch.Tensor:
-        if image.shape[-1] == 3 or image.shape[-1] == 6:
+        if image.shape[-1] == 3 or image.shape[-1] == 6 or image.shape[-1] == 9 or image.shape[-1] == 12:
             image = image.transpose(2, 0, 1)
             
         C = image.shape[0]
         mean_3 = [0.485, 0.456, 0.406]
         std_3 = [0.229, 0.224, 0.225]
         
-        if C == 6:
-            mean = torch.tensor(mean_3 + mean_3).view(6, 1, 1)
-            std = torch.tensor(std_3 + std_3).view(6, 1, 1)
-        else:
-            mean = torch.tensor(mean_3).view(3, 1, 1)
-            std = torch.tensor(std_3).view(3, 1, 1)
+        num_frames = C // 3
+        mean = torch.tensor(mean_3 * num_frames).view(C, 1, 1)
+        std = torch.tensor(std_3 * num_frames).view(C, 1, 1)
 
         img = torch.from_numpy(image).float() / 255.0
         img = TF.resize(img, [self.image_size, self.image_size], interpolation=InterpolationMode.BILINEAR)

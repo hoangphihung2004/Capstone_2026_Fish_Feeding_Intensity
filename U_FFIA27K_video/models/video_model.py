@@ -21,23 +21,23 @@ logger = logging.getLogger(__name__)
 
 
 class VideoModel(nn.Module):
-    """
     Thin wrapper around an image classification backbone.
-    Accepts image tensors [Batch, Channels (3), Height, Width] and returns
+    Accepts image tensors [Batch, Channels, Height, Width] and returns
     classification logits under the existing 'clipwise_output' key.
     """
-    def __init__(self, backbone: nn.Module) -> None:
+    def __init__(self, backbone: nn.Module, target_channels: int = 3) -> None:
         """
         Initialize VideoModel wrapper.
 
         Args:
             backbone (nn.Module): Torch image classification model.
+            target_channels (int): Target input channels for the model.
         """
         super(VideoModel, self).__init__()
 
-        # Adapt first conv to 6 channels BEFORE wrapping
-        from models.surgery import adapt_first_conv_to_6ch
-        adapt_first_conv_to_6ch(backbone)
+        # Adapt first conv to multi channels BEFORE wrapping
+        from models.surgery import adapt_first_conv_to_multi_channels
+        adapt_first_conv_to_multi_channels(backbone, target_channels)
 
         self.backbone = backbone
         self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())

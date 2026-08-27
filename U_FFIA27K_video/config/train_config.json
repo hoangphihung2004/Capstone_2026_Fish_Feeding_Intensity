@@ -26,6 +26,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frame_policy": "quarter_end_concat"
+    "frame_policy": "quarter_end"
   }
 }
