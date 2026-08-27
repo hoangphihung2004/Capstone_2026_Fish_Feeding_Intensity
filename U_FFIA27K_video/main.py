@@ -300,7 +300,7 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
     
     # Determine target channels based on policy
     policy = config.video_features.frame_policy
-    if policy == "6_channels":
+    if policy in ["6_channels", "1_49_channels", "25_49_channels"]:
         target_channels = 6
     elif policy == "9_channels":
         target_channels = 9

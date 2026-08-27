@@ -318,7 +318,7 @@ class VideoTrainer:
             img_size = self.config.video_features.image_size
             
             policy = self.config.video_features.frame_policy
-            if policy == "6_channels":
+            if policy in ["6_channels", "1_49_channels", "25_49_channels"]:
                 channels = 6
             elif policy == "9_channels":
                 channels = 9

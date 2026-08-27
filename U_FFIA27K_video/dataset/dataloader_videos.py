@@ -130,9 +130,14 @@ def _get_multi_frame_indices(full_vid_length: int, frame_policy: str) -> list:
     c = full_vid_length // 2
     tq = 3 * full_vid_length // 4
     e = full_vid_length - 1 if full_vid_length > 0 else 0
+    s = 0
 
     if frame_policy == "6_channels":
         return [q, e]
+    elif frame_policy == "1_49_channels":
+        return [s, e]
+    elif frame_policy == "25_49_channels":
+        return [c, e]
     elif frame_policy == "9_channels":
         return [q, c, e]
     elif frame_policy == "12_channels":
@@ -150,7 +155,7 @@ def _decode_image(video_path: str, label: Any, image_size: int, frame_policy: st
 
     full_vid_length = len(vr)
     
-    if frame_policy == "6_channels":
+    if frame_policy in ["6_channels", "1_49_channels", "25_49_channels"]:
         channels = 6
     elif frame_policy == "9_channels":
         channels = 9
@@ -179,7 +184,7 @@ def _decode_image_cv2(video_path: str, label: Any, image_size: int, frame_policy
     import numpy as np
     
     # Pre-calculate expected channels to handle empty videos safely
-    if frame_policy == "6_channels":
+    if frame_policy in ["6_channels", "1_49_channels", "25_49_channels"]:
         channels = 6
     elif frame_policy == "9_channels":
         channels = 9
