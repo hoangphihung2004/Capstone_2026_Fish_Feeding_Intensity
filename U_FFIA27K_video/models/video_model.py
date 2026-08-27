@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoModel(nn.Module):
+    """
     Thin wrapper around an image classification backbone.
     Accepts image tensors [Batch, Channels, Height, Width] and returns
     classification logits under the existing 'clipwise_output' key.
