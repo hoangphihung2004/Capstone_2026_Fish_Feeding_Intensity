@@ -24,9 +24,9 @@
     "cv_val_ratio": 0.2
   },
   "audio_features": {
-    "sample_rate": 64000,
-    "window_size": 2048,
-    "hop_size": 1024,
+    "sample_rate": 128000,
+    "window_size": 4096,
+    "hop_size": 2048,
     "mel_bins": 128,
     "time_drop_width": 64,
     "time_stripes_num": 2,
