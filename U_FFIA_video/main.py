@@ -178,6 +178,38 @@ def aggregate_cv_summaries(model_dir: str, num_folds: int) -> None:
     logger.info(f"Saved cross-validation summary JSON to: '{json_path}'")
 
 
+def cv_summary_files_ready(model_dir: str, num_folds: int) -> bool:
+    output_dir = Path(model_dir)
+    return all((output_dir / f"fold_{fold_index:02d}" / "summary.csv").exists() for fold_index in range(num_folds))
+
+
+def aggregate_cv_summaries_if_ready(model_dir: str, num_folds: int) -> None:
+    if cv_summary_files_ready(model_dir, num_folds):
+        aggregate_cv_summaries(model_dir, num_folds)
+        return
+
+    logger.info(
+        "Cross-validation summary aggregation skipped because not all fold summaries exist yet. "
+        "Run the remaining folds with the same seed, split_strategy, num_folds, and cv_val_ratio."
+    )
+
+
+def selected_cv_fold_indices(config: TrainConfig) -> list[int]:
+    requested_fold = config.dataset_splitter.fold_index
+    num_folds = int(config.dataset_splitter.num_folds)
+
+    if requested_fold is None:
+        return list(range(num_folds))
+
+    fold_index = int(requested_fold)
+    if fold_index != requested_fold:
+        raise ValueError(f"dataset_splitter.fold_index must be an integer fold id, got {requested_fold!r}.")
+    if not 0 <= fold_index < num_folds:
+        raise ValueError(f"dataset_splitter.fold_index={fold_index} is outside [0, {num_folds}).")
+
+    return [fold_index]
+
+
 def safe_filename_part(value: str) -> str:
     safe_chars = []
     for char in str(value):
@@ -195,8 +227,13 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        timestamp,
     ]
+    if (
+        config.dataset_splitter.evaluation_mode == "cross_validation"
+        and config.dataset_splitter.fold_index is not None
+    ):
+        filename_parts.append(f"fold_{int(config.dataset_splitter.fold_index):02d}")
+    filename_parts.append(timestamp)
     safe_stem = "_".join(safe_filename_part(part) for part in filename_parts)
     return f"{safe_stem}{suffix}"
 
@@ -397,6 +434,11 @@ def main():
     logger.info(f"  - Requested Frames:         {config.video_features.frames}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
+    if config.dataset_splitter.evaluation_mode == "cross_validation":
+        if config.dataset_splitter.fold_index is None:
+            logger.info("  - CV Fold Selection:        all folds")
+        else:
+            logger.info(f"  - CV Fold Selection:        fold {int(config.dataset_splitter.fold_index):02d} only")
     logger.info("==================================================")
 
     # 2. Hardware device configuration
@@ -409,7 +451,8 @@ def main():
 
     if config.dataset_splitter.evaluation_mode == "cross_validation":
         model_dir = None
-        for fold_index in range(config.dataset_splitter.num_folds):
+        fold_indices = selected_cv_fold_indices(config)
+        for fold_index in fold_indices:
             logger.info("==================================================")
             logger.info(f"Starting cross-validation fold {fold_index + 1}/{config.dataset_splitter.num_folds}")
             logger.info("==================================================")
@@ -425,7 +468,10 @@ def main():
             model_dir = str(Path(fold_output_dir).parent)
 
         if model_dir is not None:
-            aggregate_cv_summaries(model_dir, config.dataset_splitter.num_folds)
+            if len(fold_indices) == config.dataset_splitter.num_folds:
+                aggregate_cv_summaries(model_dir, config.dataset_splitter.num_folds)
+            else:
+                aggregate_cv_summaries_if_ready(model_dir, config.dataset_splitter.num_folds)
     else:
         run_video_training(
             config=config,
