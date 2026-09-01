@@ -3,7 +3,7 @@
   "batch_size": 16,
   "preload_workers": -1,
   "dataloader_workers": -1,
-  "prefetch_factor": 2,
+  "prefetch_factor": 1,
   "learning_rate": 1e-4,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
@@ -22,13 +22,13 @@
     "save_results": true,
     "include_video": true,
     "split_strategy": "random_sample",
-    "evaluation_mode": "holdout",
+    "evaluation_mode": "cross_validation",
     "num_folds": 5,
     "fold_index": null,
     "cv_val_ratio": 0.2
   },
   "video_features": {
     "image_size": 224,
-    "frames": 14
+    "frames": 20
   }
 }
