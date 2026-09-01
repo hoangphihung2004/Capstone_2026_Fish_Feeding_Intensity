@@ -91,7 +91,10 @@ class SplitterConfig(BaseModel):
     )
     fold_index: Optional[int] = Field(
         default=None,
-        description="Current outer fold index for cross-validation. Set automatically by main.py during CV runs."
+        description=(
+            "Cross-validation fold selector. Use null to run all folds, or set 0..num_folds-1 "
+            "to run only one deterministic fold with the same split as a full CV run."
+        )
     )
     cv_val_ratio: float = Field(
         default=0.2,
