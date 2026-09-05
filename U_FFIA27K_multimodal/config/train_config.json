@@ -7,7 +7,7 @@
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
   "early_stopping": true,
-  "patience": 40,
+  "patience": 50,
   "delta": 0.0,
   "audio_loss_weight": 1.0,
   "video_loss_weight": 1.0,
