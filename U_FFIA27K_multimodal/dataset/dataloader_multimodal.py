@@ -335,7 +335,7 @@ class FishMultimodalDataLoader:
             "drop_last": drop_last,
             "num_workers": self.dataloader_workers,
             "collate_fn": self.collate_fn,
-            "pin_memory": torch.cuda.is_available(),
+            "pin_memory": True,
             "persistent_workers": self.dataloader_workers > 0,
         }
         if self.dataloader_workers > 0 and self.prefetch_factor is not None:
