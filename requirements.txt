@@ -1,7 +1,15 @@
 numpy
 pandas
+scipy
 tqdm
 scikit-learn
 lightgbm
 torch
+torchaudio
+librosa
+soundfile
 scikit-image
+huggingface_hub
+hf_transfer
+
+

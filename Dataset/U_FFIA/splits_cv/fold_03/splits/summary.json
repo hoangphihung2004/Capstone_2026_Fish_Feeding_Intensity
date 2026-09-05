@@ -1,0 +1,46 @@
+{
+  "label_map": {
+    "none": 0,
+    "strong": 1,
+    "medium": 2,
+    "weak": 3
+  },
+  "splits": {
+    "train": {
+      "total": 17324,
+      "by_class": {
+        "none": 3118,
+        "strong": 4850,
+        "medium": 4250,
+        "weak": 5106
+      }
+    },
+    "test": {
+      "total": 5413,
+      "by_class": {
+        "none": 974,
+        "strong": 1515,
+        "medium": 1328,
+        "weak": 1596
+      }
+    },
+    "val": {
+      "total": 4330,
+      "by_class": {
+        "none": 779,
+        "strong": 1212,
+        "medium": 1062,
+        "weak": 1277
+      }
+    }
+  },
+  "dataset_root": "/marimo/Fish_Feeding_Intensity_Dataset",
+  "output_dir": "/marimo/Fish_Feeding_Intensity_Dataset/splits/cv/fold_03",
+  "seed": 42,
+  "test_sample_per_class": 700,
+  "split_strategy": "random_sample",
+  "evaluation_mode": "cross_validation",
+  "num_folds": 5,
+  "fold_index": 3,
+  "cv_val_ratio": 0.2
+}
