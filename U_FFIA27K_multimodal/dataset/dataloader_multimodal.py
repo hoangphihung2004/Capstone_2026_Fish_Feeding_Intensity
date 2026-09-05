@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
@@ -257,7 +258,13 @@ class FishMultimodalDataLoader:
             cache: List[np.ndarray | None] = [None] * len(self.data_dict)
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(load_one, index): index for index in range(len(self.data_dict))}
-                for future in concurrent.futures.as_completed(futures):
+                completed = concurrent.futures.as_completed(futures)
+                for future in tqdm(
+                    completed,
+                    total=len(futures),
+                    desc=f"Preloading {self.split} audio to RAM",
+                    unit="file",
+                ):
                     index, waveform = future.result()
                     cache[index] = waveform
             if any(item is None for item in cache):
@@ -278,7 +285,13 @@ class FishMultimodalDataLoader:
             cache: List[Dict[str, Any] | None] = [None] * len(self.data_dict)
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(self._decode_video_row, index): index for index in range(len(self.data_dict))}
-                for future in concurrent.futures.as_completed(futures):
+                completed = concurrent.futures.as_completed(futures)
+                for future in tqdm(
+                    completed,
+                    total=len(futures),
+                    desc=f"Preloading {self.split} video to RAM",
+                    unit="file",
+                ):
                     cache[futures[future]] = future.result()
             if any(item is None for item in cache):
                 raise RuntimeError(f"Video RAM preload failed for split '{self.split}'.")
