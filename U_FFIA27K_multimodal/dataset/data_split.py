@@ -615,6 +615,10 @@ class BaseDataSplitter(ABC):
             json.dump(summary, f, indent=2, ensure_ascii=False)
         logger.info(f"Successfully saved split summary file to {output_path}")
 
+    def save_splits(self, train_dict: List[List], test_dict: List[List], val_dict: List[List], output_dir: Path) -> None:
+        """Write an already-generated split to an experiment artifact directory."""
+        self._save_splits(train_dict, test_dict, val_dict, output_dir)
+
 
 class FishDataSplitter(BaseDataSplitter):
     """
@@ -735,13 +739,14 @@ class FishDataSplitter(BaseDataSplitter):
         else:
             splits_dir = base_splits_dir
 
-        self._clear_existing_splits(base_splits_dir)
+        if self.save_results:
+            self._clear_existing_splits(base_splits_dir)
 
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
         val_csv = splits_dir / 'val.csv'
 
-        if splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
+        if self.save_results and splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
             logger.info("==================================================")
             logger.info(f"Fallback mode enabled: found existing split files at '{splits_dir}'.")
             logger.info("Loading existing dataset splits instead of recomputing them...")

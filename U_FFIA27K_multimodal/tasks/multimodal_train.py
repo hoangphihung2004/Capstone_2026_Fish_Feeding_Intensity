@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class MultimodalTrainer:
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device, config: TrainConfig, train_config_path: str = "config/train_config.json") -> None:
+    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device, config: TrainConfig, train_config_path: str = "config/train_config.json", split_saver: Any = None) -> None:
         self.model = model
         self.optimizer = optimizer
         self.device = device
@@ -52,19 +52,8 @@ class MultimodalTrainer:
                     json.dump(config.model_dump(), file, indent=2)
             with open(os.path.join(self.ckpt_dir, "splitter_config.json"), "w", encoding="utf-8") as file:
                 json.dump(config.dataset_splitter.model_dump(), file, indent=2)
-            dataset_path = Path(config.dataset_splitter.dataset_path)
-            local_splits_dir = dataset_path / "splits"
-            legacy_splits_dir = dataset_path.parent / "splits"
-            if dataset_path.name in {"audio", "video"} and legacy_splits_dir.exists() and not local_splits_dir.exists():
-                base_splits_dir = legacy_splits_dir
-            else:
-                base_splits_dir = local_splits_dir
-            if config.dataset_splitter.evaluation_mode == "cross_validation":
-                splits_dir = base_splits_dir / "cv" / f"fold_{int(config.dataset_splitter.fold_index):02d}"
-            else:
-                splits_dir = base_splits_dir
-            if splits_dir.exists():
-                shutil.copytree(splits_dir, os.path.join(self.ckpt_dir, "splits"), dirs_exist_ok=True)
+            if split_saver is not None:
+                split_saver.save_splits(Path(self.ckpt_dir) / "splits")
         except Exception as exc:
             logger.warning("Warning: Failed to backup configurations or splits: %s", exc)
 

@@ -39,7 +39,7 @@ class SplitterConfig(BaseModel):
     dataset_path: str = Field(default="/marimo/Fish_Feeding_Intensity_Dataset")
     seed: int = Field(default=42, ge=0)
     test_sample_per_class: int = Field(default=700, gt=0)
-    save_results: bool = Field(default=True)
+    save_results: bool = Field(default=False)
     # Multimodal training always requires both paired modalities.
     include_video: Literal[True] = True
     split_strategy: str = Field(default="random_sample")

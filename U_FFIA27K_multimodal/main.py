@@ -304,6 +304,7 @@ def run_multimodal_training(config: TrainConfig, train_config_path: str, device:
         device=device,
         config=config,
         train_config_path=train_config_path,
+        split_saver=loader_manager,
     )
     trainer.train(train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, max_epoch=config.epochs)
     if config.dataset_splitter.evaluation_mode == "cross_validation":

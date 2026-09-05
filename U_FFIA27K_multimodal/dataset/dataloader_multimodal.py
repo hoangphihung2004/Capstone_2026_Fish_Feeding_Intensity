@@ -218,6 +218,10 @@ class FishMultimodalDataLoader:
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
         logger.info("==================================================")
 
+    def save_splits(self, output_dir: str | Path) -> None:
+        """Save the active deterministic split with the current experiment artifacts."""
+        self.splitter.save_splits(self.train_dict, self.test_dict, self.val_dict, Path(output_dir))
+
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {
