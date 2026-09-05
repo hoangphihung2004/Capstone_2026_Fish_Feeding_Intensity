@@ -31,6 +31,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+import torchaudio.functional as F_audio
+
 def init_bn(bn: nn.BatchNorm2d) -> None:
     """
     Initialize BatchNorm2d weights with default values (bias = 0, weight = 1).
@@ -41,9 +43,57 @@ def init_bn(bn: nn.BatchNorm2d) -> None:
         bn.weight.data.fill_(1.)
 
 
+class LogLinearFilterBank(nn.Module):
+    """
+    GPU-based Linear Filterbank extractor computing Log-Linear Spectrogram.
+    Applies linearly spaced triangular filterbanks across the frequency spectrum.
+    """
+    def __init__(
+        self,
+        sr: int = 256000,
+        n_fft: int = 4096,
+        n_filters: int = 128,
+        fmin: float = 200.0,
+        fmax: Optional[float] = None,
+        amin: float = 1e-10,
+        freeze_parameters: bool = True
+    ) -> None:
+        super(LogLinearFilterBank, self).__init__()
+        self.sr = sr
+        self.n_fft = n_fft
+        self.n_filters = n_filters
+        self.fmin = float(fmin)
+        self.fmax = float(fmax) if fmax is not None else float(sr // 2)
+        self.amin = amin
+
+        # Number of STFT frequency bins
+        n_freqs = n_fft // 2 + 1
+
+        # Generate linear filterbank matrix of shape [n_freqs, n_filters]
+        fbanks = F_audio.linear_fbanks(
+            n_freqs=n_freqs,
+            f_min=self.fmin,
+            f_max=self.fmax,
+            n_filter=self.n_filters,
+            sample_rate=self.sr
+        )
+        self.register_buffer("fbanks", fbanks)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x (Tensor): STFT Spectrogram [Batch, 1, Time_Steps, Freq_Bins]
+        Returns:
+            Tensor: Log-Linear Spectrogram [Batch, 1, Time_Steps, n_filters]
+        """
+        out = torch.matmul(x, self.fbanks)
+        out = torch.log(torch.clamp(out, min=self.amin))
+        return out
+
+
 class AudioFrontend(nn.Module):
     """
-    GPU-based raw audio waveform preprocessing frontend utilizing torchlibrosa.
+    GPU-based raw audio waveform preprocessing frontend supporting Linear and Mel Filterbanks.
     """
     def __init__(self, config: Optional[AudioFrontendConfig] = None) -> None:
         """
@@ -59,6 +109,7 @@ class AudioFrontend(nn.Module):
             self.config = config
 
         self.mel_bins = self.config.mel_bins
+        self.filter_type = getattr(self.config, "filter_type", "linear").lower()
 
         # 1. Amplitude Spectrogram Extractor (STFT) on GPU using torchlibrosa
         self.spectrogram_extractor = Spectrogram(
@@ -71,19 +122,32 @@ class AudioFrontend(nn.Module):
             freeze_parameters=True
         )
 
-        # 2. Logmel Filterbank Extractor on GPU using torchlibrosa
+        # 2. Filterbank Extractor on GPU (Linear or Mel)
         fmax = min(self.config.fmax, self.config.sample_rate // 2)
-        self.logmel_extractor = LogmelFilterBank(
-            sr=self.config.sample_rate,
-            n_fft=self.config.window_size,
-            n_mels=self.config.mel_bins,
-            fmin=self.config.fmin,
-            fmax=fmax,
-            ref=1.0,
-            amin=1e-10,
-            top_db=None,
-            freeze_parameters=True
-        )
+        if self.filter_type == "linear":
+            self.filter_extractor = LogLinearFilterBank(
+                sr=self.config.sample_rate,
+                n_fft=self.config.window_size,
+                n_filters=self.config.mel_bins,
+                fmin=self.config.fmin,
+                fmax=fmax,
+                amin=1e-10,
+                freeze_parameters=True
+            )
+        else:
+            self.filter_extractor = LogmelFilterBank(
+                sr=self.config.sample_rate,
+                n_fft=self.config.window_size,
+                n_mels=self.config.mel_bins,
+                fmin=self.config.fmin,
+                fmax=fmax,
+                ref=1.0,
+                amin=1e-10,
+                top_db=None,
+                freeze_parameters=True
+            )
+        # Backward compatibility alias
+        self.logmel_extractor = self.filter_extractor
 
         # 3. SpecAugment Spec Augmentation Extractor on GPU using torchlibrosa
         self.spec_augmenter = SpecAugmentation(
@@ -99,10 +163,11 @@ class AudioFrontend(nn.Module):
 
         logger.info("==================================================")
         logger.info("Initialized AudioFrontend module on GPU:")
+        logger.info(f"  - Filter Type:              {self.filter_type.upper()}")
         logger.info(f"  - Sample Rate:              {self.config.sample_rate} Hz")
         logger.info(f"  - Window Size:              {self.config.window_size}")
         logger.info(f"  - Hop Size:                 {self.config.hop_size}")
-        logger.info(f"  - Mel Bins:                 {self.config.mel_bins}")
+        logger.info(f"  - Frequency Bins:           {self.config.mel_bins}")
         logger.info(f"  - Fmin/Fmax:                {self.config.fmin} / {fmax} Hz")
         logger.info(f"  - SpecAugment Time Masking: Width={self.config.time_drop_width}, Stripes={self.config.time_stripes_num}")
         logger.info(f"  - SpecAugment Freq Masking: Width={self.config.freq_drop_width}, Stripes={self.config.freq_stripes_num}")
@@ -110,19 +175,19 @@ class AudioFrontend(nn.Module):
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """
-        Forward Pass converting raw 1D waveforms into 2D Mel-spectrograms.
+        Forward Pass converting raw 1D waveforms into 2D Linear or Mel-spectrograms.
 
         Args:
             input_tensor (torch.Tensor): Raw waveform tensor [Batch, Num_Samples].
 
         Returns:
-            torch.Tensor: Augmented Mel-spectrogram tensor [Batch, 1, Time_Steps + 2, Mel_Bins].
+            torch.Tensor: Augmented Spectrogram tensor [Batch, 1, Time_Steps + 2, Frequency_Bins].
         """
         # Step A: Raw 1D Waveform -> STFT 2D Spectrogram [Batch, 1, Time_Steps, Freq_Bins]
         x = self.spectrogram_extractor(input_tensor)
         
-        # Step B: Logmel filtering -> [Batch, 1, Time_Steps, Mel_Bins]
-        x = self.logmel_extractor(x)
+        # Step B: Filterbank filtering (Linear or Mel) -> [Batch, 1, Time_Steps, Frequency_Bins]
+        x = self.filter_extractor(x)
         
         # Step C: Pad time-steps dimension by 2 rows of zeros for shape alignment
         m = nn.ZeroPad2d((0, 0, 2, 0))

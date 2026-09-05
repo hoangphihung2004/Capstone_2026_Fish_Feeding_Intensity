@@ -24,12 +24,13 @@ class AudioFeaturesConfig(BaseModel):
     """
     Detailed configuration parameters for GPU Mel-spectrogram feature extraction.
     """
-    sample_rate: int = Field(default=64000, description="Sample rate of raw audio waveforms.")
-    window_size: int = Field(default=2048, description="FFT window size (n_fft).")
-    hop_size: int = Field(default=1024, description="Hop length between FFT windows.")
-    mel_bins: int = Field(default=128, description="Number of Mel frequency bins (n_mels).")
-    fmin: int = Field(default=1, description="Minimum filter frequency.")
-    fmax: int = Field(default=32000, description="Maximum filter frequency.")
+    filter_type: str = Field(default="linear", description="Frontend filterbank type: 'linear' or 'mel'.")
+    sample_rate: int = Field(default=256000, description="Sample rate of raw audio waveforms.")
+    window_size: int = Field(default=4096, description="FFT window size (n_fft).")
+    hop_size: int = Field(default=2048, description="Hop length between FFT windows.")
+    mel_bins: int = Field(default=128, description="Number of frequency bins (n_mels or n_filters).")
+    fmin: int = Field(default=200, description="Minimum filter frequency.")
+    fmax: int = Field(default=128000, description="Maximum filter frequency.")
     time_drop_width: int = Field(default=64, description="Maximum time masking width.")
     time_stripes_num: int = Field(default=2, description="Number of masked time stripes.")
     freq_drop_width: int = Field(default=8, description="Maximum frequency masking width.")
