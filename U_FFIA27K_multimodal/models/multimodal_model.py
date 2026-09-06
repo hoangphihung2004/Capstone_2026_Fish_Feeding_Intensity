@@ -26,9 +26,7 @@ class MultimodalArchitecture(nn.Module):
         self.fusion_aggregate = nn.Sequential(nn.Linear(3 * 64, 64), nn.LayerNorm(64))
         self.audio_head = nn.Linear(320, classes_num)
         self.video_head = nn.Linear(320, classes_num)
-        self.multimodal_head = nn.Sequential(
-            nn.Linear(704, 128), nn.LeakyReLU(0.01),
-            nn.Linear(128, classes_num))
+        self.multimodal_head = nn.Linear(704, classes_num)
 
     def forward(self, audio_features, video_form):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
