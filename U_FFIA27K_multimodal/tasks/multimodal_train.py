@@ -26,11 +26,7 @@ class MultimodalTrainer:
         self.lr_scheduler = lr_scheduler
         self.device = device
         self.config = config
-        self.loss_fn = ClipCELoss(
-            audio_weight=config.audio_loss_weight,
-            video_weight=config.video_loss_weight,
-            multimodal_weight=config.multimodal_loss_weight,
-        )
+        self.loss_fn = ClipCELoss()
         self.evaluator = MultimodalEvaluator(model=self.model, loss_fn=self.loss_fn)
         self.early_stopper = EarlyStopping(patience=config.patience, delta=config.delta, verbose=True) if config.early_stopping else None
         base_dir = config.ckpt_dir if config.ckpt_dir else "checkpoint"
@@ -158,17 +154,13 @@ class MultimodalTrainer:
             if self.early_stopper is not None:
                 should_stop = self.early_stopper.step(early_stop_score)
             logger.info(
-                "Epoch %03d/%03d | Train Loss (3 heads): %.5f | Val Loss (3 heads): %.5f | "
-                "Train Acc A/V/F: %.4f/%.4f/%.4f | Val Acc A/V/F: %.4f/%.4f/%.4f",
+                "Epoch %03d/%03d | Train Loss: %.5f | Val Loss: %.5f | "
+                "Train Accuracy (Fusion): %.4f | Val Accuracy (Fusion): %.4f",
                 epoch + 1,
                 max_epoch,
                 train_loss,
                 val_loss,
-                train_head_acc["audio"],
-                train_head_acc["video"],
                 train_head_acc["multimodal"],
-                val_head_acc["audio"],
-                val_head_acc["video"],
                 val_head_acc["multimodal"],
             )
             logger.info("Learning Rate: %.2e", learning_rate)

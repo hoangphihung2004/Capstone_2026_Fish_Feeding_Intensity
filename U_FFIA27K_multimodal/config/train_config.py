@@ -69,9 +69,6 @@ class MultimodalTrainConfig(BaseModel):
     early_stopping: bool = Field(default=True)
     patience: int = Field(default=40)
     delta: float = Field(default=0.0)
-    audio_loss_weight: float = Field(default=1.0, ge=0.0)
-    video_loss_weight: float = Field(default=1.0, ge=0.0)
-    multimodal_loss_weight: float = Field(default=1.0, ge=0.0)
     cache_audio: bool = Field(default=True)
     cache_video_mode: Literal["disk", "ram", "none"] = Field(default="ram")
 

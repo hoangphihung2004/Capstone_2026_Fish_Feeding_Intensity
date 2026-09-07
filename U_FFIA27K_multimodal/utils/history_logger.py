@@ -97,7 +97,7 @@ class HistoryLogger:
         logger.info(f"Saved summary to: '{summary_csv_path}'")
 
     def save_confusion_matrices(self, split: str, statistics: dict) -> None:
-        """Save one confusion matrix per head for the selected evaluation split."""
+        """Save the multimodal confusion matrix for the selected evaluation split."""
         for head, head_statistics in statistics["heads"].items():
             path = os.path.join(self.log_dir, f"confusion_matrix_{split}_{head}.csv")
             with open(path, "w", newline="", encoding="utf-8") as file:
@@ -108,7 +108,7 @@ class HistoryLogger:
             logger.info(f"Saved {split} confusion matrix for {head} head to: '{path}'")
 
     def save_classification_reports(self, split: str, statistics: dict) -> None:
-        """Log and save one classification report per head for an evaluation split."""
+        """Log and save the multimodal classification report for an evaluation split."""
         for head, head_statistics in statistics["heads"].items():
             path = os.path.join(self.log_dir, f"classification_report_{split}_{head}.txt")
             report = head_statistics["message"]
