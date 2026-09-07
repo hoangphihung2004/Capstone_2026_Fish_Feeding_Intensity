@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class MultimodalTrainer:
-    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device, config: TrainConfig, train_config_path: str = "config/train_config.json", split_saver: Any = None) -> None:
+    def __init__(self, model: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device, config: TrainConfig, lr_scheduler: Any = None, train_config_path: str = "config/train_config.json", split_saver: Any = None) -> None:
         self.model = model
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.device = device
         self.config = config
         self.loss_fn = ClipCELoss(
@@ -63,6 +64,7 @@ class MultimodalTrainer:
                 "epoch": epoch,
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
+                "lr_scheduler_state_dict": self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
                 "ave_precision": metric_val,
             },
             path,
@@ -84,6 +86,7 @@ class MultimodalTrainer:
         start = time.perf_counter()
         for epoch in range(max_epoch):
             self.model.train()
+            learning_rate = self.optimizer.param_groups[0]["lr"]
             total_loss = 0.0
             head_preds = {head: [] for head in HEAD_KEYS}
             targets = []
@@ -128,6 +131,15 @@ class MultimodalTrainer:
             }
             if not np.isfinite(val_loss):
                 raise FloatingPointError(f"Non-finite validation loss at epoch {epoch}.")
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step(val_loss)
+                next_learning_rate = self.optimizer.param_groups[0]["lr"]
+                if next_learning_rate < learning_rate:
+                    logger.info(
+                        "LR scheduler reduced learning rate after val_loss plateau: %.2e -> %.2e",
+                        learning_rate,
+                        next_learning_rate,
+                    )
             is_best = (val_acc > best_metric) if self.config.monitor == "accuracy" else (val_loss < best_metric)
             if is_best:
                 best_metric = val_acc if self.config.monitor == "accuracy" else val_loss
@@ -137,7 +149,7 @@ class MultimodalTrainer:
                 best_val_mAP = val_mAP
                 best_val_statistics = val_statistics
                 self._save_checkpoint(os.path.join(self.ckpt_dir, "multimodal_best.pt"), epoch, best_metric)
-            self.history_logger.log_epoch(epoch, train_loss, train_acc, train_mAP, val_loss, val_statistics, is_best)
+            self.history_logger.log_epoch(epoch, learning_rate, train_loss, train_acc, train_mAP, val_loss, val_statistics, is_best)
             if self.config.monitor == "accuracy":
                 early_stop_score = val_acc
             else:
@@ -159,6 +171,7 @@ class MultimodalTrainer:
                 val_head_acc["video"],
                 val_head_acc["multimodal"],
             )
+            logger.info("Learning Rate: %.2e", learning_rate)
             early_suffix = ""
             if self.early_stopper is not None:
                 early_suffix = f" (no improvement for {self.early_stopper.counter}/{self.early_stopper.patience} epochs)"

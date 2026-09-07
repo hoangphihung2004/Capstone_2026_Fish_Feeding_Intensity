@@ -298,11 +298,24 @@ def run_multimodal_training(config: TrainConfig, train_config_path: str, device:
     test_loader = loader_manager.get_dataloader("test", shuffle=False, drop_last=False)
 
     optimizer = optim.Adam((p for p in model.parameters() if p.requires_grad), lr=config.learning_rate)
+    scheduler = None
+    if config.lr_scheduler.enabled:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=config.lr_scheduler.factor,
+            patience=config.lr_scheduler.patience,
+            threshold=config.lr_scheduler.threshold,
+            threshold_mode="abs",
+            cooldown=config.lr_scheduler.cooldown,
+            min_lr=config.lr_scheduler.min_lr,
+        )
     trainer = MultimodalTrainer(
         model=model,
         optimizer=optimizer,
         device=device,
         config=config,
+        lr_scheduler=scheduler,
         train_config_path=train_config_path,
         split_saver=loader_manager,
     )
@@ -334,6 +347,15 @@ def main() -> None:
     logger.info(f"  - Audio Backbone:          {config.model.audio_backbone}")
     logger.info(f"  - Video Backbone:          {config.model.video_backbone}")
     logger.info("  - Video Input Policy:      first_last")
+    if config.lr_scheduler.enabled:
+        logger.info(
+            "  - LR Scheduler:            ReduceLROnPlateau on val_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
+            config.lr_scheduler.factor,
+            config.lr_scheduler.patience,
+            config.lr_scheduler.min_lr,
+        )
+    else:
+        logger.info("  - LR Scheduler:            disabled")
     logger.info(f"  - Image Size:              {config.video_features.image_size}")
     logger.info(f"  - Audio Cache RAM:         {config.cache_audio}")
     logger.info(f"  - Video Cache Mode:        {config.cache_video_mode}")

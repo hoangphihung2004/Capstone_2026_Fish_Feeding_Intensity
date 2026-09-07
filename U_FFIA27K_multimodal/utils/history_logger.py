@@ -16,6 +16,7 @@ class HistoryLogger:
             csv.writer(f).writerow(
                 [
                     "epoch",
+                    "learning_rate",
                     "train_loss",
                     "train_accuracy",
                     "train_mAP",
@@ -33,11 +34,12 @@ class HistoryLogger:
                 ]
             )
 
-    def log_epoch(self, epoch: int, train_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_statistics: dict, is_best: bool = False) -> None:
+    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_statistics: dict, is_best: bool = False) -> None:
         val_auc = val_statistics["auc"]
         val_ap = val_statistics["average_precision"]
         row = [
             epoch,
+            f"{learning_rate:.10f}",
             f"{train_loss:.6f}",
             f"{train_acc:.6f}",
             f"{train_mAP:.6f}",

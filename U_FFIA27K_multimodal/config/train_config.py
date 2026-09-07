@@ -49,6 +49,15 @@ class SplitterConfig(BaseModel):
     cv_val_ratio: float = Field(default=0.2, gt=0.0, lt=1.0)
 
 
+class ReduceLROnPlateauConfig(BaseModel):
+    enabled: bool = Field(default=True)
+    factor: float = Field(default=0.5, gt=0.0, lt=1.0)
+    patience: int = Field(default=10, ge=0)
+    threshold: float = Field(default=0.001, ge=0.0)
+    cooldown: int = Field(default=2, ge=0)
+    min_lr: float = Field(default=1e-6, gt=0.0)
+
+
 class MultimodalTrainConfig(BaseModel):
     epochs: int = Field(default=250, gt=0)
     batch_size: int = Field(default=128, gt=0)
@@ -66,6 +75,7 @@ class MultimodalTrainConfig(BaseModel):
     cache_audio: bool = Field(default=True)
     cache_video_mode: Literal["disk", "ram", "none"] = Field(default="ram")
 
+    lr_scheduler: ReduceLROnPlateauConfig = Field(default_factory=ReduceLROnPlateauConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)
