@@ -1,6 +1,7 @@
 {
   "epochs": 250,
   "batch_size": 256,
+  "prefetch_factor": 1,
   "learning_rate": 0.0001,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
