@@ -189,6 +189,8 @@ class MultimodalTrainer:
             test_statistics = self.evaluator.evaluate(test_loader)
             self.history_logger.save_confusion_matrices("val", best_val_statistics)
             self.history_logger.save_confusion_matrices("test", test_statistics)
+            self.history_logger.save_classification_reports("val", best_val_statistics)
+            self.history_logger.save_classification_reports("test", test_statistics)
             timer = InferenceTimer(self.model, self.device)
             latency = timer.measure_latency_per_sample(
                 waveform_shape=(1, self.config.audio_features.sample_rate * 2),

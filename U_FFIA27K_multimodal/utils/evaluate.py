@@ -11,6 +11,9 @@ from models.multimodal_model import HEAD_KEYS
 from .losses import ClipCELoss
 
 
+CLASS_NAMES = ("none", "strong", "medium", "weak")
+
+
 def classification_statistics(target, probabilities):
     labels = target.argmax(1)
     predictions = probabilities.argmax(1)
@@ -26,7 +29,14 @@ def classification_statistics(target, probabilities):
         "average_precision": np.array(ap), "auc": np.array(auc),
         "accuracy": float(accuracy_score(labels, predictions)),
         "confu_matrix": confusion_matrix(labels, predictions, labels=classes),
-        "message": classification_report(labels, predictions, labels=classes, digits=4, zero_division=0),
+        "message": classification_report(
+            labels,
+            predictions,
+            labels=classes,
+            target_names=CLASS_NAMES,
+            digits=4,
+            zero_division=0,
+        ),
     }
     for average in ("weighted", "macro"):
         precision, recall, f1, _ = precision_recall_fscore_support(

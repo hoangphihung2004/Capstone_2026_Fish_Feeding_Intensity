@@ -105,5 +105,17 @@ class HistoryLogger:
                     writer.writerow([label] + [int(value) for value in row])
             logger.info(f"Saved {split} confusion matrix for {head} head to: '{path}'")
 
+    def save_classification_reports(self, split: str, statistics: dict) -> None:
+        """Log and save one classification report per head for an evaluation split."""
+        for head, head_statistics in statistics["heads"].items():
+            path = os.path.join(self.log_dir, f"classification_report_{split}_{head}.txt")
+            report = head_statistics["message"]
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(report)
+                if not report.endswith("\n"):
+                    file.write("\n")
+            logger.info("%s classification report (%s head):\n%s", split.upper(), head, report)
+            logger.info("Saved %s classification report for %s head to: '%s'", split, head, path)
+
     def plot_history(self) -> None:
         return
