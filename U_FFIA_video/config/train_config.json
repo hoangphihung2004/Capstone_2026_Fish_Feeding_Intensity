@@ -1,5 +1,5 @@
 {
-  "epochs": 20,
+  "epochs": 50,
   "batch_size": 16,
   "preload_workers": -1,
   "dataloader_workers": 5,
