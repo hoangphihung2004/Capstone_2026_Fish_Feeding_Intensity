@@ -22,9 +22,9 @@ class MultimodalArchitecture(nn.Module):
         self.video = efficientnet_b0(weights=weights).features[:8]
         adapt_first_conv_to_multi_channels(self.video, target_channels=6)
         self.audio = LightweightAudioEncoder()
-        self.fusion = nn.ModuleList(HierarchicalMessengerFusion(c, c) for c in (40, 112, 320))
-        self.fusion_aggregate = nn.Sequential(nn.Linear(3 * 64, 64), nn.LayerNorm(64))
-        self.multimodal_head = nn.Linear(704, classes_num)
+        self.fusion = nn.ModuleList(HierarchicalMessengerFusion(c, c) for c in (24, 40, 112, 320))
+        self.fusion_aggregate = nn.Sequential(nn.Linear(4 * 64, 128), nn.LayerNorm(128))
+        self.multimodal_head = nn.Linear(768, classes_num)
 
     def forward(self, audio_features, video_form):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
@@ -41,8 +41,8 @@ class MultimodalArchitecture(nn.Module):
             audio = block(audio)
             for stage in video_stages:
                 video = self.video[stage](video)
-            if index >= 2:
-                audio, video, fusion_state = self.fusion[index - 2](audio, video)
+            if index >= 1:
+                audio, video, fusion_state = self.fusion[index - 1](audio, video)
                 fusion_states.append(fusion_state)
         audio = self.audio.pool(audio)
         video = video.mean(dim=(2, 3))
