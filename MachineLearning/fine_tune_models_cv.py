@@ -132,7 +132,7 @@ def suggest_params(model_name: str, trial: optuna.Trial) -> dict:
         raise ValueError(f"Không hỗ trợ mô hình: {model_name}")
 
 
-def build_model(model_name: str, params: Optional[dict] = None, n_jobs: int = N_JOBS):
+def build_model(model_name: str, params: Optional[dict] = None, n_jobs: int = 1):
     params = params.copy() if params else {}
     if model_name == "LR":
         solver = params.get("solver", "liblinear")
@@ -190,7 +190,8 @@ def fine_tune_model(model_name, n_trials, x_train, y_train, x_val, y_val, n_jobs
         nonlocal best_acc, best_param
         try:
             params = suggest_params(model_name, trial)
-            model_instance = build_model(model_name, params=params, n_jobs=n_jobs)
+            # Trong lúc Optuna tìm kiếm song song: mỗi model con dùng 1 core để tránh tranh chấp CPU
+            model_instance = build_model(model_name, params=params, n_jobs=1)
             model_instance.fit(x_train, y_train)
 
             y_pred_val = model_instance.predict(x_val)
@@ -215,6 +216,7 @@ def fine_tune_model(model_name, n_trials, x_train, y_train, x_val, y_val, n_jobs
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE),
     )
+    # Optuna chạy song song n_jobs trials cùng lúc (mỗi trial chiếm 1 core)
     study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs)
     pbar.close()
 
@@ -248,10 +250,12 @@ def fine_tune_single_fold(feature_path, label="label"):
             x_val_use = x_val
             x_test_use = x_test
 
+        # 1. Tuning siêu tham số: Optuna chạy 18 trials song song, mỗi trial chiếm 1 core
         best_param, tuning_time, best_val_acc = fine_tune_model(
             model_name, n_trials, x_train_use, y_train, x_val_use, y_val, n_jobs=N_JOBS
         )
 
+        # 2. Huấn luyện model tốt nhất cuối cùng: huy động toàn bộ 18 cores
         best_model = build_model(model_name, params=best_param, n_jobs=N_JOBS)
 
         start_time = time.time()
