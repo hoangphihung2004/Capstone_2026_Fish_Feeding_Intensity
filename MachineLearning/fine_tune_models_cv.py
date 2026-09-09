@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import optuna
 import pandas as pd
 from tqdm import tqdm
 
@@ -32,9 +33,11 @@ except ImportError:
 
 
 RANDOM_STATE = 42
+N_JOBS = 18
 random.seed(RANDOM_STATE)
 np.random.seed(RANDOM_STATE)
 warnings.filterwarnings("ignore")
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 def load_feature(feature_path, label="label"):
@@ -68,91 +71,94 @@ def normalize_data(x_train, x_val, x_test):
 
 
 def get_models():
-    param_LR = {
-        "penalty": ["l1", "l2"],
-        "C": [0.01, 0.1, 1.0, 10, 100],
-        "solver": ["liblinear", "saga"],
-        "max_iter": np.random.randint(300, 500, size=100)
+    return {
+        "LR": {"n_trials": 10, "use_scaler": True},
+        "KNN": {"n_trials": 100, "use_scaler": True},
+        "SVM": {"n_trials": 10, "use_scaler": True},
+        "RF": {"n_trials": 100, "use_scaler": False},
+        "ET": {"n_trials": 100, "use_scaler": False},
+        "LGBM": {"n_trials": 100, "use_scaler": False},
     }
 
-    param_KNN = {
-        "n_neighbors": np.arange(3, 31, 2),
-        "weights": ["uniform", "distance"],
-        "metric": ["euclidean", "manhattan", "chebyshev", "minkowski"],
-        "algorithm": ["auto", "ball_tree", "kd_tree", "brute"]
-    }
 
-    param_SVM = {
-        "kernel": ["linear", "rbf"],
-        "C": [0.01, 0.03, 0.1, 0.3, 1.0, 3.0],
-        "gamma": ["scale", "auto"]
-    }
+def suggest_params(model_name: str, trial: optuna.Trial) -> dict:
+    if model_name == "LR":
+        return {
+            "penalty": trial.suggest_categorical("penalty", ["l1", "l2"]),
+            "C": trial.suggest_categorical("C", [0.01, 0.1, 1.0, 10.0, 100.0]),
+            "solver": trial.suggest_categorical("solver", ["liblinear", "saga"]),
+            "max_iter": trial.suggest_int("max_iter", 300, 499),
+        }
+    elif model_name == "KNN":
+        return {
+            "n_neighbors": trial.suggest_int("n_neighbors", 3, 29, step=2),
+            "weights": trial.suggest_categorical("weights", ["uniform", "distance"]),
+            "metric": trial.suggest_categorical("metric", ["euclidean", "manhattan", "chebyshev", "minkowski"]),
+            "algorithm": trial.suggest_categorical("algorithm", ["auto", "ball_tree", "kd_tree", "brute"]),
+        }
+    elif model_name == "SVM":
+        return {
+            "kernel": trial.suggest_categorical("kernel", ["linear", "rbf"]),
+            "C": trial.suggest_categorical("C", [0.01, 0.03, 0.1, 0.3, 1.0, 3.0]),
+            "gamma": trial.suggest_categorical("gamma", ["scale", "auto"]),
+        }
+    elif model_name == "RF":
+        return {
+            "n_estimators": trial.suggest_int("n_estimators", 10, 399),
+            "max_depth": trial.suggest_categorical("max_depth", [None] + list(range(5, 51))),
+            "criterion": trial.suggest_categorical("criterion", ["gini", "entropy"]),
+        }
+    elif model_name == "ET":
+        return {
+            "n_estimators": trial.suggest_int("n_estimators", 10, 500),
+            "max_depth": trial.suggest_categorical("max_depth", [None] + list(range(5, 51))),
+            "criterion": trial.suggest_categorical("criterion", ["gini", "entropy"]),
+            "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
+            "max_leaf_nodes": trial.suggest_categorical("max_leaf_nodes", [None] + list(range(2, 13))),
+            "min_samples_split": trial.suggest_categorical("min_samples_split", [2, 3, 5, 7, 9, 11]),
+            "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", [1, 3, 5, 8, 9, 11]),
+            "max_features": trial.suggest_categorical("max_features", ["sqrt", 0.5, 0.6, 0.7]),
+        }
+    elif model_name == "LGBM":
+        return {
+            "boosting_type": trial.suggest_categorical("boosting_type", ["gbdt", "dart"]),
+            "num_leaves": trial.suggest_int("num_leaves", 15, 49),
+            "max_depth": trial.suggest_categorical("max_depth", [None] + list(range(5, 41))),
+            "learning_rate": trial.suggest_categorical("learning_rate", [0.001, 0.01, 0.1, 1.0, 3.0, 10.0]),
+            "n_estimators": trial.suggest_int("n_estimators", 50, 500),
+            "class_weight": trial.suggest_categorical("class_weight", ["balanced", None]),
+        }
+    else:
+        raise ValueError(f"Không hỗ trợ mô hình: {model_name}")
 
-    param_RF = {
-        "n_estimators": np.random.randint(10, 400, size=300),
-        "max_depth": np.append([None], np.random.randint(5, 51, size=30)),
-        "criterion": ["gini", "entropy"]
-    }
 
-    param_LGBM = {
-        "boosting_type": ["gbdt", "dart"],
-        "num_leaves": np.random.randint(15, 50, size=34),
-        "max_depth": [None] + list(range(5, 41)),
-        "learning_rate": [0.001, 0.01, 0.1, 1, 3, 10],
-        "n_estimators": np.random.randint(50, 501, size=300),
-        "class_weight": ["balanced", None]
-    }
-
-    param_ET = {
-        "n_estimators": np.random.randint(10, 501, size=300),
-        "max_depth": np.append([None], np.random.randint(5, 51, size=40)),
-        "criterion": ["gini", "entropy"],
-        "bootstrap": [True, False],
-        "max_leaf_nodes": np.append([None], np.random.randint(2, 13, size=10)),
-        "min_samples_split": [2, 3, 5, 7, 9, 11],
-        "min_samples_leaf": [1, 3, 5, 8, 9, 11],
-        "max_features": ["sqrt", 0.5, 0.6, 0.7]
-    }
-
-    models = {
-        "LR": (LogisticRegression(random_state=RANDOM_STATE), param_LR, 10, True),
-        "KNN": (KNeighborsClassifier(), param_KNN, 100, True),
-        "SVM": (SVC(), param_SVM, 10, True),
-        "RF": (RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_RF, 100, False),
-        "ET": (ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=-1), param_ET, 100, False),
-        "LGBM": (LGBMClassifier(objective="multiclass", random_state=RANDOM_STATE, force_col_wise=True, verbose=-1, n_jobs=-1), param_LGBM, 100, False)
-    }
-
-    return models
-
-
-def get_random_params(param_grid, n_iter):
-    # Tính tổng số tổ hợp khả dĩ
-    total_combinations = 1
-    for v in param_grid.values():
-        total_combinations *= len(v)
-
-    # Nếu tổng số tổ hợp nhỏ thì dùng tích Descartes an toàn
-    if total_combinations <= n_iter:
-        keys, values = zip(*param_grid.items())
-        all_params = list(product(*values))
-        return [dict(zip(keys, v)) for v in all_params]
-
-    # Tránh tràn RAM bằng cách lấy mẫu ngẫu nhiên trực tiếp
-    params_list = []
-    seen = set()
-    attempts = 0
-    max_attempts = n_iter * 20
-
-    while len(params_list) < n_iter and attempts < max_attempts:
-        attempts += 1
-        params = {k: random.choice(list(v)) for k, v in param_grid.items()}
-        sig = tuple(sorted((k, str(v)) for k, v in params.items()))
-        if sig not in seen:
-            seen.add(sig)
-            params_list.append(params)
-
-    return params_list
+def build_model(model_name: str, params: Optional[dict] = None, n_jobs: int = N_JOBS):
+    params = params.copy() if params else {}
+    if model_name == "LR":
+        solver = params.get("solver", "liblinear")
+        lr_jobs = None if solver == "liblinear" else n_jobs
+        return LogisticRegression(random_state=RANDOM_STATE, n_jobs=lr_jobs, **params)
+    elif model_name == "KNN":
+        return KNeighborsClassifier(n_jobs=n_jobs, **params)
+    elif model_name == "SVM":
+        return SVC(random_state=RANDOM_STATE, **params)
+    elif model_name == "RF":
+        return RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **params)
+    elif model_name == "ET":
+        return ExtraTreesClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **params)
+    elif model_name == "LGBM":
+        if LGBMClassifier is None:
+            raise ImportError("Thư viện 'lightgbm' chưa được cài đặt.")
+        return LGBMClassifier(
+            objective="multiclass",
+            random_state=RANDOM_STATE,
+            force_col_wise=True,
+            verbose=-1,
+            n_jobs=n_jobs,
+            **params
+        )
+    else:
+        raise ValueError(f"Không hỗ trợ mô hình: {model_name}")
 
 
 def get_metrics(y_true, y_pred):
@@ -170,41 +176,55 @@ def get_metrics(y_true, y_pred):
     return metrics
 
 
-def fine_tune_model(model_name, model, param_grid, n_iter, x_train, y_train, x_val, y_val):
-    best_param = None
-    best_acc = -1
+def fine_tune_model(model_name, n_trials, x_train, y_train, x_val, y_val, n_jobs=N_JOBS):
+    import threading
 
-    params_list = get_random_params(param_grid, n_iter)
+    best_param = None
+    best_acc = -1.0
+    lock = threading.Lock()
 
     start_time = time.time()
+    pbar = tqdm(total=n_trials, desc=f"Fine tuning (Optuna) - {model_name}")
 
-    pbar = tqdm(params_list, desc=f"Fine tuning - {model_name}")
-    for params in pbar:
+    def objective(trial):
+        nonlocal best_acc, best_param
         try:
-            model_instance = clone(model)
-            model_instance.set_params(**params)
+            params = suggest_params(model_name, trial)
+            model_instance = build_model(model_name, params=params, n_jobs=n_jobs)
             model_instance.fit(x_train, y_train)
 
             y_pred_val = model_instance.predict(x_val)
+            acc = float(accuracy_score(y_val, y_pred_val))
 
-            acc = accuracy_score(y_val, y_pred_val)
+            with lock:
+                if acc > best_acc:
+                    best_acc = acc
+                    best_param = params
+                    tqdm.write(f"  [+] {model_name} -> New Best Val Acc: {best_acc:.4f}")
 
-            if acc > best_acc:
-                best_acc = acc
-                best_param = params
-                tqdm.write(f"  [+] {model_name} -> New Best Val Acc: {best_acc:.4f}")
+                pbar.update(1)
+                pbar.set_postfix({"best_val_acc": f"{best_acc:.4f}" if best_acc >= 0 else "N/A"})
 
-            pbar.set_postfix({"best_val_acc": f"{best_acc:.4f}" if best_acc >= 0 else "N/A"})
+            return acc
+        except Exception as e:
+            with lock:
+                pbar.update(1)
+            raise optuna.TrialPruned(str(e))
 
-        except Exception:
-            pass
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE),
+    )
+    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs)
+    pbar.close()
 
     tuning_time = time.time() - start_time
+    final_best_acc = study.best_value if len(study.trials) > 0 and study.best_value is not None else best_acc
+    final_best_param = study.best_params if len(study.trials) > 0 and study.best_params is not None else best_param
 
-    # Giữ nguyên lệnh in khi kết thúc tuning model
-    print(f"[{model_name}] Final Best Val Acc: {best_acc:.4f} (Tuning time: {tuning_time:.1f}s)")
+    print(f"[{model_name}] Final Best Val Acc: {final_best_acc:.4f} (Tuning time: {tuning_time:.1f}s)")
 
-    return best_param, tuning_time, best_acc
+    return final_best_param, tuning_time, final_best_acc
 
 
 def fine_tune_single_fold(feature_path, label="label"):
@@ -214,14 +234,12 @@ def fine_tune_single_fold(feature_path, label="label"):
 
     x_train, y_train, x_val, y_val, x_test, y_test = load_feature(feature_path, label)
 
-    models = get_models()
+    models_config = get_models()
     results = []
 
-    for model_name, model_info in tqdm(models.items(), desc="Models"):
-        model = model_info[0]
-        param_grid = model_info[1]
-        n_iter = model_info[2]
-        use_scaler = model_info[3]
+    for model_name, model_info in tqdm(models_config.items(), desc="Models"):
+        n_trials = model_info["n_trials"]
+        use_scaler = model_info["use_scaler"]
 
         if use_scaler:
             x_train_use, x_val_use, x_test_use = normalize_data(x_train, x_val, x_test)
@@ -231,12 +249,10 @@ def fine_tune_single_fold(feature_path, label="label"):
             x_test_use = x_test
 
         best_param, tuning_time, best_val_acc = fine_tune_model(
-            model_name, model, param_grid, n_iter, x_train_use, y_train, x_val_use, y_val
+            model_name, n_trials, x_train_use, y_train, x_val_use, y_val, n_jobs=N_JOBS
         )
 
-        best_model = clone(model)
-        if best_param:
-            best_model.set_params(**best_param)
+        best_model = build_model(model_name, params=best_param, n_jobs=N_JOBS)
 
         start_time = time.time()
         best_model.fit(x_train_use, y_train)

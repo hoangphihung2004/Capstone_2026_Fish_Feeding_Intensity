@@ -11,5 +11,6 @@ soundfile
 scikit-image
 huggingface_hub
 hf_transfer
+optuna
 
 
