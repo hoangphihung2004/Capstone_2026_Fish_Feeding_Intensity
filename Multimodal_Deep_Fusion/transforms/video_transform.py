@@ -1,76 +1,45 @@
-﻿import numpy as np
+import numpy as np
 import torch
-import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 
 
-class ImageToPIL:
-    """Convert one RGB image in [C, H, W] or [H, W, C] format to PIL."""
-    def __call__(self, image):
-        if isinstance(image, np.ndarray):
-            if image.ndim != 3:
-                raise ValueError(f"Expected image with 3 dimensions, got shape {tuple(image.shape)}")
-
-            if image.shape[0] == 3:
-                image = image.transpose(1, 2, 0)
-            elif image.shape[-1] != 3:
-                raise ValueError(f"Expected RGB channel dimension with size 3, got shape {tuple(image.shape)}")
-
-            return TF.to_pil_image(image)
-
-        if isinstance(image, torch.Tensor):
-            if image.ndim != 3:
-                raise ValueError(f"Expected image with 3 dimensions, got shape {tuple(image.shape)}")
-
-            if image.shape[0] != 3 and image.shape[-1] == 3:
-                image = image.permute(2, 0, 1)
-            elif image.shape[0] != 3:
-                raise ValueError(f"Expected RGB channel dimension with size 3, got shape {tuple(image.shape)}")
-
-            return TF.to_pil_image(image)
-
-        return image
-
-
 class VideoTransform:
-    """
-    Backward-compatible name for the single-frame image transform pipeline.
+    """Multi-frame early-fusion transform from U_FFIA27K_video_Multi_channels."""
 
-    Input:  np.ndarray [H, W, C] or [C, H, W] uint8
-    Output: torch.Tensor [C, H, W] float32 normalized with ImageNet statistics.
-    """
-    def __init__(self, transform: transforms.Compose) -> None:
-        self.transform = transform
+    def __init__(self, image_size: int = 224, split: str = "train") -> None:
+        self.image_size = image_size
+        self.split = split
 
     def __call__(self, image: np.ndarray) -> torch.Tensor:
-        return self.transform(image)
+        if image.shape[-1] in (3, 6, 9, 12):
+            image = image.transpose(2, 0, 1)
+
+        channels = image.shape[0]
+        if channels not in (3, 6, 9, 12):
+            raise ValueError(f"Expected 3, 6, 9, or 12 image channels, got shape {tuple(image.shape)}")
+        mean = torch.tensor([0.485, 0.456, 0.406] * (channels // 3)).view(channels, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225] * (channels // 3)).view(channels, 1, 1)
+
+        image_tensor = torch.from_numpy(image).float() / 255.0
+        image_tensor = TF.resize(image_tensor, [self.image_size, self.image_size], interpolation=InterpolationMode.BILINEAR)
+        if self.split == "train":
+            if torch.rand(1) < 0.5:
+                image_tensor = TF.hflip(image_tensor)
+            if torch.rand(1) < 0.5:
+                image_tensor = TF.rotate(image_tensor, float(torch.empty(1).uniform_(-20, 20).item()))
+            if torch.rand(1) < 0.5:
+                translate = [
+                    int(torch.empty(1).uniform_(-0.2, 0.2).item() * self.image_size),
+                    int(torch.empty(1).uniform_(-0.2, 0.2).item() * self.image_size),
+                ]
+                image_tensor = TF.affine(image_tensor, angle=0.0, translate=translate, scale=1.0, shear=0.0)
+        return (image_tensor - mean) / std
 
     @staticmethod
     def get_transforms(image_size: int = 224):
-        mean = (0.485, 0.456, 0.406)
-        std = (0.229, 0.224, 0.225)
-
-        train_transform = [
-            ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
-            transforms.ColorJitter(brightness=0.15),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomRotation(20),
-            transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ]
-
-        eval_transform = [
-            ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
-        ]
-
         return {
-            "train": VideoTransform(transforms.Compose(train_transform)),
-            "val": VideoTransform(transforms.Compose(eval_transform)),
-            "test": VideoTransform(transforms.Compose(eval_transform)),
+            "train": VideoTransform(image_size=image_size, split="train"),
+            "val": VideoTransform(image_size=image_size, split="val"),
+            "test": VideoTransform(image_size=image_size, split="test"),
         }

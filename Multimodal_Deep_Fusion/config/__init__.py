@@ -10,6 +10,7 @@ from .train_config import (
     DEFAULT_IMAGE_CACHE_ROOT,
     VALID_CACHE_MODES,
     load_train_config,
+    video_input_channels,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "VALID_CACHE_MODES",
     "load_artifact_upload_config",
     "load_train_config",
+    "video_input_channels",
 ]

@@ -170,6 +170,80 @@ def _decode_center_image_cv2(video_path: str, label: Any, image_size: int) -> Di
     }
 
 
+def _get_multi_frame_indices(full_vid_length: int, frame_policy: str) -> list:
+    """Match the early-fusion frame selection used by U_FFIA27K_video_Multi_channels."""
+    if full_vid_length == 0:
+        return [0]
+
+    q = full_vid_length // 4
+    c = full_vid_length // 2
+    tq = 3 * full_vid_length // 4
+    e = full_vid_length - 1
+    s = 0
+    if frame_policy == "6_channels":
+        return [q, e]
+    if frame_policy == "1_49_channels":
+        return [s, e]
+    if frame_policy == "25_49_channels":
+        return [c, e]
+    if frame_policy == "9_channels":
+        return [q, c, e]
+    if frame_policy == "12_channels":
+        return [q, c, tq, e]
+    raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
+
+
+def _multi_frame_channel_count(frame_policy: str) -> int:
+    channels = {"6_channels": 6, "1_49_channels": 6, "25_49_channels": 6, "9_channels": 9, "12_channels": 12}.get(frame_policy)
+    if channels is None:
+        raise ValueError(f"Unknown multi-channel frame policy: {frame_policy}")
+    return channels
+
+
+def _decode_multi_frame_image(video_path: str, label: Any, image_size: int, frame_policy: str) -> Dict[str, Any]:
+    """Decode and concatenate RGB frames exactly as the multi-channel video branch."""
+    from decord import VideoReader, cpu, gpu
+
+    try:
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=gpu(0))
+    except Exception:
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0))
+
+    channels = _multi_frame_channel_count(frame_policy)
+    if len(vr) == 0:
+        image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
+    else:
+        indices = _get_multi_frame_indices(len(vr), frame_policy)
+        batch = vr.get_batch(indices).asnumpy()  # [N, H, W, 3] RGB
+        image_uint8 = np.concatenate([batch[i] for i in range(len(indices))], axis=-1).transpose(2, 0, 1).astype(np.uint8)
+    return {"video_name": video_path, "image_form": image_uint8, "target": label}
+
+
+def _decode_multi_frame_image_cv2(video_path: str, label: Any, image_size: int, frame_policy: str) -> Dict[str, Any]:
+    """OpenCV fallback with the identical frame indices and RGB concatenation."""
+    channels = _multi_frame_channel_count(frame_policy)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logger.error("Error: Could not open video file: '%s'", video_path)
+        image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
+    else:
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count == 0:
+            image_uint8 = np.zeros((channels, image_size, image_size), dtype=np.uint8)
+        else:
+            frames = []
+            for index in _get_multi_frame_indices(frame_count, frame_policy):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+                success, frame = cap.read()
+                if not success:
+                    frames = []
+                    break
+                frames.append(cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (image_size, image_size)))
+            image_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8) if frames else np.zeros((channels, image_size, image_size), dtype=np.uint8)
+        cap.release()
+    return {"video_name": video_path, "image_form": image_uint8, "target": label}
+
+
 def _load_or_create_image_sample(
     index: int,
     video_path: str,

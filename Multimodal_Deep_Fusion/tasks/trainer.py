@@ -540,11 +540,13 @@ class MultimodalTrainer:
         return result
 
     def _measure_latency_per_sample(self, warm_up_steps: int = 10, num_steps: int = 50) -> float:
+        from config import video_input_channels
+
         self.model.eval()
         waveform = torch.zeros(1, self.cfg.audio_features.sample_rate * 2, device=self.device)
         video = torch.zeros(
             1,
-            3,
+            video_input_channels(self.cfg.video_features.frame_policy),
             self.cfg.video_features.image_size,
             self.cfg.video_features.image_size,
             device=self.device,

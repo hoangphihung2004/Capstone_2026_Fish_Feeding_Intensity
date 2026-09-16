@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 from config import DatasetConfig, SplitterConfig
 from dataset.audio_loader import FishVoiceDataLoader
 from dataset.data_split import FishDataSplitter
-from dataset.video_loader import _decode_center_image, _decode_center_image_cv2
+from dataset.video_loader import _decode_center_image, _decode_center_image_cv2, _decode_multi_frame_image, _decode_multi_frame_image_cv2
 from transforms import VideoTransform
 
 logger = logging.getLogger(__name__)
@@ -163,6 +163,7 @@ class MultimodalFishDataset(Dataset):
         split: str,
         sample_rate: int,
         image_size: int,
+        frame_policy: str,
         cache_audio: bool,
         cache_video: bool,
         num_workers: int,
@@ -171,6 +172,7 @@ class MultimodalFishDataset(Dataset):
         self.split = split
         self.sample_rate = sample_rate
         self.image_size = image_size
+        self.frame_policy = frame_policy
         self.cache_audio = cache_audio
         self.cache_video = cache_video
         self.preload_workers = max(1, num_workers)
@@ -215,14 +217,20 @@ class MultimodalFishDataset(Dataset):
         logger.info("Cached %s audio to RAM: %.1f MB", self.split, total_bytes / (1024**2))
 
     def _decode_video(self, video_path: str, label: int) -> Dict[str, Any]:
+        if self.frame_policy == "center":
+            try:
+                return _decode_center_image(video_path=video_path, label=label, image_size=self.image_size)
+            except Exception as exc:
+                logger.warning("Decord failed for '%s', falling back to OpenCV. Error: %s", video_path, exc)
+                return _decode_center_image_cv2(video_path=video_path, label=label, image_size=self.image_size)
         try:
-            return _decode_center_image(video_path=video_path, label=label, image_size=self.image_size)
+            return _decode_multi_frame_image(video_path, label, self.image_size, self.frame_policy)
         except Exception as exc:
             logger.warning("Decord failed for '%s', falling back to OpenCV. Error: %s", video_path, exc)
-            return _decode_center_image_cv2(video_path=video_path, label=label, image_size=self.image_size)
+            return _decode_multi_frame_image_cv2(video_path, label, self.image_size, self.frame_policy)
 
     def _preload_video(self) -> None:
-        logger.info("Preloading %s center-frame video samples to RAM (%d samples)...", self.split, len(self.entries))
+        logger.info("Preloading %s %s video samples to RAM (%d samples)...", self.split, self.frame_policy, len(self.entries))
 
         def load_one(index_entry: Tuple[int, Dict[str, Any]]) -> Tuple[int, Dict[str, Any]]:
             index, entry = index_entry
@@ -291,6 +299,7 @@ def create_dataloaders(
     dataset_cfg: DatasetConfig,
     sample_rate: int,
     image_size: int,
+    frame_policy: str,
     batch_size: int,
 ) -> Dict[str, DataLoader]:
     workers = resolve_num_workers(dataset_cfg.num_workers)
@@ -301,6 +310,7 @@ def create_dataloaders(
             split=split_name,
             sample_rate=sample_rate,
             image_size=image_size,
+            frame_policy=frame_policy,
             cache_audio=dataset_cfg.cache_audio,
             cache_video=dataset_cfg.cache_video and dataset_cfg.video_cache_mode == "ram",
             num_workers=workers,

@@ -44,7 +44,7 @@ def _log_run_configuration(cfg, root: Path) -> None:
 
 
 def _experiment_root(cfg, project_dir: Path) -> Path:
-    name = f"{cfg.audio.backbone}_{cfg.video.backbone}_{cfg.fusion.type}"
+    name = f"{cfg.audio.backbone}_{cfg.video.backbone}_{cfg.fusion.type}_{cfg.video_features.frame_policy}"
     output_dir = Path(cfg.output_dir)
     if not output_dir.is_absolute():
         output_dir = project_dir / output_dir
@@ -59,6 +59,7 @@ def _run_holdout(cfg, root: Path) -> Dict[str, float]:
         dataset_cfg=cfg.dataset,
         sample_rate=cfg.audio_features.sample_rate,
         image_size=cfg.video_features.image_size,
+        frame_policy=cfg.video_features.frame_policy,
         batch_size=cfg.batch_size,
     )
     trainer = MultimodalTrainer(
@@ -127,6 +128,7 @@ def _run_cross_validation(cfg, root: Path) -> List[Dict[str, float]]:
             dataset_cfg=fold_cfg.dataset,
             sample_rate=fold_cfg.audio_features.sample_rate,
             image_size=fold_cfg.video_features.image_size,
+            frame_policy=fold_cfg.video_features.frame_policy,
             batch_size=fold_cfg.batch_size,
         )
         trainer = MultimodalTrainer(

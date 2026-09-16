@@ -27,6 +27,8 @@ Single-fold Hugging Face artifacts include `fold_XX` in their filename.
 
 Each run selects one audio model, one video model, and one fusion head.
 
+The video branch uses early fusion by default (`video_features.frame_policy: "6_channels"`): it concatenates the quarter and final RGB frames into one six-channel tensor, then expands the video backbone's first convolution using duplicated, scale-preserved pretrained weights. The supported policies are `6_channels`, `1_49_channels`, `25_49_channels`, `9_channels`, and `12_channels`; `center` remains available for legacy single-frame runs.
+
 Available fusion heads:
 
 ```text

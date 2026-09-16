@@ -21,7 +21,7 @@ def build_artifact_name(cfg: TrainConfig) -> str:
         fold_suffix = f"_fold_{int(cfg.dataset.fold_index):02d}"
     return (
         f"MultimodalDL_{cfg.audio.backbone}_{cfg.video.backbone}_"
-        f"{cfg.fusion.type}_{cfg.evaluation_mode}{fold_suffix}_{timestamp}.zip"
+        f"{cfg.fusion.type}_{cfg.video_features.frame_policy}_{cfg.evaluation_mode}{fold_suffix}_{timestamp}.zip"
     )
 
 

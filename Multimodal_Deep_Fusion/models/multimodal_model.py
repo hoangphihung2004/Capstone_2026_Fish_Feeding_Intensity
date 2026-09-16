@@ -7,11 +7,12 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 
-from config import TrainConfig
+from config import TrainConfig, video_input_channels
 from features.audio_frontend import AudioFrontend
 from models.audio import build_audio_backbone
 from models.fusion import build_fusion_head
 from models.video import build_video_backbone
+from models.video.surgery import adapt_first_conv_to_multi_channels
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,8 @@ class MultimodalDeepFusionModel(nn.Module):
         )
         classifier, video_dim = _video_classifier_and_dim(video_backbone)
         _strict_load_checkpoint(video_backbone, cfg.video.checkpoint_path, "Video backbone")
+        video_channels = video_input_channels(cfg.video_features.frame_policy)
+        adapt_first_conv_to_multi_channels(video_backbone, video_channels)
         self.video_branch = FeatureHook(module=video_backbone, classifier=classifier, feature_dim=video_dim)
 
         if cfg.audio.freeze:
@@ -121,11 +124,13 @@ class MultimodalDeepFusionModel(nn.Module):
             cfg=cfg.fusion,
         )
         logger.info(
-            "Initialized multimodal model: audio=%s (%dD), video=%s (%dD), fusion=%s",
+            "Initialized multimodal model: audio=%s (%dD), video=%s (%dD, %s, %d channels), fusion=%s",
             cfg.audio.backbone,
             self.audio_branch.feature_dim,
             cfg.video.backbone,
             self.video_branch.feature_dim,
+            cfg.video_features.frame_policy,
+            video_channels,
             cfg.fusion.type,
         )
 

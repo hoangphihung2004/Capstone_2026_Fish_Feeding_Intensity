@@ -9,6 +9,23 @@ from pydantic import BaseModel, Field
 
 DEFAULT_IMAGE_CACHE_ROOT = "video_image_cache"
 VALID_CACHE_MODES = {"none", "ram", "disk"}
+FRAME_POLICY_CHANNELS = {
+    "center": 3,
+    "6_channels": 6,
+    "1_49_channels": 6,
+    "25_49_channels": 6,
+    "9_channels": 9,
+    "12_channels": 12,
+}
+
+
+def video_input_channels(frame_policy: str) -> int:
+    try:
+        return FRAME_POLICY_CHANNELS[frame_policy]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported video frame_policy='{frame_policy}'. Expected one of {sorted(FRAME_POLICY_CHANNELS)}."
+        ) from exc
 
 
 class AudioFeaturesConfig(BaseModel):
@@ -27,6 +44,7 @@ class AudioFeaturesConfig(BaseModel):
 
 class VideoFeaturesConfig(BaseModel):
     image_size: int = 224
+    frame_policy: Literal["center", "6_channels", "1_49_channels", "25_49_channels", "9_channels", "12_channels"] = "6_channels"
 
 
 class SplitterConfig(BaseModel):
