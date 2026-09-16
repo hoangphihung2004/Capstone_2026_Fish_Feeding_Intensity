@@ -71,6 +71,7 @@ class DatasetConfig(BaseModel):
     split_strategy: Literal["random_sample", "time_series", "group_random"] = "random_sample"
     test_sample_per_class: int = 700
     num_folds: int = 5
+    fold_index: Optional[int] = None
     cv_val_ratio: float = 0.2
 
 

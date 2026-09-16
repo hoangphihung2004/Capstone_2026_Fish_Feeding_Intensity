@@ -16,10 +16,22 @@ logger = logging.getLogger(__name__)
 
 def build_artifact_name(cfg: TrainConfig) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fold_suffix = ""
+    if cfg.evaluation_mode == "cross_validation" and cfg.dataset.fold_index is not None:
+        fold_suffix = f"_fold_{int(cfg.dataset.fold_index):02d}"
     return (
         f"MultimodalDL_{cfg.audio.backbone}_{cfg.video.backbone}_"
-        f"{cfg.fusion.type}_{cfg.evaluation_mode}_{timestamp}.zip"
+        f"{cfg.fusion.type}_{cfg.evaluation_mode}{fold_suffix}_{timestamp}.zip"
     )
+
+
+def artifact_repo_path(path_in_repo: str, artifact_name: str) -> str:
+    """Keep a configured destination directory, but always use a unique run name."""
+    configured_path = Path(path_in_repo)
+    parent = configured_path.parent if configured_path.suffix else configured_path
+    if str(parent) == ".":
+        return artifact_name
+    return (parent / artifact_name).as_posix()
 
 
 def zip_source_tree(source_dir: str | Path, output_zip: str | Path) -> Path:
@@ -46,7 +58,7 @@ def upload_artifact_if_enabled(
             "Hugging Face authentication token was not found. Run 'hf auth login' in this environment first."
         )
 
-    artifact_name = upload_cfg.path_in_repo or build_artifact_name(train_cfg)
+    artifact_name = build_artifact_name(train_cfg)
     source_path = Path(source_dir or upload_cfg.source_dir)
     with tempfile.TemporaryDirectory() as tmp_dir:
         zip_path = Path(tmp_dir) / artifact_name
@@ -61,7 +73,7 @@ def upload_artifact_if_enabled(
         api = HfApi(token=token)
         api.upload_file(
             path_or_fileobj=str(zip_path),
-            path_in_repo=artifact_name,
+            path_in_repo=artifact_repo_path(upload_cfg.path_in_repo, artifact_name),
             repo_id=upload_cfg.repo_id,
             repo_type=upload_cfg.repo_type,
         )

@@ -76,6 +76,13 @@ def _normalize_entry(entry: List[Any] | Tuple[Any, ...] | Dict[str, Any]) -> Dic
 
 
 def load_splits(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """Load deterministic splits for the requested CV fold.
+
+    ``DatasetConfig.fold_index`` is the public fold selector.  The optional
+    argument is retained for compatibility with callers that supplied a fold
+    directly; when it is omitted, the value in the config is used.
+    """
+    selected_fold_index = dataset_cfg.fold_index if fold_index is None else fold_index
     splitter_cfg = SplitterConfig(
         dataset_path=dataset_cfg.dataset_path,
         seed=dataset_cfg.seed,
@@ -85,7 +92,7 @@ def load_splits(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int]
         split_strategy=dataset_cfg.split_strategy,
         evaluation_mode=mode,
         num_folds=dataset_cfg.num_folds,
-        fold_index=fold_index,
+        fold_index=selected_fold_index,
         cv_val_ratio=dataset_cfg.cv_val_ratio,
     )
     logger.info(
@@ -94,7 +101,7 @@ def load_splits(dataset_cfg: DatasetConfig, mode: str, fold_index: Optional[int]
         mode,
         dataset_cfg.seed,
         dataset_cfg.split_strategy,
-        fold_index,
+        selected_fold_index,
     )
     splitter = FishDataSplitter(splitter_cfg)
     train_raw, test_raw, val_raw = splitter.split_data()

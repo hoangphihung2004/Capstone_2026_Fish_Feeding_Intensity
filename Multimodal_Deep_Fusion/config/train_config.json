@@ -44,6 +44,7 @@
     "split_strategy": "random_sample",
     "test_sample_per_class": 700,
     "num_folds": 5,
+    "fold_index": null,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
