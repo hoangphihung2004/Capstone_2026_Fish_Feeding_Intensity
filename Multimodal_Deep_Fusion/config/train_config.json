@@ -2,14 +2,13 @@
   "seed": 42,
   "device": "cuda",
   "num_classes": 4,
-  "evaluation_mode": "holdout",
   "epochs": 200,
   "batch_size": 256,
   "learning_rate": 0.0001,
   "optimizer": "adam",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 50,
+  "patience": 40,
   "delta": 0.0,
   "output_dir": "outputs",
   "audio": {
@@ -25,9 +24,9 @@
     "checkpoint_path": ""
   },
   "fusion": {
-    "type": "self_attention",
+    "type": "raw_concat",
     "proj_dim": 256,
-    "hidden_dim": 256,
+    "hidden_dim": 512,
     "dropout": 0.2,
     "num_heads": 4,
     "activation": "relu",
@@ -42,9 +41,10 @@
     "prefetch_factor": 1,
     "seed": 42,
     "split_strategy": "random_sample",
+    "evaluation_mode": "cross_validation",
     "test_sample_per_class": 700,
     "num_folds": 5,
-    "fold_index": null,
+    "fold_index": 0,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
@@ -62,6 +62,6 @@
   },
   "video_features": {
     "image_size": 224,
-    "frame_policy": "6_channels"
+    "frame_policy": "1_49_channels"
   }
 }

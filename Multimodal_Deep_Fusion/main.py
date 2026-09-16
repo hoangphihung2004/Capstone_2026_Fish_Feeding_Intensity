@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def _log_run_configuration(cfg, root: Path) -> None:
     logger.info("==================================================")
     logger.info("Multimodal Deep Fusion configuration")
-    logger.info("  - Evaluation mode:          %s", cfg.evaluation_mode)
+    logger.info("  - Evaluation mode:          %s", cfg.dataset.evaluation_mode)
     logger.info("  - Audio backbone:           %s", cfg.audio.backbone)
     logger.info("  - Video backbone:           %s", cfg.video.backbone)
     logger.info("  - Fusion head:              %s", cfg.fusion.type)
@@ -33,7 +33,7 @@ def _log_run_configuration(cfg, root: Path) -> None:
     logger.info("  - Monitor metric:           %s", cfg.monitor)
     logger.info("  - Dataset path:             %s", cfg.dataset.dataset_path)
     logger.info("  - Split strategy:           %s", cfg.dataset.split_strategy)
-    if cfg.evaluation_mode == "cross_validation":
+    if cfg.dataset.evaluation_mode == "cross_validation":
         if cfg.dataset.fold_index is None:
             logger.info("  - CV fold selection:        all folds")
         else:
@@ -155,9 +155,9 @@ def main() -> None:
     root.mkdir(parents=True, exist_ok=True)
     _log_run_configuration(cfg, root)
 
-    if cfg.evaluation_mode == "holdout":
+    if cfg.dataset.evaluation_mode == "holdout":
         _run_holdout(cfg, root)
-    elif cfg.evaluation_mode == "cross_validation":
+    elif cfg.dataset.evaluation_mode == "cross_validation":
         _run_cross_validation(cfg, root)
 
     upload_cfg = load_artifact_upload_config(project_dir / "config" / "artifact_upload_config.json")

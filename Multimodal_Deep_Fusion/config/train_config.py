@@ -87,6 +87,7 @@ class DatasetConfig(BaseModel):
     prefetch_factor: Optional[int] = None
     seed: int = 42
     split_strategy: Literal["random_sample", "time_series", "group_random"] = "random_sample"
+    evaluation_mode: Literal["holdout", "cross_validation"] = "holdout"
     test_sample_per_class: int = 700
     num_folds: int = 5
     fold_index: Optional[int] = None
@@ -97,7 +98,6 @@ class TrainConfig(BaseModel):
     seed: int = 42
     device: str = "cuda"
     num_classes: int = 4
-    evaluation_mode: Literal["holdout", "cross_validation"] = "holdout"
     epochs: int = 200
     batch_size: int = 256
     learning_rate: float = 1e-3

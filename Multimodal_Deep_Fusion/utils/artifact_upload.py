@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 def build_artifact_name(cfg: TrainConfig) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     fold_suffix = ""
-    if cfg.evaluation_mode == "cross_validation" and cfg.dataset.fold_index is not None:
+    if cfg.dataset.evaluation_mode == "cross_validation" and cfg.dataset.fold_index is not None:
         fold_suffix = f"_fold_{int(cfg.dataset.fold_index):02d}"
     return (
         f"MultimodalDL_{cfg.audio.backbone}_{cfg.video.backbone}_"
-        f"{cfg.fusion.type}_{cfg.video_features.frame_policy}_{cfg.evaluation_mode}{fold_suffix}_{timestamp}.zip"
+        f"{cfg.fusion.type}_{cfg.video_features.frame_policy}_{cfg.dataset.evaluation_mode}{fold_suffix}_{timestamp}.zip"
     )
 
 
