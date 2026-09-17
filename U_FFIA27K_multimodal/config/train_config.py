@@ -33,6 +33,7 @@ class ModelConfig(BaseModel):
     video_backbone: Literal["EfficientNetB0_S7"] = "EfficientNetB0_S7"
     pretrained_video: bool = Field(default=True, description="Use ImageNet weights for video encoder.")
     pretrained_audio: Literal[False] = False
+    fusion_head_dropout: float = Field(default=0.2, ge=0.0, lt=1.0, description="Dropout before the multimodal classifier.")
 
 
 class SplitterConfig(BaseModel):

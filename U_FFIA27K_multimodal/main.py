@@ -153,7 +153,11 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
 
 
 def build_model(config: TrainConfig) -> MultimodalModel:
-    model = MultimodalModel(config.audio_features, pretrained_video=config.model.pretrained_video)
+    model = MultimodalModel(
+        config.audio_features,
+        pretrained_video=config.model.pretrained_video,
+        fusion_head_dropout=config.model.fusion_head_dropout,
+    )
     num_params = model.architecture_num_params()
     if num_params >= 5_000_000:
         raise ValueError(f"Architecture exceeds parameter budget: {num_params:,}")
@@ -346,6 +350,7 @@ def main() -> None:
         logger.info(f"  - Early Stopping Patience: {config.patience} epochs")
     logger.info(f"  - Audio Backbone:          {config.model.audio_backbone}")
     logger.info(f"  - Video Backbone:          {config.model.video_backbone}")
+    logger.info(f"  - Fusion Head Dropout:     {config.model.fusion_head_dropout:.2f}")
     logger.info("  - Video Input Policy:      first_last")
     if config.lr_scheduler.enabled:
         logger.info(
