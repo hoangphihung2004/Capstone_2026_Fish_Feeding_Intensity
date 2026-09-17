@@ -149,7 +149,16 @@ class MultimodalTrainer:
                 best_val_mAP = val_mAP
                 best_val_statistics = val_statistics
                 self._save_checkpoint(os.path.join(self.ckpt_dir, "multimodal_best.pt"), epoch, best_metric)
-            self.history_logger.log_epoch(epoch, learning_rate, train_loss, train_acc, train_mAP, val_loss, val_statistics, is_best)
+            self.history_logger.log_epoch(
+                epoch,
+                learning_rate,
+                train_loss,
+                train_head_acc,
+                train_mAP,
+                val_loss,
+                val_statistics,
+                is_best,
+            )
             if self.config.monitor == "accuracy":
                 early_stop_score = val_acc
             else:

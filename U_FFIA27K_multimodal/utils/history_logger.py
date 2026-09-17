@@ -18,10 +18,14 @@ class HistoryLogger:
                     "epoch",
                     "learning_rate",
                     "train_loss",
-                    "train_accuracy",
+                    "train_accuracy_audio",
+                    "train_accuracy_video",
+                    "train_accuracy_multimodal",
                     "train_mAP",
                     "val_loss",
-                    "val_accuracy",
+                    "val_accuracy_audio",
+                    "val_accuracy_video",
+                    "val_accuracy_multimodal",
                     "val_mAP",
                     "val_auc_class_none",
                     "val_auc_class_strong",
@@ -34,17 +38,24 @@ class HistoryLogger:
                 ]
             )
 
-    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_statistics: dict, is_best: bool = False) -> None:
+    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_head_acc: dict,
+                  train_mAP: float, val_loss: float, val_statistics: dict, is_best: bool = False) -> None:
         val_auc = val_statistics["auc"]
         val_ap = val_statistics["average_precision"]
+        val_head_acc = {head: float(statistics["accuracy"])
+                        for head, statistics in val_statistics["heads"].items()}
         row = [
             epoch,
             f"{learning_rate:.10f}",
             f"{train_loss:.6f}",
-            f"{train_acc:.6f}",
+            f"{train_head_acc['audio']:.6f}",
+            f"{train_head_acc['video']:.6f}",
+            f"{train_head_acc['multimodal']:.6f}",
             f"{train_mAP:.6f}",
             f"{val_loss:.6f}",
-            f"{float(val_statistics['accuracy']):.6f}",
+            f"{val_head_acc['audio']:.6f}",
+            f"{val_head_acc['video']:.6f}",
+            f"{val_head_acc['multimodal']:.6f}",
             f"{float(np.mean(val_ap)):.6f}",
             f"{val_auc[0]:.6f}",
             f"{val_auc[1]:.6f}",
