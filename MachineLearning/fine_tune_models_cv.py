@@ -86,7 +86,7 @@ def suggest_params(model_name: str, trial: optuna.Trial) -> dict:
         return {
             "penalty": trial.suggest_categorical("penalty", ["l1", "l2"]),
             "C": trial.suggest_categorical("C", [0.01, 0.1, 1.0, 10.0, 100.0]),
-            "solver": trial.suggest_categorical("solver", ["liblinear", "saga"]),
+            "solver": trial.suggest_categorical("solver", ["saga"]),
             "max_iter": trial.suggest_int("max_iter", 300, 499),
         }
     elif model_name == "KNN":
@@ -135,7 +135,7 @@ def suggest_params(model_name: str, trial: optuna.Trial) -> dict:
 def build_model(model_name: str, params: Optional[dict] = None, n_jobs: int = 1):
     params = params.copy() if params else {}
     if model_name == "LR":
-        solver = params.get("solver", "liblinear")
+        solver = params.get("solver", "saga")
         lr_jobs = None if solver == "liblinear" else n_jobs
         return LogisticRegression(random_state=RANDOM_STATE, n_jobs=lr_jobs, **params)
     elif model_name == "KNN":
@@ -223,8 +223,13 @@ def fine_tune_model(model_name, n_trials, x_train, y_train, x_val, y_val, n_jobs
     pbar.close()
 
     tuning_time = time.time() - start_time
-    final_best_acc = study.best_value if len(study.trials) > 0 and study.best_value is not None else best_acc
-    final_best_param = study.best_params if len(study.trials) > 0 and study.best_params is not None else best_param
+    completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if completed_trials:
+        final_best_acc = study.best_value
+        final_best_param = study.best_params
+    else:
+        final_best_acc = best_acc if best_acc >= 0 else 0.0
+        final_best_param = best_param or {}
 
     print(f"[{model_name}] Final Best Val Acc: {final_best_acc:.4f} (Tuning time: {tuning_time:.1f}s)")
 
@@ -355,6 +360,19 @@ def fine_tune_cv(parent_dir_path: str, label: str = "label") -> pd.DataFrame:
         if feature_csv is None or not feature_csv.exists():
             print(f"\n[CẢNH BÁO] Bỏ qua {fdir.name} vì không tìm thấy file features.csv!")
             continue
+
+        result_file = fdir / "result.csv"
+        if result_file.exists():
+            try:
+                cached_df = pd.read_csv(result_file)
+                if len(cached_df) == len(get_models()):
+                    print(f"\n[{idx}/{len(fold_dirs)}] >>> {fdir.name}: Đã có kết quả hoàn chỉnh ({len(cached_df)} models), tự động tải lại!")
+                    if "Fold" not in cached_df.columns:
+                        cached_df["Fold"] = fdir.name
+                    all_fold_dfs.append(cached_df)
+                    continue
+            except Exception:
+                pass
 
         print(f"\n[{idx}/{len(fold_dirs)}] >>> Đang chạy: {fdir.name}")
         fold_df = fine_tune_single_fold(feature_csv, label=label)
