@@ -33,7 +33,7 @@ except ImportError:
 
 
 RANDOM_STATE = 42
-N_JOBS = 18
+N_JOBS = 8
 random.seed(RANDOM_STATE)
 np.random.seed(RANDOM_STATE)
 warnings.filterwarnings("ignore")
@@ -72,12 +72,12 @@ def normalize_data(x_train, x_val, x_test):
 
 def get_models():
     return {
-        "LR": {"n_trials": 10, "use_scaler": True},
-        "KNN": {"n_trials": 100, "use_scaler": True},
-        "SVM": {"n_trials": 10, "use_scaler": True},
-        "RF": {"n_trials": 100, "use_scaler": False},
-        "ET": {"n_trials": 100, "use_scaler": False},
-        "LGBM": {"n_trials": 100, "use_scaler": False},
+        "LR": {"n_trials": 3, "use_scaler": True},
+        "KNN": {"n_trials": 10, "use_scaler": True},
+        "SVM": {"n_trials": 3, "use_scaler": True},
+        "RF": {"n_trials": 10, "use_scaler": False},
+        "ET": {"n_trials": 10, "use_scaler": False},
+        "LGBM": {"n_trials": 10, "use_scaler": False},
     }
 
 
@@ -141,6 +141,8 @@ def build_model(model_name: str, params: Optional[dict] = None, n_jobs: int = 1)
     elif model_name == "KNN":
         return KNeighborsClassifier(n_jobs=n_jobs, **params)
     elif model_name == "SVM":
+        params.setdefault("cache_size", 2000)
+        params.setdefault("max_iter", 1000)
         return SVC(random_state=RANDOM_STATE, **params)
     elif model_name == "RF":
         return RandomForestClassifier(random_state=RANDOM_STATE, n_jobs=n_jobs, **params)
