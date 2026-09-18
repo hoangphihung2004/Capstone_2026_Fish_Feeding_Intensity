@@ -1,9 +1,9 @@
-"""Measure per-file end-to-end audio inference latency from a saved checkpoint.
+"""Measure per-file end-to-end audio inference latency.
 
 The measured region is deliberately limited to one real WAV file at a time:
 disk read -> audio preprocessing -> CPU-to-device transfer -> frontend -> model.
-Model construction and checkpoint loading happen before the warm-up phase and are
-not included in the reported inference latency.
+Model construction and optional checkpoint loading happen before the warm-up
+phase and are not included in the reported inference latency.
 """
 
 import csv
@@ -146,13 +146,15 @@ def main() -> None:
         raise ValueError("warmup_samples must be positive and timed_samples must be greater than one.")
 
     train_config_path = _resolve_path(benchmark_config.get("train_config_path", ""), field_name="train_config_path")
-    checkpoint_path = _resolve_path(benchmark_config.get("checkpoint_path", ""), field_name="checkpoint_path")
+    checkpoint_value = str(benchmark_config.get("checkpoint_path", "")).strip()
+    checkpoint_path = _resolve_path(checkpoint_value, field_name="checkpoint_path") if checkpoint_value else None
     test_split_value = str(benchmark_config.get("test_split_csv_path", "")).strip()
-    test_split_csv_path = (
-        _resolve_path(test_split_value, field_name="test_split_csv_path")
-        if test_split_value
-        else checkpoint_path.parent / "splits" / "test.csv"
-    )
+    if test_split_value:
+        test_split_csv_path = _resolve_path(test_split_value, field_name="test_split_csv_path")
+    elif checkpoint_path is not None:
+        test_split_csv_path = checkpoint_path.parent / "splits" / "test.csv"
+    else:
+        raise ValueError("Set test_split_csv_path when checkpoint_path is empty.")
     output_path = _resolve_path(benchmark_config.get("output_path", ""), field_name="output_path")
 
     requested_device = str(benchmark_config.get("device", "cuda")).lower()
@@ -162,7 +164,10 @@ def main() -> None:
 
     frontend = AudioFrontend(config=train_config.audio_features)
     model = AudioModel(frontend=frontend, backbone=build_backbone(train_config)).to(device)
-    load_checkpoint(model, checkpoint_path, device)
+    if checkpoint_path is not None:
+        load_checkpoint(model, checkpoint_path, device)
+    else:
+        logger.info("No checkpoint configured; benchmarking the initialized architecture with random weights.")
 
     paths = load_test_audio_paths(
         split_csv_path=test_split_csv_path,
