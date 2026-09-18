@@ -33,7 +33,7 @@ except ImportError:
 
 
 RANDOM_STATE = 42
-N_JOBS = 8
+N_JOBS = 18
 random.seed(RANDOM_STATE)
 np.random.seed(RANDOM_STATE)
 warnings.filterwarnings("ignore")
@@ -72,12 +72,12 @@ def normalize_data(x_train, x_val, x_test):
 
 def get_models():
     return {
-        "LR": {"n_trials": 3, "use_scaler": True},
-        "KNN": {"n_trials": 10, "use_scaler": True},
-        "SVM": {"n_trials": 3, "use_scaler": True},
-        "RF": {"n_trials": 10, "use_scaler": False},
-        "ET": {"n_trials": 10, "use_scaler": False},
-        "LGBM": {"n_trials": 10, "use_scaler": False},
+        "LR": {"n_trials": 10, "use_scaler": True},
+        "KNN": {"n_trials": 100, "use_scaler": True},
+        "SVM": {"n_trials": 10, "use_scaler": True},
+        "RF": {"n_trials": 100, "use_scaler": False},
+        "ET": {"n_trials": 100, "use_scaler": False},
+        "LGBM": {"n_trials": 100, "use_scaler": False},
     }
 
 
