@@ -6,7 +6,7 @@ Model construction and optional checkpoint loading happen before the warm-up
 phase and are not included in the reported inference latency.
 """
 
-import csv
+import copy
 import json
 import logging
 import random
@@ -23,6 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import TrainConfig
+from dataset import FishDataSplitter
 from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
 from main import build_backbone, validate_backbone_config
@@ -60,38 +61,35 @@ def load_checkpoint(model: torch.nn.Module, checkpoint_path: Path, device: torch
     model.load_state_dict(cleaned_state_dict, strict=True)
 
 
-def load_test_audio_paths(split_csv_path: Path, required_samples: int, seed: int) -> list[str]:
-    if not split_csv_path.is_file():
-        raise FileNotFoundError(f"Test split CSV not found: {split_csv_path}")
+def build_test_audio_paths(train_config: TrainConfig, required_samples: int, seed: int) -> list[str]:
+    """Build the same test split as the audio pipeline without writing split files."""
+    splitter_config = copy.deepcopy(train_config.dataset_splitter)
+    splitter_config.save_results = False
+    splitter_config.include_video = False
+    if splitter_config.evaluation_mode == "cross_validation" and splitter_config.fold_index is None:
+        splitter_config.fold_index = 0
+        logger.info("No CV fold was selected in train_config; using deterministic fold 00 for benchmarking.")
+
+    _, test_entries, _ = FishDataSplitter(config=splitter_config).split_data()
 
     audio_paths: list[str] = []
     seen_paths: set[str] = set()
-    with split_csv_path.open("r", encoding="utf-8", newline="") as file:
-        reader = csv.DictReader(file)
-        if "audio_path" not in (reader.fieldnames or []):
-            raise ValueError(f"CSV must contain an 'audio_path' column: {split_csv_path}")
-        for row in reader:
-            audio_path_value = row["audio_path"].strip()
-            if not audio_path_value:
-                continue
-            audio_path = Path(audio_path_value)
-            if not audio_path.is_absolute():
-                audio_path = split_csv_path.parent / audio_path
-            normalized_path = str(audio_path.resolve())
-            if normalized_path not in seen_paths:
-                seen_paths.add(normalized_path)
-                audio_paths.append(normalized_path)
+    for entry in test_entries:
+        normalized_path = str(Path(entry[0]).resolve())
+        if normalized_path not in seen_paths:
+            seen_paths.add(normalized_path)
+            audio_paths.append(normalized_path)
 
     if len(audio_paths) < required_samples:
         raise ValueError(
-            f"The test split contains only {len(audio_paths)} unique WAV files, but "
+            f"The automatically generated test split contains only {len(audio_paths)} unique WAV files, but "
             f"warmup_samples + timed_samples requires {required_samples}."
         )
 
     missing_paths = [path for path in audio_paths if not Path(path).is_file()]
     if missing_paths:
         raise FileNotFoundError(
-            f"Test split contains {len(missing_paths)} missing WAV files. First missing file: {missing_paths[0]}"
+            f"Generated test split contains {len(missing_paths)} missing WAV files. First missing file: {missing_paths[0]}"
         )
 
     random.Random(seed).shuffle(audio_paths)
@@ -148,13 +146,6 @@ def main() -> None:
     train_config_path = _resolve_path(benchmark_config.get("train_config_path", ""), field_name="train_config_path")
     checkpoint_value = str(benchmark_config.get("checkpoint_path", "")).strip()
     checkpoint_path = _resolve_path(checkpoint_value, field_name="checkpoint_path") if checkpoint_value else None
-    test_split_value = str(benchmark_config.get("test_split_csv_path", "")).strip()
-    if test_split_value:
-        test_split_csv_path = _resolve_path(test_split_value, field_name="test_split_csv_path")
-    elif checkpoint_path is not None:
-        test_split_csv_path = checkpoint_path.parent / "splits" / "test.csv"
-    else:
-        raise ValueError("Set test_split_csv_path when checkpoint_path is empty.")
     output_path = _resolve_path(benchmark_config.get("output_path", ""), field_name="output_path")
 
     requested_device = str(benchmark_config.get("device", "cuda")).lower()
@@ -169,8 +160,8 @@ def main() -> None:
     else:
         logger.info("No checkpoint configured; benchmarking the initialized architecture with random weights.")
 
-    paths = load_test_audio_paths(
-        split_csv_path=test_split_csv_path,
+    paths = build_test_audio_paths(
+        train_config=train_config,
         required_samples=warmup_samples + timed_samples,
         seed=int(benchmark_config.get("seed", 42)),
     )

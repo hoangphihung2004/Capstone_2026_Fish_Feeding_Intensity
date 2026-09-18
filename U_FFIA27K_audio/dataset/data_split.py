@@ -735,8 +735,6 @@ class FishDataSplitter(BaseDataSplitter):
         else:
             splits_dir = base_splits_dir
 
-        self._clear_existing_splits(base_splits_dir)
-
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
         val_csv = splits_dir / 'val.csv'
@@ -863,14 +861,24 @@ class FishDataSplitter(BaseDataSplitter):
                 
                 # If any paths were corrected or new video paths added, overwrite split files on disk to synchronize
                 if need_rewrite_files:
-                    logger.info("Updating split files on disk to synchronize corrected paths...")
-                    self._save_splits(train_dict, test_dict, val_dict, splits_dir)
-                    logger.info("Finished synchronizing corrected split files on disk.")
+                    if self.save_results:
+                        logger.info("Updating split files on disk to synchronize corrected paths...")
+                        self._save_splits(train_dict, test_dict, val_dict, splits_dir)
+                        logger.info("Finished synchronizing corrected split files on disk.")
+                    else:
+                        logger.info("Split paths were corrected in memory; save_results=False so split files were not changed.")
                 
                 logger.info("==================================================")
                 return train_dict, test_dict, val_dict
             except Exception as e:
                 logger.warning(f"Failed to load or auto-correct existing splits: {e}. Falling back to standard splitting.")
+
+        # A benchmark can request an in-memory split (save_results=False). In that
+        # case, do not remove any existing experiment split files. For persisted
+        # training splits, clear only after the existing-split fallback above has
+        # had a chance to load and validate them.
+        if self.save_results:
+            self._clear_existing_splits(base_splits_dir)
 
         logger.info("==================================================")
         logger.info("Starting audio dataset splitting...")

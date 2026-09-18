@@ -1,7 +1,6 @@
 {
   "train_config_path": "config/train_config.json",
   "checkpoint_path": "",
-  "test_split_csv_path": "",
   "output_path": "outputs/end_to_end_inference.json",
   "device": "cuda",
   "seed": 42,
