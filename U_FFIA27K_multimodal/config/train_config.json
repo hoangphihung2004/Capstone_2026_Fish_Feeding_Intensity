@@ -7,7 +7,7 @@
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 50,
+  "patience": 60,
   "delta": 0.001,
   "audio_loss_weight": 0.25,
   "video_loss_weight": 0.25,
@@ -17,10 +17,10 @@
   "lr_scheduler": {
     "enabled": true,
     "factor": 0.5,
-    "patience": 10,
-    "threshold": 0.001,
-    "cooldown": 2,
-    "min_lr": 0.000001
+    "patience": 12,
+    "threshold": 0.0001,
+    "cooldown": 3,
+    "min_lr": 0.00001
   },
   "model": {
     "audio_backbone": "LightweightAudioEncoder",
@@ -34,9 +34,9 @@
     "test_sample_per_class": 700,
     "save_results": false,
     "split_strategy": "random_sample",
-    "evaluation_mode": "holdout",
+    "evaluation_mode": "cross_validation",
     "num_folds": 5,
-    "fold_index": null,
+    "fold_index": 0,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
