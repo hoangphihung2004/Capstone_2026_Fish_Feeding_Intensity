@@ -33,9 +33,9 @@
     "test_sample_per_class": 700,
     "save_results": false,
     "split_strategy": "random_sample",
-    "evaluation_mode": "holdout",
+    "evaluation_mode": "cross_validation",
     "num_folds": 5,
-    "fold_index": null,
+    "fold_index": 0,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
