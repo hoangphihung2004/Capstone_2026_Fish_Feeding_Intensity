@@ -5,19 +5,19 @@
   "prefetch_factor": null,
   "learning_rate": 0.0001,
   "ckpt_dir": "checkpoint/",
-  "monitor": "accuracy",
+  "monitor": "loss",
   "early_stopping": true,
-  "patience": 50,
-  "delta": 0.001,
+  "patience": 75,
+  "delta": 0.0001,
   "cache_audio": true,
   "cache_video_mode": "ram",
   "lr_scheduler": {
     "enabled": true,
     "factor": 0.5,
-    "patience": 10,
-    "threshold": 0.001,
-    "cooldown": 2,
-    "min_lr": 0.000001
+    "patience": 12,
+    "threshold": 0.0001,
+    "cooldown": 3,
+    "min_lr": 0.000002
   },
   "model": {
     "audio_backbone": "LightweightAudioEncoder",
