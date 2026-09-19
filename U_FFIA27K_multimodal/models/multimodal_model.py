@@ -16,7 +16,7 @@ HEAD_KEYS = {"audio": "audio_output", "video": "video_output", "multimodal": "cl
 class MultimodalArchitecture(nn.Module):
     """Log-mel + six-channel video with hierarchical messenger fusion."""
 
-    def __init__(self, pretrained_video=True, classes_num=4, fusion_head_dropout=0.2):
+    def __init__(self, pretrained_video=True, classes_num=4):
         super().__init__()
         weights = EfficientNet_B0_Weights.DEFAULT if pretrained_video else None
         self.video = efficientnet_b0(weights=weights).features[:8]
@@ -26,7 +26,6 @@ class MultimodalArchitecture(nn.Module):
         self.fusion_aggregate = nn.Sequential(nn.Linear(4 * 64, 128), nn.LayerNorm(128))
         self.audio_head = nn.Linear(320, classes_num)
         self.video_head = nn.Linear(320, classes_num)
-        self.fusion_head_dropout = nn.Dropout(p=fusion_head_dropout)
         self.multimodal_head = nn.Linear(768, classes_num)
 
     def forward(self, audio_features, video_form):
@@ -53,18 +52,15 @@ class MultimodalArchitecture(nn.Module):
         return {
             "audio_output": self.audio_head(audio),
             "video_output": self.video_head(video),
-            "clipwise_output": self.multimodal_head(self.fusion_head_dropout(torch.cat((audio, video, fusion_state), dim=1))),
+            "clipwise_output": self.multimodal_head(torch.cat((audio, video, fusion_state), dim=1)),
         }
 
 
 class MultimodalModel(nn.Module):
-    def __init__(self, audio_config=None, pretrained_video=True, fusion_head_dropout=0.2):
+    def __init__(self, audio_config=None, pretrained_video=True):
         super().__init__()
         self.frontend = AudioFrontend(audio_config)
-        self.architecture = MultimodalArchitecture(
-            pretrained_video=pretrained_video,
-            fusion_head_dropout=fusion_head_dropout,
-        )
+        self.architecture = MultimodalArchitecture(pretrained_video=pretrained_video)
 
     def forward(self, waveform, video_form):
         return self.architecture(self.frontend(waveform), video_form)
