@@ -8,7 +8,7 @@ from torch.nn import functional as F
 class HierarchicalMessengerFusion(nn.Module):
     """Exchange cross-modal information through four compact messenger tokens."""
 
-    def __init__(self, audio_channels, video_channels, latent_dim=32, tokens=4, output_dim=64):
+    def __init__(self, audio_channels, video_channels, latent_dim=32, tokens=4):
         super().__init__()
         self.tokens = tokens
         self.audio_projection = nn.Sequential(nn.Linear(audio_channels, latent_dim), nn.LayerNorm(latent_dim))
@@ -28,7 +28,7 @@ class HierarchicalMessengerFusion(nn.Module):
         self.video_update = nn.Linear(latent_dim, video_channels)
         self.audio_scale = nn.Parameter(torch.tensor(0.0))
         self.video_scale = nn.Parameter(torch.tensor(0.0))
-        self.summary = nn.Sequential(nn.Linear(latent_dim, output_dim), nn.LayerNorm(output_dim))
+        self.summary = nn.LayerNorm(latent_dim)
 
     @staticmethod
     def _tokens(feature, projection, messenger):
