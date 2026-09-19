@@ -158,12 +158,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
 
 
 def build_model(config: TrainConfig) -> MultimodalModel:
-    model = MultimodalModel(
-        config.audio_features,
-        pretrained_video=config.model.pretrained_video,
-        fusion_summary_dim=config.model.fusion_summary_dim,
-        fusion_aggregate_dim=config.model.fusion_aggregate_dim,
-    )
+    model = MultimodalModel(config.audio_features, pretrained_video=config.model.pretrained_video)
     num_params = model.architecture_num_params()
     if num_params >= 5_000_000:
         raise ValueError(f"Architecture exceeds parameter budget: {num_params:,}")

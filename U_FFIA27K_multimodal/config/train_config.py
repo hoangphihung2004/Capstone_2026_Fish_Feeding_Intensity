@@ -33,14 +33,6 @@ class ModelConfig(BaseModel):
     video_backbone: Literal["EfficientNetB0_S7"] = "EfficientNetB0_S7"
     pretrained_video: bool = Field(default=True, description="Use ImageNet weights for video encoder.")
     pretrained_audio: Literal[False] = False
-    fusion_summary_dim: Literal[32, 64, 128] = Field(
-        default=64,
-        description="Per-scale HMF summary width. The messenger latent width remains 32.",
-    )
-    fusion_aggregate_dim: Literal[64, 128, 256] = Field(
-        default=128,
-        description="Width of the aggregated fusion feature concatenated with final audio and video features.",
-    )
 
 
 class SplitterConfig(BaseModel):
