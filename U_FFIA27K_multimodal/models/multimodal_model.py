@@ -16,15 +16,19 @@ HEAD_KEYS = {"multimodal": "clipwise_output"}
 class MultimodalArchitecture(nn.Module):
     """Log-mel + six-channel video with hierarchical messenger fusion."""
 
-    def __init__(self, pretrained_video=True, classes_num=4):
+    def __init__(self, pretrained_video=True, classes_num=4, fusion_summary_dim=64, fusion_aggregate_dim=128):
         super().__init__()
         weights = EfficientNet_B0_Weights.DEFAULT if pretrained_video else None
         self.video = efficientnet_b0(weights=weights).features[:8]
         adapt_first_conv_to_multi_channels(self.video, target_channels=6)
         self.audio = LightweightAudioEncoder()
-        self.fusion = nn.ModuleList(HierarchicalMessengerFusion(c, c) for c in (24, 40, 112, 320))
-        self.fusion_aggregate = nn.Sequential(nn.Linear(4 * 64, 128), nn.LayerNorm(128))
-        self.multimodal_head = nn.Linear(768, classes_num)
+        self.fusion = nn.ModuleList(
+            HierarchicalMessengerFusion(c, c, output_dim=fusion_summary_dim) for c in (24, 40, 112, 320)
+        )
+        self.fusion_aggregate = nn.Sequential(
+            nn.Linear(4 * fusion_summary_dim, fusion_aggregate_dim), nn.LayerNorm(fusion_aggregate_dim)
+        )
+        self.multimodal_head = nn.Linear(320 + 320 + fusion_aggregate_dim, classes_num)
 
     def forward(self, audio_features, video_form):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
@@ -53,10 +57,14 @@ class MultimodalArchitecture(nn.Module):
 
 
 class MultimodalModel(nn.Module):
-    def __init__(self, audio_config=None, pretrained_video=True):
+    def __init__(self, audio_config=None, pretrained_video=True, fusion_summary_dim=64, fusion_aggregate_dim=128):
         super().__init__()
         self.frontend = AudioFrontend(audio_config)
-        self.architecture = MultimodalArchitecture(pretrained_video=pretrained_video)
+        self.architecture = MultimodalArchitecture(
+            pretrained_video=pretrained_video,
+            fusion_summary_dim=fusion_summary_dim,
+            fusion_aggregate_dim=fusion_aggregate_dim,
+        )
 
     def forward(self, waveform, video_form):
         return self.architecture(self.frontend(waveform), video_form)

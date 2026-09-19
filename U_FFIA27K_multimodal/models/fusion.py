@@ -28,7 +28,13 @@ class HierarchicalMessengerFusion(nn.Module):
         self.video_update = nn.Linear(latent_dim, video_channels)
         self.audio_scale = nn.Parameter(torch.tensor(0.0))
         self.video_scale = nn.Parameter(torch.tensor(0.0))
-        self.summary = nn.Sequential(nn.Linear(latent_dim, output_dim), nn.LayerNorm(output_dim))
+        # A 32-D summary is already in the messenger latent space, so do not
+        # introduce an unnecessary learned projection for that ablation arm.
+        self.summary = (
+            nn.LayerNorm(latent_dim)
+            if output_dim == latent_dim
+            else nn.Sequential(nn.Linear(latent_dim, output_dim), nn.LayerNorm(output_dim))
+        )
 
     @staticmethod
     def _tokens(feature, projection, messenger):

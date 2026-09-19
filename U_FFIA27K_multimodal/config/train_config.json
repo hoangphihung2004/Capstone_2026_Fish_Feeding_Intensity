@@ -23,7 +23,9 @@
     "audio_backbone": "LightweightAudioEncoder",
     "video_backbone": "EfficientNetB0_S7",
     "pretrained_audio": false,
-    "pretrained_video": true
+    "pretrained_video": true,
+    "fusion_summary_dim": 64,
+    "fusion_aggregate_dim": 128
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
