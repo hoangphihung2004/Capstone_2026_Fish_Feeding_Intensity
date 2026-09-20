@@ -23,6 +23,7 @@ class MultimodalArchitecture(nn.Module):
         adapt_first_conv_to_multi_channels(self.video, target_channels=6)
         self.audio = LightweightAudioEncoder()
         self.fusion = nn.ModuleList(HierarchicalMessengerFusion(c, c) for c in (24, 40, 112, 320))
+        self.fusion_norm = nn.LayerNorm(4 * 32)
         self.multimodal_head = nn.Linear(320 + 320 + 4 * 32, classes_num)
 
     def forward(self, audio_features, video_form):
@@ -45,7 +46,7 @@ class MultimodalArchitecture(nn.Module):
                 fusion_states.append(fusion_state)
         audio = self.audio.pool(audio)
         video = video.mean(dim=(2, 3))
-        fusion_state = torch.cat(fusion_states, dim=1)
+        fusion_state = self.fusion_norm(torch.cat(fusion_states, dim=1))
         return {
             "clipwise_output": self.multimodal_head(torch.cat((audio, video, fusion_state), dim=1)),
         }

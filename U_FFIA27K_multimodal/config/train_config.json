@@ -7,17 +7,17 @@
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
-  "patience": 60,
+  "patience": 50,
   "delta": 0.001,
   "cache_audio": true,
   "cache_video_mode": "ram",
   "lr_scheduler": {
     "enabled": true,
     "factor": 0.5,
-    "patience": 12,
-    "threshold": 0.0001,
-    "cooldown": 3,
-    "min_lr": 0.00001
+    "patience": 10,
+    "threshold": 0.001,
+    "cooldown": 2,
+    "min_lr": 0.000001
   },
   "model": {
     "audio_backbone": "LightweightAudioEncoder",
