@@ -8,7 +8,7 @@
   "monitor": "accuracy",
   "early_stopping": true,
   "patience": 50,
-  "delta": 0.001,
+  "delta": 0.0,
   "cache_audio": true,
   "cache_video_mode": "ram",
   "lr_scheduler": {
