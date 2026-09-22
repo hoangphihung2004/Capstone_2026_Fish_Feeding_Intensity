@@ -23,7 +23,8 @@
     "audio_backbone": "LightweightAudioEncoder",
     "video_backbone": "EfficientNetB0_S7",
     "pretrained_audio": false,
-    "pretrained_video": true
+    "pretrained_video": true,
+    "dropout_rate": 0.5
   },
   "ablation": {
     "mode": "AF0"

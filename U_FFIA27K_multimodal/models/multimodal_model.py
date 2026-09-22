@@ -23,7 +23,7 @@ ABLATION_FUSION_INDICES = {
 class MultimodalArchitecture(nn.Module):
     """Log-mel + six-channel video with hierarchical messenger fusion."""
 
-    def __init__(self, pretrained_video=True, classes_num=4, ablation_mode="AF4"):
+    def __init__(self, pretrained_video=True, classes_num=4, ablation_mode="AF4", dropout_rate=0.2):
         super().__init__()
         if ablation_mode not in ABLATION_FUSION_INDICES:
             raise ValueError(f"Unknown ablation_mode='{ablation_mode}'. Expected one of {tuple(ABLATION_FUSION_INDICES)}.")
@@ -40,6 +40,7 @@ class MultimodalArchitecture(nn.Module):
                 for index in self.enabled_fusion_indices
             }
         )
+        self.classifier_dropout = nn.Dropout(p=dropout_rate)
         self.multimodal_head = nn.Linear(320 + 320 + 32 * len(self.enabled_fusion_indices), classes_num)
 
     def forward(self, audio_features, video_form):
@@ -65,17 +66,18 @@ class MultimodalArchitecture(nn.Module):
         video = video.mean(dim=(2, 3))
         features = (audio, video, *fusion_states)
         return {
-            "clipwise_output": self.multimodal_head(torch.cat(features, dim=1)),
+            "clipwise_output": self.multimodal_head(self.classifier_dropout(torch.cat(features, dim=1))),
         }
 
 
 class MultimodalModel(nn.Module):
-    def __init__(self, audio_config=None, pretrained_video=True, ablation_mode="AF4"):
+    def __init__(self, audio_config=None, pretrained_video=True, ablation_mode="AF4", dropout_rate=0.2):
         super().__init__()
         self.frontend = AudioFrontend(audio_config)
         self.architecture = MultimodalArchitecture(
             pretrained_video=pretrained_video,
             ablation_mode=ablation_mode,
+            dropout_rate=dropout_rate,
         )
 
     def forward(self, waveform, video_form):
