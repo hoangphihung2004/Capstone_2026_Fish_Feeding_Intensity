@@ -4,7 +4,6 @@ import copy
 import csv
 import json
 import os
-import random
 import sys
 import zipfile
 from datetime import datetime
@@ -280,12 +279,8 @@ def selected_cv_fold_indices(config: TrainConfig) -> list[int]:
 
 
 def run_multimodal_training(config: TrainConfig, train_config_path: str, device: torch.device, fold_index: int = None) -> str:
-    seed = config.dataset_splitter.seed
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    # Keep dataset splitting reproducible through dataset_splitter.seed, while
+    # allowing each training run to use a fresh random initialization/order.
     model = build_model(config).to(device)
     log_model_complexity(model, config, device)
     loader_manager = FishMultimodalDataLoader(
