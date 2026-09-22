@@ -11,23 +11,36 @@ from .surgery import adapt_first_conv_to_multi_channels
 
 
 HEAD_KEYS = {"multimodal": "clipwise_output"}
+ABLATION_FUSION_INDICES = {
+    "AF0": (),
+    "AF1": (3,),
+    "AF2": (2, 3),
+    "AF3": (1, 2, 3),
+    "AF4": (0, 1, 2, 3),
+}
 
 
 class MultimodalArchitecture(nn.Module):
     """Log-mel + six-channel video with hierarchical messenger fusion."""
 
-    def __init__(self, pretrained_video=True, classes_num=4):
+    def __init__(self, pretrained_video=True, classes_num=4, ablation_mode="AF4"):
         super().__init__()
+        if ablation_mode not in ABLATION_FUSION_INDICES:
+            raise ValueError(f"Unknown ablation_mode='{ablation_mode}'. Expected one of {tuple(ABLATION_FUSION_INDICES)}.")
+        self.ablation_mode = ablation_mode
+        self.enabled_fusion_indices = ABLATION_FUSION_INDICES[ablation_mode]
         weights = EfficientNet_B0_Weights.DEFAULT if pretrained_video else None
         self.video = efficientnet_b0(weights=weights).features[:8]
         adapt_first_conv_to_multi_channels(self.video, target_channels=6)
         self.audio = LightweightAudioEncoder()
-        self.fusion = nn.ModuleList(HierarchicalMessengerFusion(c, c) for c in (24, 40, 112, 320))
-        self.fusion_aggregate = nn.Sequential(
-            nn.Linear(4 * 32, 128),
-            nn.LayerNorm(128),
+        fusion_channels = (24, 40, 112, 320)
+        self.fusion = nn.ModuleDict(
+            {
+                str(index): HierarchicalMessengerFusion(fusion_channels[index], fusion_channels[index])
+                for index in self.enabled_fusion_indices
+            }
         )
-        self.multimodal_head = nn.Linear(320 + 320 + 4 * 32, classes_num)
+        self.multimodal_head = nn.Linear(320 + 320 + 32 * len(self.enabled_fusion_indices), classes_num)
 
     def forward(self, audio_features, video_form):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
@@ -44,22 +57,26 @@ class MultimodalArchitecture(nn.Module):
             audio = block(audio)
             for stage in video_stages:
                 video = self.video[stage](video)
-            if index >= 1:
-                audio, video, fusion_state = self.fusion[index - 1](audio, video)
+            fusion_index = index - 1
+            if fusion_index in self.enabled_fusion_indices:
+                audio, video, fusion_state = self.fusion[str(fusion_index)](audio, video)
                 fusion_states.append(fusion_state)
         audio = self.audio.pool(audio)
         video = video.mean(dim=(2, 3))
-        fusion_state = self.fusion_aggregate(torch.cat(fusion_states, dim=1))
+        features = (audio, video, *fusion_states)
         return {
-            "clipwise_output": self.multimodal_head(torch.cat((audio, video, fusion_state), dim=1)),
+            "clipwise_output": self.multimodal_head(torch.cat(features, dim=1)),
         }
 
 
 class MultimodalModel(nn.Module):
-    def __init__(self, audio_config=None, pretrained_video=True):
+    def __init__(self, audio_config=None, pretrained_video=True, ablation_mode="AF4"):
         super().__init__()
         self.frontend = AudioFrontend(audio_config)
-        self.architecture = MultimodalArchitecture(pretrained_video=pretrained_video)
+        self.architecture = MultimodalArchitecture(
+            pretrained_video=pretrained_video,
+            ablation_mode=ablation_mode,
+        )
 
     def forward(self, waveform, video_form):
         return self.architecture(self.frontend(waveform), video_form)

@@ -35,6 +35,12 @@ class ModelConfig(BaseModel):
     pretrained_audio: Literal[False] = False
 
 
+class AblationConfig(BaseModel):
+    """Fusion ablations, enabled cumulatively from the deepest scale to the shallowest."""
+
+    mode: Literal["AF0", "AF1", "AF2", "AF3", "AF4"] = "AF4"
+
+
 class SplitterConfig(BaseModel):
     dataset_path: str = Field(default="/marimo/Fish_Feeding_Intensity_Dataset")
     seed: int = Field(default=42, ge=0)
@@ -74,6 +80,7 @@ class MultimodalTrainConfig(BaseModel):
 
     lr_scheduler: ReduceLROnPlateauConfig = Field(default_factory=ReduceLROnPlateauConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
+    ablation: AblationConfig = Field(default_factory=AblationConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig)

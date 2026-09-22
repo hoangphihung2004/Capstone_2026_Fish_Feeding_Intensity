@@ -1,4 +1,5 @@
 from .train_config import (
+    AblationConfig,
     AudioFeaturesConfig,
     DEFAULT_IMAGE_CACHE_ROOT,
     ModelConfig,
@@ -17,6 +18,7 @@ except ImportError:
 
 __all__ = [
     "ArtifactUploadConfig",
+    "AblationConfig",
     "AudioFeaturesConfig",
     "DEFAULT_IMAGE_CACHE_ROOT",
     "ModelConfig",
