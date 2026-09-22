@@ -24,7 +24,7 @@
     "video_backbone": "EfficientNetB0_S7",
     "pretrained_audio": false,
     "pretrained_video": true,
-    "dropout_rate": 0.5
+    "dropout_rate": 0.8
   },
   "ablation": {
     "mode": "AF0"
