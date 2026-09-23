@@ -33,7 +33,7 @@
     "split_strategy": "random_sample",
     "evaluation_mode": "cross_validation",
     "num_folds": 5,
-    "fold_index": 2,
+    "fold_index": 1,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
