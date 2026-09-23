@@ -27,7 +27,7 @@
     "dropout_rate": 0.95
   },
   "ablation": {
-    "mode": "AF0"
+    "mode": "AF1"
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
@@ -37,7 +37,7 @@
     "split_strategy": "random_sample",
     "evaluation_mode": "cross_validation",
     "num_folds": 5,
-    "fold_index": 4,
+    "fold_index": 0,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
