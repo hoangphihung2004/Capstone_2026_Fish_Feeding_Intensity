@@ -39,7 +39,7 @@ class ModelConfig(BaseModel):
 class AblationConfig(BaseModel):
     """Fusion ablations, enabled cumulatively from the deepest scale to the shallowest."""
 
-    mode: Literal["AF0", "AF1", "AF2", "AF3", "AF4"] = "AF4"
+    mode: Literal["AF0", "AF1", "AF2", "AF3", "AF4", "AF5"] = "AF4"
 
 
 class SplitterConfig(BaseModel):

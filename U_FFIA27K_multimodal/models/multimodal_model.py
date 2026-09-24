@@ -11,13 +11,16 @@ from .surgery import adapt_first_conv_to_multi_channels
 
 
 HEAD_KEYS = {"multimodal": "clipwise_output"}
-ABLATION_FUSION_INDICES = {
+ABLATION_FUSION_NAMES = {
     "AF0": (),
-    "AF1": (3,),
-    "AF2": (2, 3),
-    "AF3": (1, 2, 3),
-    "AF4": (0, 1, 2, 3),
+    "AF1": ("F4",),
+    "AF2": ("F3", "F4"),
+    "AF3": ("F2", "F3", "F4"),
+    "AF4": ("F1", "F2", "F3", "F4"),
+    "AF5": ("F5", "F1", "F2", "F3", "F4"),
 }
+FUSION_CHANNELS = {"F5": 16, "F1": 24, "F2": 40, "F3": 112, "F4": 320}
+FUSION_NAME_BY_BLOCK_INDEX = {0: "F5", 1: "F1", 2: "F2", 3: "F3", 4: "F4"}
 
 
 class MultimodalArchitecture(nn.Module):
@@ -25,23 +28,22 @@ class MultimodalArchitecture(nn.Module):
 
     def __init__(self, pretrained_video=True, classes_num=4, ablation_mode="AF4", dropout_rate=0.2):
         super().__init__()
-        if ablation_mode not in ABLATION_FUSION_INDICES:
-            raise ValueError(f"Unknown ablation_mode='{ablation_mode}'. Expected one of {tuple(ABLATION_FUSION_INDICES)}.")
+        if ablation_mode not in ABLATION_FUSION_NAMES:
+            raise ValueError(f"Unknown ablation_mode='{ablation_mode}'. Expected one of {tuple(ABLATION_FUSION_NAMES)}.")
         self.ablation_mode = ablation_mode
-        self.enabled_fusion_indices = ABLATION_FUSION_INDICES[ablation_mode]
+        self.enabled_fusion_names = ABLATION_FUSION_NAMES[ablation_mode]
         weights = EfficientNet_B0_Weights.DEFAULT if pretrained_video else None
         self.video = efficientnet_b0(weights=weights).features[:8]
         adapt_first_conv_to_multi_channels(self.video, target_channels=6)
         self.audio = LightweightAudioEncoder()
-        fusion_channels = (24, 40, 112, 320)
         self.fusion = nn.ModuleDict(
             {
-                str(index): HierarchicalMessengerFusion(fusion_channels[index], fusion_channels[index])
-                for index in self.enabled_fusion_indices
+                name: HierarchicalMessengerFusion(FUSION_CHANNELS[name], FUSION_CHANNELS[name])
+                for name in self.enabled_fusion_names
             }
         )
         self.classifier_dropout = nn.Dropout(p=dropout_rate)
-        self.multimodal_head = nn.Linear(320 + 320 + 32 * len(self.enabled_fusion_indices), classes_num)
+        self.multimodal_head = nn.Linear(320 + 320 + 32 * len(self.enabled_fusion_names), classes_num)
 
     def forward(self, audio_features, video_form):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
@@ -58,9 +60,9 @@ class MultimodalArchitecture(nn.Module):
             audio = block(audio)
             for stage in video_stages:
                 video = self.video[stage](video)
-            fusion_index = index - 1
-            if fusion_index in self.enabled_fusion_indices:
-                audio, video, fusion_state = self.fusion[str(fusion_index)](audio, video)
+            fusion_name = FUSION_NAME_BY_BLOCK_INDEX[index]
+            if fusion_name in self.enabled_fusion_names:
+                audio, video, fusion_state = self.fusion[fusion_name](audio, video)
                 fusion_states.append(fusion_state)
         audio = self.audio.pool(audio)
         video = video.mean(dim=(2, 3))
