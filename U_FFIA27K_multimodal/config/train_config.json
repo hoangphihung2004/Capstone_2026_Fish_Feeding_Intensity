@@ -27,7 +27,7 @@
     "dropout_rate": 0.7
   },
   "ablation": {
-    "mode": "AF3"
+    "mode": "AF5"
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
