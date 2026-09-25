@@ -1,8 +1,11 @@
 """
 Dataset preparation script for Jetson Orin Nano Edge Deployment.
 
-This script selects a balanced subset of test samples (50 samples per class x 4 classes = 200 samples)
-from the official test split (Fold 00) for cross-validation evaluation and web demonstration.
+Module: deployment.data_preparation
+Responsibilities:
+- Extract balanced test subset (50 samples x 4 classes = 200 samples) from Fold 00 test split
+- Organize sample media into audio/ and video/ directories with unique names
+- Generate manifest CSV and zipped package for transfer to Jetson
 """
 
 import argparse
@@ -15,12 +18,12 @@ from pathlib import Path
 import pandas as pd
 
 # Root directory of the repository (U_FFIA27K_multimodal_deployment)
-project_root = str(Path(__file__).resolve().parent.parent)
+project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("PrepareDataset")
+logger = logging.getLogger("DataPreparation")
 
 
 def parse_args():
@@ -102,7 +105,6 @@ def prepare_samples():
                 logger.error(f"Missing audio file: {src_audio}")
                 continue
 
-            # Prefix with class and index to ensure unique filenames without collision
             v_name = f"{row['class_name']}_{idx:03d}_{os.path.basename(src_video)}"
             a_name = f"{row['class_name']}_{idx:03d}_{os.path.basename(src_audio)}"
 

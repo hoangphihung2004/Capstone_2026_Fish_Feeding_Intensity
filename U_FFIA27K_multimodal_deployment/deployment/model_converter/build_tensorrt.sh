@@ -1,5 +1,6 @@
 #!/bin/bash
 # Shell script to compile ONNX model into TensorRT FP16 engine on Jetson Orin Nano
+# Module: deployment.model_converter
 
 set -e
 

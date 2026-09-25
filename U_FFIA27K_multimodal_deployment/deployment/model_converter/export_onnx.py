@@ -1,9 +1,12 @@
 """
 Export Multimodal Fish Feeding Intensity Model to ONNX format.
 
-This script exports the core multimodal neural network (Audio Backbone + Video Backbone
-+ Hierarchical Messenger Fusion + Multimodal Classifier) to ONNX for TensorRT acceleration
-on NVIDIA Jetson Orin Nano.
+Module: deployment.model_converter
+Responsibilities:
+- Load PyTorch checkpoint (.pt)
+- Export Multimodal Core Architecture to ONNX (opset 18)
+- Optimize graph with onnxslim
+- Numerically validate predictions against PyTorch
 """
 
 import argparse
@@ -19,7 +22,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 # Root directory of the repository (U_FFIA27K_multimodal_deployment)
-project_root = str(Path(__file__).resolve().parent.parent)
+project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -28,7 +31,7 @@ import torch
 from models.multimodal_model import MultimodalModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("ExportONNX")
+logger = logging.getLogger("ModelConverter")
 
 
 def parse_args():
@@ -185,7 +188,7 @@ def main():
     model = load_model(args.checkpoint)
     raw_path, active_path = export_to_onnx(model, args.output_dir, args.batch_size, args.opset)
     verify_numerical_consistency(model, active_path, args.batch_size)
-    logger.info("Phase 1 Step 1 complete: ONNX model ready for Jetson Orin Nano deployment.")
+    logger.info("Model conversion complete: ONNX model ready for TensorRT compilation.")
 
 
 if __name__ == "__main__":
