@@ -18,13 +18,13 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-import numpy as np
-import torch
-
-project_root = str(Path(__file__).resolve().parent)
+# Root directory of the repository (U_FFIA27K_multimodal_deployment)
+project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+import numpy as np
+import torch
 from models.multimodal_model import MultimodalModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
