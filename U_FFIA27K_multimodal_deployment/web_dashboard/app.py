@@ -190,7 +190,6 @@ class ModelPipelineService:
         self.ckpt_path = os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "multimodal_best.pt")
         self.manifest_path = os.path.join(project_root, "samples", "manifest.csv")
         self.samples_dir = os.path.join(project_root, "samples")
-        self.audio_device = self._resolve_audio_device()
         self.engine_lock = threading.Lock()
         self.checkpoint_sha256 = self._file_sha256(self.ckpt_path)
         self.input_cache = InputTensorCache(
@@ -213,15 +212,6 @@ class ModelPipelineService:
                 digest.update(block)
         return digest.hexdigest()
 
-    @staticmethod
-    def _resolve_audio_device() -> torch.device:
-        requested = os.environ.get("AQUAFFIA_AUDIO_DEVICE", "auto").strip().lower()
-        if requested not in {"auto", "cpu", "cuda"}:
-            raise ValueError("AQUAFFIA_AUDIO_DEVICE must be one of: auto, cpu, cuda.")
-        if requested == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("AQUAFFIA_AUDIO_DEVICE=cuda was requested but CUDA PyTorch is unavailable.")
-        return torch.device("cuda" if requested == "cuda" or (requested == "auto" and torch.cuda.is_available()) else "cpu")
-
     def _init_service(self):
         # 1. Load AudioFrontend
         self.frontend = AudioFrontend()
@@ -236,7 +226,7 @@ class ModelPipelineService:
                 logger.info("AudioFrontend loaded successfully from checkpoint.")
             except Exception as e:
                 logger.warning(f"Failed to load checkpoint weights into AudioFrontend: {e}")
-        self.frontend.to(self.audio_device).eval()
+        self.frontend.eval()
 
         # 2. Load Core Model
         if TRT_AVAILABLE and os.path.exists(self.engine_path):
@@ -277,7 +267,7 @@ class ModelPipelineService:
             y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
         with torch.no_grad():
-            feat = self.frontend(y.unsqueeze(0).to(self.audio_device))
+            feat = self.frontend(y.unsqueeze(0))
         audio_feat = feat.detach().cpu().numpy()
         elapsed = (time.perf_counter() - t0) * 1000.0
         return audio_feat, elapsed
@@ -480,7 +470,7 @@ class ContinuousStreamManager:
             y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
         with torch.no_grad():
-            feat = self.service.frontend(y.unsqueeze(0).to(self.service.audio_device))
+            feat = self.service.frontend(y.unsqueeze(0))
         audio_feat = feat.detach().cpu().numpy()
         t_audio = (time.perf_counter() - t_a0) * 1000.0
 
@@ -837,7 +827,7 @@ async def get_benchmark_summary():
     # Fallback to certified baseline if benchmark script has not run yet
     return {
         "runtime": service.runtime_name,
-        "audio_frontend_device": str(service.audio_device),
+        "audio_frontend_device": "cpu",
         "input_cache_enabled": service.input_cache.enabled,
         "evaluation_metrics": {
             "accuracy": 0.9710,

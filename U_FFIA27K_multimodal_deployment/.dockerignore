@@ -19,6 +19,7 @@ samples/continuous_simulation
 samples/*.mp4
 samples/*.wav
 cache/
+benchmarking/results/
 
 # Docker & logs
 docker/*.log

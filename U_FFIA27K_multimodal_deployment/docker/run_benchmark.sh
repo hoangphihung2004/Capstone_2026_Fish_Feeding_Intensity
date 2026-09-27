@@ -2,13 +2,14 @@
 set -euo pipefail
 
 IMAGE="${AQUAFFIA_IMAGE:-hoanghung442004/aquaffia-edge:v1.1.0}"
-WEB_CONTAINER="aquaffia-edge-v11"
+WEB_CONTAINER="aquaffia-edge"
 
 if docker ps -q -f "name=^/${WEB_CONTAINER}$" | grep -q .; then
   docker stop "${WEB_CONTAINER}"
 fi
 
-mkdir -p /home/fptdanang/results_v11
+RESULTS_DIR="${AQUAFFIA_RESULTS_DIR:-/home/fptdanang/aquaffia-edge/results}"
+mkdir -p "${RESULTS_DIR}"
 
 if [ "$#" -eq 0 ]; then
   set -- --num_samples -1 --workers 1
@@ -19,7 +20,7 @@ docker run --rm \
   --network host \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
   -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
-  -v /home/fptdanang/results_v11:/app/benchmarking/results \
+  -v "${RESULTS_DIR}:/app/benchmarking/results" \
   -v /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvonnxparser.so.10:/lib/aarch64-linux-gnu/libnvonnxparser.so.10:ro \

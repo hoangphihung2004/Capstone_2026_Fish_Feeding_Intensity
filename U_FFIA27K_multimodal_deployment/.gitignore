@@ -7,4 +7,6 @@ outputs/
 /DEPLOYMENT_PLAN.md
 weights/
 samples/
+/cache/
+/benchmarking/results/
 

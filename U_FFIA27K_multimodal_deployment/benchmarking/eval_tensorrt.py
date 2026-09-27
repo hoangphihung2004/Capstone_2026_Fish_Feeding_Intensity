@@ -155,12 +155,6 @@ def parse_args():
         default=1,
         help="Must be 1 on Jetson for representative batch-1 latency. Higher values are coerced to 1 to avoid CPU oversubscription.",
     )
-    parser.add_argument(
-        "--audio-device",
-        choices=("auto", "cpu", "cuda"),
-        default=os.environ.get("AQUAFFIA_AUDIO_DEVICE", "auto"),
-        help="Device for AudioFrontend. auto selects CUDA only when CUDA-enabled PyTorch is available.",
-    )
     return parser.parse_args()
 
 
@@ -291,12 +285,12 @@ class ONNXRuntimeInference:
 # ==============================================================================
 # 3. PREPROCESSING HELPERS
 # ==============================================================================
-def load_audio_frontend(checkpoint_path: str, device: str = "cpu") -> AudioFrontend:
+def load_audio_frontend(checkpoint_path: str) -> AudioFrontend:
     """Load AudioFrontend module with trained BatchNorm weights from checkpoint."""
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at: {checkpoint_path}")
 
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = ckpt.get("model_state_dict", ckpt)
     frontend = AudioFrontend()
 
@@ -308,18 +302,17 @@ def load_audio_frontend(checkpoint_path: str, device: str = "cpu") -> AudioFront
     missing, unexpected = frontend.load_state_dict(frontend_sd, strict=False)
     if missing or unexpected:
         raise RuntimeError(f"AudioFrontend checkpoint mismatch: missing={missing}, unexpected={unexpected}")
-    frontend.eval().to(device)
+    frontend.eval()
     return frontend
 
 
-_RESAMPLER_CACHE: Dict[Tuple[int, int, str], torchaudio.transforms.Resample] = {}
+_RESAMPLER_CACHE: Dict[Tuple[int, int], torchaudio.transforms.Resample] = {}
 
 
 def preprocess_audio(
     audio_path: str,
     frontend: AudioFrontend,
     target_sr: int = 64000,
-    device: str = "cpu",
 ) -> Tuple[np.ndarray, float]:
     """Load WAV audio, resample to 64kHz, and compute Log-Mel Spectrogram (1, 1, 128, 128)."""
     t0 = time.perf_counter()
@@ -330,10 +323,10 @@ def preprocess_audio(
         waveform = waveform.mean(dim=0, keepdim=True)
 
     if original_sr != target_sr:
-        key = (original_sr, target_sr, device)
+        key = (original_sr, target_sr)
         if key not in _RESAMPLER_CACHE:
-            _RESAMPLER_CACHE[key] = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr).to(device)
-        waveform = _RESAMPLER_CACHE[key](waveform.to(device))
+            _RESAMPLER_CACHE[key] = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
+        waveform = _RESAMPLER_CACHE[key](waveform)
 
     y = waveform.squeeze(0).to(torch.float32)
     target_len = target_sr * 2
@@ -343,7 +336,7 @@ def preprocess_audio(
         y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
     with torch.no_grad():
-        feat = frontend(y.unsqueeze(0).to(device))
+        feat = frontend(y.unsqueeze(0))
 
     audio_feature_np = feat.detach().cpu().numpy()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -530,9 +523,6 @@ def main():
             args.workers,
         )
         args.workers = 1
-    audio_device = "cuda" if args.audio_device == "cuda" or (args.audio_device == "auto" and torch.cuda.is_available()) else "cpu"
-    if args.audio_device == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("--audio-device cuda requires CUDA-enabled PyTorch inside the container.")
     os.makedirs(args.output_dir, exist_ok=True)
 
     # 1. Initialize Inference Engine (TensorRT with ORN fallback)
@@ -558,8 +548,8 @@ def main():
 
     # 2. Load AudioFrontend
     logger.info("Loading AudioFrontend from checkpoint...")
-    frontend = load_audio_frontend(args.checkpoint, device=audio_device)
-    logger.info("AudioFrontend device: %s", audio_device)
+    frontend = load_audio_frontend(args.checkpoint)
+    logger.info("AudioFrontend device: cpu")
 
     # 3. Load Manifest
     logger.info(f"Loading samples manifest: {args.manifest}")
@@ -617,7 +607,7 @@ def main():
             v_file = samples_dir / row["video_path"]
             a_file = samples_dir / row["audio_path"]
             lbl = int(row["label"])
-            a_feat, t_a = preprocess_audio(str(a_file), frontend, device=audio_device)
+            a_feat, t_a = preprocess_audio(str(a_file), frontend)
             v_feat, t_v = preprocess_video(str(v_file))
             return idx, lbl, a_feat, v_feat, t_a, t_v
 
@@ -676,7 +666,7 @@ def main():
             label = int(row["label"])
 
             # Preprocessing
-            audio_feat, t_audio = preprocess_audio(str(a_file), frontend, device=audio_device)
+            audio_feat, t_audio = preprocess_audio(str(a_file), frontend)
             video_feat, t_video = preprocess_video(str(v_file))
 
             # Model Inference
@@ -731,7 +721,7 @@ def main():
             "python_version": sys.version,
             "torch_version": torch.__version__,
             "cuda_available": torch.cuda.is_available(),
-            "audio_frontend_device": audio_device,
+            "audio_frontend_device": "cpu",
         },
     }
 

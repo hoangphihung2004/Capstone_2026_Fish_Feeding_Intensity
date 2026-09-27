@@ -2,14 +2,16 @@
 set -euo pipefail
 
 IMAGE="${AQUAFFIA_IMAGE:-hoanghung442004/aquaffia-edge:v1.1.0}"
-CONTAINER="aquaffia-edge-v11"
+CONTAINER="aquaffia-edge"
 
 if docker ps -aq -f "name=^/${CONTAINER}$" | grep -q .; then
   docker start "${CONTAINER}"
   exit 0
 fi
 
-mkdir -p /home/fptdanang/cache_v11 /home/fptdanang/results_v11
+CACHE_DIR="${AQUAFFIA_CACHE_DIR:-/home/fptdanang/aquaffia-edge/cache}"
+RESULTS_DIR="${AQUAFFIA_RESULTS_DIR:-/home/fptdanang/aquaffia-edge/results}"
+mkdir -p "${CACHE_DIR}" "${RESULTS_DIR}"
 
 docker run -d \
   --name "${CONTAINER}" \
@@ -18,8 +20,8 @@ docker run -d \
   --network host \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
   -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
-  -v /home/fptdanang/cache_v11:/app/cache \
-  -v /home/fptdanang/results_v11:/app/benchmarking/results \
+  -v "${CACHE_DIR}:/app/cache" \
+  -v "${RESULTS_DIR}:/app/benchmarking/results" \
   -v /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvonnxparser.so.10:/lib/aarch64-linux-gnu/libnvonnxparser.so.10:ro \
