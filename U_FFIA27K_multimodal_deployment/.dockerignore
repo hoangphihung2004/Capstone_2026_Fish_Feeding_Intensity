@@ -1,0 +1,25 @@
+# Git and editor files
+.git
+.gitignore
+.vscode
+.idea
+*.md
+
+# Python cache & virtual environments
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.venv
+venv
+ENV
+
+# Large video/audio data (mounted externally as runtime volume)
+samples/continuous_simulation
+samples/*.mp4
+samples/*.wav
+cache/
+
+# Docker & logs
+docker/*.log
+*.log

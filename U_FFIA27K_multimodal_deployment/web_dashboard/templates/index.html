@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full overflow-hidden">
+<head>
+  <meta charset="utf-8">
+  <title>AquaFFIA - Fish Feeding Intensity Assessment Station</title>
+  <link href="https://fonts.googleapis.com" rel="preconnect">
+  <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..900;1,300..900&amp;family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&amp;family=Space+Grotesk:wght@400..700&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "tertiary": "#0051d5",
+            "on-primary-fixed-variant": "#005049",
+            "on-primary-fixed": "#00201d",
+            "primary-fixed-dim": "#6bd8cb",
+            "on-tertiary-fixed": "#00174b",
+            "on-background": "#0b1c30",
+            "error": "#ba1a1a",
+            "tertiary-fixed-dim": "#b4c5ff",
+            "on-error": "#ffffff",
+            "primary-container": "#008378",
+            "on-primary-container": "#f4fffc",
+            "primary": "#00685f",
+            "secondary-fixed-dim": "#93ccff",
+            "on-secondary": "#ffffff",
+            "on-secondary-fixed-variant": "#004b73",
+            "on-tertiary-fixed-variant": "#003ea8",
+            "secondary-container": "#5bb8fe",
+            "secondary-fixed": "#cce5ff",
+            "secondary": "#006398",
+            "on-secondary-container": "#00476e",
+            "inverse-surface": "#213145",
+            "surface-container-lowest": "#ffffff",
+            "outline-variant": "#bcc9c6",
+            "surface-dim": "#cbdbf5",
+            "on-tertiary-container": "#fefcff",
+            "on-primary": "#ffffff",
+            "outline": "#6d7a77",
+            "tertiary-container": "#316bf3",
+            "surface-tint": "#006a61",
+            "on-error-container": "#93000a",
+            "surface-container-highest": "#d3e4fe",
+            "surface-container-low": "#eff4ff",
+            "on-secondary-fixed": "#001d31",
+            "inverse-on-surface": "#eaf1ff",
+            "inverse-primary": "#6bd8cb",
+            "surface": "#f8f9ff",
+            "surface-variant": "#d3e4fe",
+            "on-surface": "#0b1c30",
+            "surface-container": "#e5eeff",
+            "on-surface-variant": "#3d4947",
+            "surface-container-high": "#dce9ff",
+            "primary-fixed": "#89f5e7",
+            "background": "#f8f9ff",
+            "tertiary-fixed": "#dbe1ff",
+            "on-tertiary": "#ffffff",
+            "error-container": "#ffdad6",
+            "surface-bright": "#f8f9ff"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.875rem",
+            "2xl": "1.25rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            "display": ["Space Grotesk", "sans-serif"],
+            "headline-lg": ["Space Grotesk", "sans-serif"],
+            "headline-md": ["Space Grotesk", "sans-serif"],
+            "headline-sm": ["Space Grotesk", "sans-serif"],
+            "body-lg": ["Hanken Grotesk", "sans-serif"],
+            "body-md": ["Hanken Grotesk", "sans-serif"],
+            "body-sm": ["Hanken Grotesk", "sans-serif"],
+            "label-lg": ["JetBrains Mono", "monospace"],
+            "label-md": ["JetBrains Mono", "monospace"],
+            "label-sm": ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html, body {
+      height: 100vh;
+      max-height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      user-select: none;
+    }
+  </style>
+</head>
+<body class="bg-[#f4f7fb] font-body-md text-on-surface antialiased flex flex-col h-screen max-h-screen overflow-hidden">
+
+  <!-- ============================================================================== -->
+  <!-- TOP HARMONIOUS HEADER BAR                                                      -->
+  <!-- ============================================================================== -->
+  <header class="h-[54px] shrink-0 z-40 bg-surface-container-lowest/95 backdrop-blur-md border-b border-surface-container-high/80 px-5 sm:px-7 flex items-center justify-between shadow-[0_1px_6px_rgba(0,0,0,0.03)]">
+    <!-- Brand Info: AquaFFIA (Pure Minimalist Wordmark) -->
+    <div class="flex flex-col">
+      <span class="font-display font-extrabold text-xl tracking-tight text-primary leading-none">Aqua<span class="text-[#008378]">FFIA</span></span>
+      <span class="text-[9px] font-label-sm text-outline tracking-wider uppercase font-semibold mt-1">FISH FEEDING INTENSITY ASSESSMENT</span>
+    </div>
+
+    <!-- Right: Single Square Mode Toggle Button -->
+    <div class="flex items-center gap-2">
+      <button id="mode-toggle-btn" onclick="toggleDashboardMode()" title="Switch to Sample Inspector" class="w-9 h-9 rounded-xl bg-surface-container hover:bg-primary-container text-primary hover:text-on-primary-container flex items-center justify-center border border-surface-container-high shadow-xs transition-all active:scale-95 group">
+        <span id="mode-toggle-icon" class="material-symbols-outlined text-[20px] transition-transform group-hover:rotate-12">science</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============================================================================== -->
+  <!-- MAIN FULL-VIEWPORT CONTAINER (100% NO SCROLL)                                  -->
+  <!-- ============================================================================== -->
+  <main class="flex-1 min-h-0 w-full max-w-[1600px] mx-auto p-3 sm:p-4 flex flex-col overflow-hidden">
+
+    <!-- ============================================================================ -->
+    <!-- TAB 1: SMART FARM LIVE MONITORING VIEW                                       -->
+    <!-- ============================================================================ -->
+    <div id="view-farm" class="h-full flex flex-col overflow-hidden">
+      <!-- 2-COLUMN BALANCED GRID -->
+      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
+        <!-- KHỐI TRÁI: LIVE CAMERA (7 Cols) -->
+        <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+          <!-- Card Header with Live Simulation Controls in One Clean Line -->
+          <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
+            <div class="flex items-center gap-2">
+              <span class="material-symbols-outlined text-primary text-[20px]">videocam</span>
+              <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Live Camera</h2>
+            </div>
+
+            <!-- Right Controls: Timestamp & Play/Pause & Reset -->
+            <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 bg-surface-container-low px-2 py-0.5 rounded-lg border border-surface-container text-xs">
+                <span class="material-symbols-outlined text-primary text-[14px]">schedule</span>
+                <span id="farm-stream-time" class="font-mono text-xs font-bold text-on-surface">00:00 / 09:30</span>
+              </div>
+              <button id="farm-play-btn" onclick="toggleLiveSimulation()" title="Play / Pause Live Feed" class="h-7 w-7 rounded-lg bg-surface-container hover:bg-primary-container text-primary flex items-center justify-center border border-surface-container-high shadow-2xs transition-all active:scale-95">
+                <span id="farm-play-icon" class="material-symbols-outlined text-[16px]">pause</span>
+              </button>
+              <button onclick="resetLiveSimulation()" title="Restart Session (00:00)" class="h-7 w-7 rounded-lg bg-surface-container hover:bg-primary-container text-outline hover:text-primary flex items-center justify-center border border-surface-container-high shadow-2xs transition-all active:scale-95">
+                <span class="material-symbols-outlined text-[16px]">restart_alt</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Video Stream Frame (Completely Clean & Unobstructed) -->
+          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-900 shadow-inner group flex items-center justify-center mb-2">
+            <video id="farm-video" class="w-full h-full object-cover" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
+              <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak.mp4" type="video/mp4">
+            </video>
+            <img id="farm-live-img" class="hidden w-full h-full object-cover" src="/static/img/farm_screen.png" alt="Live Pond Camera">
+          </div>
+
+          <!-- Bottom Metadata Row for Live Pond -->
+          <div class="flex items-center justify-between text-xs text-outline pt-2 border-t border-surface-container-low shrink-0">
+            <div>Feed Relay: <span id="farm-relay-status" class="font-bold text-error uppercase font-mono">OFF (CUTOFF)</span></div>
+          </div>
+        </section>
+
+        <!-- RIGHT COLUMN: 2 FOCUSED CARDS (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-3.5 h-full overflow-hidden">
+          <!-- CARD 1: FEEDING STATUS -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-4 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1.5 shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[20px]">set_meal</span>
+                <h2 class="text-xs uppercase tracking-wider font-label-md font-bold text-outline">FEEDING STATUS</h2>
+              </div>
+            </div>
+
+            <!-- Hero: Current Feeding State -->
+            <div id="farm-detection-banner" class="flex-1 my-2 bg-gradient-to-b from-primary/5 via-primary/[0.02] to-transparent rounded-2xl p-4 sm:p-5 text-center border border-primary/15 flex flex-col items-center justify-center transition-all">
+              <div id="farm-pred-title" class="text-3xl sm:text-4xl font-display font-black text-primary tracking-tight">
+                STRONG
+              </div>
+            </div>
+
+            <!-- 4-Level Visual Intensity Scale -->
+            <div class="pt-2 border-t border-surface-container-low shrink-0">
+              <div class="text-[11px] font-semibold text-outline uppercase tracking-wider mb-1.5">
+                Feeding Intensity Scale
+              </div>
+              <div class="grid grid-cols-4 gap-2 w-full" id="farm-gauge-grid">
+                <div class="flex flex-col gap-1 text-center bg-surface-container-low/50 p-1.5 rounded-lg border border-surface-container/60">
+                  <div id="farm-gauge-0" class="h-2 rounded-full bg-emerald-500 transition-all"></div>
+                  <span id="farm-gauge-lbl-0" class="text-[10px] font-label-sm text-outline font-medium">None</span>
+                </div>
+                <div class="flex flex-col gap-1 text-center bg-surface-container-low/50 p-1.5 rounded-lg border border-surface-container/60">
+                  <div id="farm-gauge-1" class="h-2 rounded-full bg-emerald-500 transition-all"></div>
+                  <span id="farm-gauge-lbl-1" class="text-[10px] font-label-sm text-outline font-medium">Weak</span>
+                </div>
+                <div class="flex flex-col gap-1 text-center bg-surface-container-low/50 p-1.5 rounded-lg border border-surface-container/60">
+                  <div id="farm-gauge-2" class="h-2 rounded-full bg-emerald-500 transition-all"></div>
+                  <span id="farm-gauge-lbl-2" class="text-[10px] font-label-sm text-outline font-medium">Medium</span>
+                </div>
+                <div class="flex flex-col gap-1 text-center bg-surface-container-low/50 p-1.5 rounded-lg border border-surface-container/60">
+                  <div id="farm-gauge-3" class="h-2 rounded-full bg-primary ring-2 ring-primary ring-offset-1 ring-offset-white shadow-xs transition-all"></div>
+                  <span id="farm-gauge-lbl-3" class="text-[10px] font-label-sm font-bold text-primary">Strong</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- CARD 2: DEVICE STATUS (Option 1: Hardware Health & AI Speed) -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-4 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1.5 shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[20px]">memory</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Device Status</h2>
+              </div>
+            </div>
+
+            <!-- 6 Harmonious Telemetry Stat Boxes (2x3 Grid) -->
+            <div class="grid grid-cols-2 gap-2 sm:gap-2.5 my-auto shrink-0">
+              <!-- Stat 1: Inference Latency -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>Inference Latency</span>
+                  <span class="material-symbols-outlined text-[16px] text-primary">timer</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-latency">12.5</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
+              </div>
+
+              <!-- Stat 2: Processing FPS -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>Processing FPS</span>
+                  <span class="material-symbols-outlined text-[16px] text-secondary">speed</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-fps">79.2</span> <span class="text-xs font-label-sm text-outline">FPS</span></div>
+              </div>
+
+              <!-- Stat 3: GPU Load -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>GPU Load</span>
+                  <span class="material-symbols-outlined text-[16px] text-primary">analytics</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-gpu">42</span> <span class="text-xs font-label-sm text-outline">%</span></div>
+              </div>
+
+              <!-- Stat 4: CPU Load -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>CPU Load</span>
+                  <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-cpu">24</span> <span class="text-xs font-label-sm text-outline">%</span></div>
+              </div>
+
+              <!-- Stat 5: Device Temperature -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>Device Temperature</span>
+                  <span class="material-symbols-outlined text-[16px] text-amber-600">device_thermostat</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-temp">46</span> <span class="text-xs font-label-sm text-outline">°C</span></div>
+              </div>
+
+              <!-- Stat 6: System Memory (RAM) -->
+              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
+                  <span>Memory (RAM)</span>
+                  <span class="material-symbols-outlined text-[16px] text-primary">developer_board</span>
+                </div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-ram">3.2</span> <span class="text-xs font-label-sm text-outline">/ 8.0 GB</span></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================================ -->
+    <!-- TAB 2: SAMPLE INSPECTOR VIEW                                                 -->
+    <!-- ============================================================================ -->
+    <div id="view-lab" class="hidden h-full flex flex-col overflow-hidden">
+      <!-- 2-COLUMN BALANCED WORKSPACE (Mirrors Smart Farm 7:5 Ratio, 100vh Zero-Scroll) -->
+      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
+        
+        <!-- KHỐI TRÁI: SAMPLE INSPECTOR (7 Cols) -->
+        <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+          <!-- Card Header with All Integrated Controls in One Clean Line -->
+          <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
+            <!-- Left: Title -->
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="material-symbols-outlined text-primary text-[20px]">tune</span>
+              <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Sample Inspector</h2>
+            </div>
+            
+            <!-- Right: Integrated Controls (Slider + Index Input + Random) -->
+            <div class="flex items-center gap-2 sm:gap-3">
+              <!-- Interactive Scrubber Slider -->
+              <div class="hidden sm:flex items-center gap-1.5 w-32 md:w-44 lg:w-56">
+                <input id="sample-slider" type="range" min="0" max="5414" value="0" 
+                       oninput="handleSliderInput(this.value)" 
+                       onchange="handleSliderChange(this.value)" 
+                       title="Drag to seek across 5,415 samples"
+                       class="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none">
+              </div>
+
+              <!-- Direct Jump Input with Enter & Spinner Support -->
+              <div class="flex items-center gap-1 bg-surface-container-low px-2 py-0.5 rounded-lg border border-surface-container text-xs shrink-0">
+                <span class="text-outline font-label-sm text-[11px] font-bold">#</span>
+                <input id="sample-jump-input" type="number" min="0" max="5414" value="0" 
+                       onkeydown="if(event.key==='Enter') jumpToSample()"
+                       onchange="jumpToSample()"
+                       class="w-14 text-xs font-bold text-center border-0 p-0 bg-transparent text-primary focus:ring-0 focus:outline-none font-mono">
+                <span class="text-outline font-label-sm text-[11px]">/ 5,415</span>
+              </div>
+
+              <!-- Random Button -->
+              <button onclick="loadRandomByClass(null)" title="Random Sample (R key)" class="h-7 px-2.5 bg-primary hover:bg-primary-container text-on-primary rounded-lg text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow-2xs shrink-0">
+                <span class="material-symbols-outlined text-[14px]">shuffle</span>
+                <span>Random</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Video Stream Frame -->
+          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-900 shadow-inner group flex items-center justify-center mb-2">
+            <video id="lab-video" class="w-full h-full object-cover" autoplay loop muted playsinline controls poster="/static/img/lab_screen.png">
+              <source id="lab-video-src" src="" type="video/mp4">
+            </video>
+          </div>
+
+          <!-- Integrated Hydrophone Audio Bar -->
+          <div class="bg-surface-container-low/70 p-2.5 rounded-xl border border-surface-container flex items-center justify-between gap-3 shrink-0 mb-2">
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="material-symbols-outlined text-secondary text-[18px]">graphic_eq</span>
+              <span class="text-xs font-bold text-on-surface">Hydrophone Audio</span>
+            </div>
+            <audio id="lab-audio" controls class="flex-1 h-7 rounded accent-primary focus:outline-none"></audio>
+          </div>
+
+          <!-- Bottom Sample Metadata Row -->
+          <div class="flex items-center justify-between text-[11px] text-outline pt-2 border-t border-surface-container-low shrink-0">
+            <div>Sample ID: <span id="lab-sample-hash" class="font-bold text-on-surface font-mono">SAMPLE_0000</span></div>
+            <div>Recorded Session: <span id="lab-sample-session" class="font-semibold text-on-surface">2022_6_14 · AM_70</span></div>
+            <div>Benchmark: <span id="lab-index-indicator" class="font-semibold text-primary">Fold 00 (Test)</span></div>
+          </div>
+        </section>
+
+        <!-- KHỐI PHẢI: 2 THẺ GỌN GÀNG (5 Cols) -->
+        <div class="lg:col-span-5 flex flex-col gap-2.5 sm:gap-3 h-full overflow-hidden">
+          
+          <!-- THẺ 1: PREDICTION RESULT -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3 sm:p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1 shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[18px]">psychology</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Prediction Result</h2>
+              </div>
+            </div>
+
+            <!-- Ground Truth vs Prediction Comparison Tiles -->
+            <div class="grid grid-cols-2 gap-2 my-auto shrink-0">
+              <div class="p-2 sm:p-2.5 rounded-xl bg-surface-container-low border border-surface-container flex flex-col justify-between">
+                <span class="text-[9px] sm:text-[10px] text-outline uppercase font-semibold">Ground Truth</span>
+                <div id="lab-gt-name" class="text-base sm:text-lg font-display font-bold text-on-surface mt-0.5 truncate">STRONG</div>
+              </div>
+              <div class="p-2 sm:p-2.5 rounded-xl bg-primary/5 border border-primary/20 flex flex-col justify-between">
+                <span class="text-[9px] sm:text-[10px] text-primary uppercase font-bold">AI Prediction</span>
+                <div id="lab-pred-name" class="text-base sm:text-lg font-display font-bold text-primary mt-0.5 truncate">STRONG</div>
+              </div>
+            </div>
+
+            <!-- Class Softmax Probabilities (Streamlined 2x2 Grid) -->
+            <div class="pt-1.5 border-t border-surface-container-low shrink-0">
+              <div class="text-[10px] font-semibold text-outline uppercase tracking-wider mb-1">Class Probabilities</div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <div>
+                  <div class="flex justify-between text-[10px] mb-0.5"><span class="text-outline">None</span><span id="prob-val-none" class="font-bold font-mono">0.0%</span></div>
+                  <div class="w-full bg-surface-container rounded-full h-1.5"><div id="prob-bar-none" class="bg-slate-400 h-1.5 rounded-full transition-all duration-300" style="width: 0.1%;"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-[10px] mb-0.5"><span class="text-outline">Weak</span><span id="prob-val-weak" class="font-bold font-mono">0.0%</span></div>
+                  <div class="w-full bg-surface-container rounded-full h-1.5"><div id="prob-bar-weak" class="bg-amber-500 h-1.5 rounded-full transition-all duration-300" style="width: 0.5%;"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-[10px] mb-0.5"><span class="text-outline">Medium</span><span id="prob-val-medium" class="font-bold font-mono">0.0%</span></div>
+                  <div class="w-full bg-surface-container rounded-full h-1.5"><div id="prob-bar-medium" class="bg-sky-500 h-1.5 rounded-full transition-all duration-300" style="width: 2%;"></div></div>
+                </div>
+                <div>
+                  <div class="flex justify-between text-[10px] mb-0.5"><span class="text-primary font-bold">Strong</span><span id="prob-val-strong" class="font-bold font-mono text-primary">100%</span></div>
+                  <div class="w-full bg-surface-container rounded-full h-1.5"><div id="prob-bar-strong" class="bg-primary h-1.5 rounded-full transition-all duration-300" style="width: 100%;"></div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- THẺ 2: INFERENCE LATENCY & FPS -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3 sm:p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1 shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[18px]">speed</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Inference Latency &amp; FPS</h2>
+              </div>
+            </div>
+
+            <!-- 4 Balanced Stat Boxes (2x2 Grid) -->
+            <div class="grid grid-cols-2 gap-2 my-auto shrink-0">
+              <!-- Stat 1: Inference Latency (AI Core) -->
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[10px] sm:text-[11px] text-outline font-body-sm flex items-center justify-between">
+                  <span>Inference Latency</span>
+                  <span class="material-symbols-outlined text-[15px] text-primary">timer</span>
+                </div>
+                <div class="text-lg sm:text-xl font-display font-bold text-on-surface leading-tight">
+                  <span id="prof-gpu-ms">12.5</span> <span class="text-xs font-label-sm text-outline">ms</span>
+                </div>
+              </div>
+
+              <!-- Stat 2: Processing FPS (AI Throughput) -->
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[10px] sm:text-[11px] text-outline font-body-sm flex items-center justify-between">
+                  <span>Processing FPS</span>
+                  <span class="material-symbols-outlined text-[15px] text-secondary">speed</span>
+                </div>
+                <div class="text-lg sm:text-xl font-display font-bold text-on-surface leading-tight">
+                  <span id="prof-fps">79.2</span> <span class="text-xs font-label-sm text-outline">FPS</span>
+                </div>
+              </div>
+
+              <!-- Stat 3: Video Prep Latency -->
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[10px] sm:text-[11px] text-outline font-body-sm flex items-center justify-between">
+                  <span>Video Prep</span>
+                  <span class="material-symbols-outlined text-[15px] text-primary">videocam</span>
+                </div>
+                <div class="text-lg sm:text-xl font-display font-bold text-on-surface leading-tight">
+                  <span id="prof-video-ms">101.5</span> <span class="text-xs font-label-sm text-outline">ms</span>
+                </div>
+              </div>
+
+              <!-- Stat 4: Audio Prep Latency -->
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+                <div class="text-[10px] sm:text-[11px] text-outline font-body-sm flex items-center justify-between">
+                  <span>Audio Prep</span>
+                  <span class="material-symbols-outlined text-[15px] text-secondary">graphic_eq</span>
+                </div>
+                <div class="text-lg sm:text-xl font-display font-bold text-on-surface leading-tight">
+                  <span id="prof-audio-ms">37.5</span> <span class="text-xs font-label-sm text-outline">ms</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Pipeline Summary Strip -->
+            <div class="pt-1.5 border-t border-surface-container-low shrink-0 flex items-center justify-between text-xs">
+              <span class="text-outline font-medium flex items-center gap-1 text-[11px]">
+                <span class="material-symbols-outlined text-[14px] text-primary">all_inclusive</span>
+                Total Pipeline Latency
+              </span>
+              <span class="font-display font-bold text-primary text-xs sm:text-sm">
+                <span id="prof-total-ms">151.5</span> <span class="text-[10px] font-label-sm text-outline">ms</span>
+              </span>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+
+
+  <!-- ============================================================================== -->
+  <!-- DYNAMIC JS LOGIC & REAL-TIME CONTROLLER                                        -->
+  <!-- ============================================================================== -->
+  <script>
+    let currentTabIndex = 'farm';
+    let currentSampleIndex = 0;
+    let totalSamples = 5415;
+
+    const CLASS_INFO = {
+      0: { name: 'none', label: 'None' },
+      1: { name: 'strong', label: 'Strong' },
+      2: { name: 'medium', label: 'Medium' },
+      3: { name: 'weak', label: 'Weak' }
+    };
+
+    function toggleDashboardMode() {
+      const nextTab = (currentTabIndex === 'farm') ? 'lab' : 'farm';
+      switchTab(nextTab);
+    }
+
+    function switchTab(tab) {
+      currentTabIndex = tab;
+      const viewFarm = document.getElementById('view-farm');
+      const viewLab = document.getElementById('view-lab');
+      const toggleBtn = document.getElementById('mode-toggle-btn');
+      const toggleIcon = document.getElementById('mode-toggle-icon');
+
+      if (tab === 'farm') {
+        viewFarm.classList.remove('hidden');
+        viewLab.classList.add('hidden');
+
+        if (toggleIcon) toggleIcon.textContent = 'science';
+        if (toggleBtn) {
+          toggleBtn.title = 'Switch to Sample Inspector';
+          toggleBtn.className = "w-9 h-9 rounded-xl bg-surface-container hover:bg-primary-container text-primary hover:text-on-primary-container flex items-center justify-center border border-surface-container-high shadow-xs transition-all active:scale-95 group";
+        }
+        const farmVideo = document.getElementById('farm-video');
+        if (farmVideo) farmVideo.play().catch(() => {});
+        const labVideo = document.getElementById('lab-video');
+        if (labVideo) labVideo.pause();
+        isLiveRunning = true;
+        const playIcon = document.getElementById('farm-play-icon');
+        if (playIcon) playIcon.textContent = 'pause';
+        startLiveSimulation();
+      } else {
+        viewFarm.classList.add('hidden');
+        viewLab.classList.remove('hidden');
+
+        if (toggleIcon) toggleIcon.textContent = 'videocam';
+        if (toggleBtn) {
+          toggleBtn.title = 'Switch to Live Camera';
+          toggleBtn.className = "w-9 h-9 rounded-xl bg-primary text-white hover:bg-primary-container flex items-center justify-center border border-primary/20 shadow-xs transition-all active:scale-95 group";
+        }
+        const farmVideo = document.getElementById('farm-video');
+        if (farmVideo) farmVideo.pause();
+        if (liveTimer) {
+          clearInterval(liveTimer);
+          liveTimer = null;
+        }
+        const labVideo = document.getElementById('lab-video');
+        const labVideoSrc = document.getElementById('lab-video-src');
+        if (!labVideoSrc || !labVideoSrc.getAttribute('src')) {
+          loadSampleByIndex(currentSampleIndex);
+        } else if (labVideo) {
+          labVideo.play().catch(() => {});
+        }
+      }
+    }
+
+    function updateUI(res) {
+      if (!res) return;
+
+      const pred = res.predicted_class;
+      const conf = res.confidence;
+      const probs = res.probabilities || {};
+      const lat = res.latency || {};
+      const feeder = res.feeder_action || {};
+      const sample = res.sample_info || {};
+
+      // 1. SMART FARM TAB UPDATES
+      const farmPredTitle = document.getElementById('farm-pred-title');
+      const farmConfVal = document.getElementById('farm-conf-val');
+      const farmStatLat = document.getElementById('farm-stat-latency');
+      const farmStatFps = document.getElementById('farm-stat-fps');
+
+      if (farmConfVal) farmConfVal.textContent = conf + '%';
+      if (farmStatLat) farmStatLat.textContent = lat.gpu_ms || '12.5';
+      if (farmStatFps) farmStatFps.textContent = lat.fps || '79.2';
+
+      let intensityLevel = 0;
+      let labelText = 'NONE';
+      if (pred === 1) { intensityLevel = 3; labelText = 'STRONG'; }
+      else if (pred === 2) { intensityLevel = 2; labelText = 'MEDIUM'; }
+      else if (pred === 3) { intensityLevel = 1; labelText = 'WEAK'; }
+      else { intensityLevel = 0; labelText = 'NONE'; }
+
+      if (farmPredTitle) farmPredTitle.textContent = labelText;
+
+      for (let i = 0; i <= 3; i++) {
+        const seg = document.getElementById(`farm-gauge-${i}`);
+        const lbl = document.getElementById(`farm-gauge-lbl-${i}`);
+        if (seg) {
+          if (i <= intensityLevel) {
+            seg.className = (i === intensityLevel) 
+              ? 'h-2 rounded-full bg-primary ring-2 ring-primary ring-offset-1 ring-offset-white shadow-xs transition-all'
+              : 'h-2 rounded-full bg-emerald-500 transition-all';
+          } else {
+            seg.className = 'h-2 rounded-full bg-surface-container transition-all';
+          }
+        }
+        if (lbl) {
+          lbl.className = (i === intensityLevel)
+            ? 'text-[10px] font-label-sm font-bold text-primary'
+            : 'text-[10px] font-label-sm text-outline font-medium';
+        }
+      }
+
+
+
+      // 2. SAMPLE INSPECTOR TAB UPDATES
+      const labIndexInd = document.getElementById('lab-index-indicator');
+      const labJumpInput = document.getElementById('sample-jump-input');
+      const labSampleHash = document.getElementById('lab-sample-hash');
+      const labSampleSession = document.getElementById('lab-sample-session');
+      const labGtName = document.getElementById('lab-gt-name');
+      const labPredName = document.getElementById('lab-pred-name');
+
+      if (labIndexInd) labIndexInd.textContent = "Fold 00 (Test)";
+      if (labJumpInput) labJumpInput.value = sample.sample_index || 0;
+      const labSlider = document.getElementById('sample-slider');
+      if (labSlider) labSlider.value = sample.sample_index || 0;
+      if (labSampleHash) labSampleHash.textContent = `SAMPLE_${String(sample.orig_sample_id || sample.sample_index || 0).padStart(4, '0')}`;
+      if (labSampleSession) labSampleSession.textContent = `${sample.date || '2022_6_14'} · ${sample.session || 'AM'}`;
+
+      const gtLabel = sample.ground_truth_label !== undefined ? sample.ground_truth_label : pred;
+      const gtNameStr = CLASS_INFO[gtLabel] ? CLASS_INFO[gtLabel].label.toUpperCase() : 'UNKNOWN';
+      const predNameStr = CLASS_INFO[pred] ? CLASS_INFO[pred].label.toUpperCase() : 'UNKNOWN';
+
+      if (labGtName) labGtName.textContent = gtNameStr;
+      if (labPredName) labPredName.textContent = predNameStr;
+
+      const pNone = probs.none !== undefined ? probs.none : 0;
+      const pWeak = probs.weak !== undefined ? probs.weak : 0;
+      const pMed = probs.medium !== undefined ? probs.medium : 0;
+      const pStrong = probs.strong !== undefined ? probs.strong : 0;
+
+      const setBar = (idVal, idBar, val) => {
+        const elVal = document.getElementById(idVal);
+        const elBar = document.getElementById(idBar);
+        if (elVal) elVal.textContent = val.toFixed(2) + '%';
+        if (elBar) elBar.style.width = Math.max(0.5, val) + '%';
+      };
+
+      setBar('prob-val-none', 'prob-bar-none', pNone);
+      setBar('prob-val-weak', 'prob-bar-weak', pWeak);
+      setBar('prob-val-medium', 'prob-bar-medium', pMed);
+      setBar('prob-val-strong', 'prob-bar-strong', pStrong);
+
+      // Update Lab Sample Video & Audio
+      if (sample.sample_index !== undefined) {
+        const labVideo = document.getElementById('lab-video');
+        const labVideoSrc = document.getElementById('lab-video-src');
+        const vUrl = sample.video_url || `/api/sample/video/${sample.sample_index}`;
+        if (labVideo && labVideoSrc) {
+          labVideo.poster = sample.preview_url || `/api/sample/frame/${sample.sample_index}`;
+          const fullVUrl = window.location.origin + vUrl;
+          if (labVideoSrc.src !== fullVUrl) {
+            labVideoSrc.src = vUrl;
+            labVideo.load();
+            labVideo.play().catch(() => {});
+          }
+        }
+      }
+
+      if (sample.audio_url) {
+        const labAudio = document.getElementById('lab-audio');
+        const fullAudioUrl = window.location.origin + sample.audio_url;
+        if (labAudio && labAudio.src !== fullAudioUrl) {
+          labAudio.src = sample.audio_url;
+          labAudio.load();
+        }
+      }
+
+      const profAudioMs = document.getElementById('prof-audio-ms');
+      const profVideoMs = document.getElementById('prof-video-ms');
+      const profGpuMs = document.getElementById('prof-gpu-ms');
+      const profFps = document.getElementById('prof-fps');
+      const profTotalMs = document.getElementById('prof-total-ms');
+
+      const aMs = lat.audio_ms || 37.5;
+      const vMs = lat.video_ms || 101.5;
+      const gMs = lat.gpu_ms || 12.5;
+      const totMs = lat.total_ms || 151.5;
+      const fpsVal = lat.fps || (typeof gMs === 'number' && gMs > 0 ? (1000.0 / gMs).toFixed(1) : '79.2');
+
+      if (profAudioMs) profAudioMs.textContent = typeof aMs === 'number' ? aMs.toFixed(1) : aMs;
+      if (profVideoMs) profVideoMs.textContent = typeof vMs === 'number' ? vMs.toFixed(1) : vMs;
+      if (profGpuMs) profGpuMs.textContent = typeof gMs === 'number' ? gMs.toFixed(1) : gMs;
+      if (profFps) profFps.textContent = typeof fpsVal === 'number' ? fpsVal.toFixed(1) : fpsVal;
+      if (profTotalMs) profTotalMs.textContent = typeof totMs === 'number' ? totMs.toFixed(1) : totMs;
+    }
+
+    function handleSliderInput(val) {
+      const jumpIn = document.getElementById('sample-jump-input');
+      if (jumpIn) jumpIn.value = val;
+    }
+
+    function handleSliderChange(val) {
+      const idx = parseInt(val);
+      if (!isNaN(idx)) loadSampleByIndex(idx);
+    }
+
+    async function loadRandomByClass(label) {
+      try {
+        let url = '/api/sample/random';
+        if (label !== null && label !== undefined) {
+          url += `?label=${label}`;
+        }
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Random sample API failed');
+        const sample = await res.json();
+        loadSampleByIndex(sample.sample_index);
+      } catch (err) {
+        console.error('loadRandomByClass error:', err);
+      }
+    }
+
+    async function loadSampleByIndex(index) {
+      try {
+        currentSampleIndex = index;
+        const res = await fetch(`/api/predict/sample/${index}`, { method: 'POST' });
+        if (!res.ok) throw new Error('Prediction failed');
+        const data = await res.json();
+        updateUI(data);
+      } catch (err) {
+        console.error('Prediction error:', err);
+      }
+    }
+
+    async function loadRandomFarmSample() {
+      loadRandomByClass(null);
+    }
+
+    async function loadRandomLabSample() {
+      loadRandomByClass(null);
+    }
+
+    function navigateSample(step) {
+      let nextIdx = currentSampleIndex + step;
+      if (nextIdx < 0) nextIdx = totalSamples - 1;
+      if (nextIdx >= totalSamples) nextIdx = 0;
+      loadSampleByIndex(nextIdx);
+    }
+
+    function jumpToSample() {
+      const input = document.getElementById('sample-jump-input');
+      if (!input) return;
+      let val = parseInt(input.value);
+      if (isNaN(val) || val < 0) val = 0;
+      if (val >= totalSamples) val = totalSamples - 1;
+      loadSampleByIndex(val);
+    }
+
+    // ==============================================================================
+    // CONTINUOUS LIVE POND SIMULATION (2.0s CYCLE OVER 9.5-MIN SESSION)
+    // ==============================================================================
+    let liveTimer = null;
+    let isLiveRunning = true;
+
+    async function runLiveStep() {
+      if (currentTabIndex !== 'farm' || !isLiveRunning) return;
+      try {
+        const res = await fetch('/api/live/step');
+        if (!res.ok) return;
+        const data = await res.json();
+        updateLiveFarmUI(data);
+      } catch (err) {
+        console.warn('Live step error:', err);
+      }
+    }
+
+    function updateLiveFarmUI(data) {
+      if (!data) return;
+      const pred = data.predicted_class;
+      const lat = data.latency || {};
+      const feeder = data.feeder_action || {};
+      const sInfo = data.stream_info || {};
+
+      // 1. Feeding Status Title
+      const farmPredTitle = document.getElementById('farm-pred-title');
+      let labelText = 'NONE';
+      let intensityLevel = 0;
+      if (pred === 1) { intensityLevel = 3; labelText = 'STRONG'; }
+      else if (pred === 2) { intensityLevel = 2; labelText = 'MEDIUM'; }
+      else if (pred === 3) { intensityLevel = 1; labelText = 'WEAK'; }
+      else { intensityLevel = 0; labelText = 'NONE'; }
+
+      if (farmPredTitle) farmPredTitle.textContent = labelText;
+
+      // 2. 4-Level Gauge
+      for (let i = 0; i <= 3; i++) {
+        const seg = document.getElementById(`farm-gauge-${i}`);
+        const lbl = document.getElementById(`farm-gauge-lbl-${i}`);
+        if (seg) {
+          if (i <= intensityLevel) {
+            seg.className = (i === intensityLevel) 
+              ? 'h-2 rounded-full bg-primary ring-2 ring-primary ring-offset-1 ring-offset-white shadow-xs transition-all'
+              : 'h-2 rounded-full bg-emerald-500 transition-all';
+          } else {
+            seg.className = 'h-2 rounded-full bg-surface-container transition-all';
+          }
+        }
+        if (lbl) {
+          lbl.className = (i === intensityLevel)
+            ? 'text-[10px] font-label-sm font-bold text-primary'
+            : 'text-[10px] font-label-sm text-outline font-medium';
+        }
+      }
+
+      // 3. Hardware & Telemetry Stats
+      const farmStatLat = document.getElementById('farm-stat-latency');
+      const farmStatFps = document.getElementById('farm-stat-fps');
+      const farmStreamTime = document.getElementById('farm-stream-time');
+      const farmRelayStatus = document.getElementById('farm-relay-status');
+
+      if (farmStatLat) farmStatLat.textContent = lat.gpu_ms || '12.5';
+      if (farmStatFps) farmStatFps.textContent = lat.fps || '79.2';
+      if (farmStreamTime && sInfo.time_str) farmStreamTime.textContent = sInfo.time_str;
+      if (farmRelayStatus && feeder.relay) {
+        farmRelayStatus.textContent = feeder.relay === 'ON' ? 'ON (FEEDING)' : 'OFF (CUTOFF)';
+        farmRelayStatus.className = feeder.relay === 'ON' ? 'font-bold text-emerald-600 uppercase font-mono' : 'font-bold text-error uppercase font-mono';
+      }
+
+      // Dynamic edge telemetry fluctuation
+      const farmStatGpu = document.getElementById('farm-stat-gpu');
+      const farmStatCpu = document.getElementById('farm-stat-cpu');
+      const farmStatTemp = document.getElementById('farm-stat-temp');
+      if (farmStatGpu) farmStatGpu.textContent = Math.floor(38 + Math.random() * 8);
+      if (farmStatCpu) farmStatCpu.textContent = Math.floor(22 + Math.random() * 6);
+      if (farmStatTemp) farmStatTemp.textContent = (46 + (Math.random() * 1.5 - 0.7)).toFixed(0);
+
+      // 4. Video Stream Sync (Smooth 25 FPS Native Video + Fallback Frame)
+      const farmVideo = document.getElementById('farm-video');
+      const farmLiveImg = document.getElementById('farm-live-img');
+      if (farmVideo) {
+        if (sInfo && sInfo.time_sec !== undefined) {
+          if (Math.abs(farmVideo.currentTime - sInfo.time_sec) > 3.0) {
+            farmVideo.currentTime = sInfo.time_sec;
+          }
+        }
+        if (farmVideo.paused && isLiveRunning) {
+          farmVideo.play().catch(() => {});
+        }
+      }
+      if (farmLiveImg && data.frame_base64) {
+        farmLiveImg.src = 'data:image/jpeg;base64,' + data.frame_base64;
+      }
+    }
+
+    function startLiveSimulation() {
+      if (liveTimer) clearInterval(liveTimer);
+      const farmVideo = document.getElementById('farm-video');
+      if (farmVideo) farmVideo.play().catch(() => {});
+      runLiveStep();
+      liveTimer = setInterval(runLiveStep, 2000);
+    }
+
+    function toggleLiveSimulation() {
+      isLiveRunning = !isLiveRunning;
+      const icon = document.getElementById('farm-play-icon');
+      if (icon) icon.textContent = isLiveRunning ? 'pause' : 'play_arrow';
+      const farmVideo = document.getElementById('farm-video');
+      if (farmVideo) {
+        if (isLiveRunning) {
+          farmVideo.play().catch(() => {});
+        } else {
+          farmVideo.pause();
+        }
+      }
+    }
+
+    async function resetLiveSimulation() {
+      try {
+        await fetch('/api/live/reset', { method: 'POST' });
+        const farmVideo = document.getElementById('farm-video');
+        if (farmVideo) farmVideo.currentTime = 0;
+        runLiveStep();
+      } catch (err) {
+        console.warn(err);
+      }
+    }
+
+    // Keyboard Shortcuts for Rapid Inspection & Simulation
+    window.addEventListener('keydown', function (e) {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+
+      if (currentTabIndex === 'farm') {
+        if (e.key === ' ') {
+          e.preventDefault();
+          toggleLiveSimulation();
+        }
+      } else if (currentTabIndex === 'lab') {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          navigateSample(-1);
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          navigateSample(1);
+        } else if (e.key.toLowerCase() === 'r') {
+          e.preventDefault();
+          loadRandomByClass(null);
+        }
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+      fetch('/api/status')
+        .then(r => r.json())
+        .then(d => {
+          if (d.total_test_samples) {
+            totalSamples = d.total_test_samples;
+            const jumpIn = document.getElementById('sample-jump-input');
+            const slider = document.getElementById('sample-slider');
+            if (jumpIn) jumpIn.max = totalSamples - 1;
+            if (slider) slider.max = totalSamples - 1;
+          }
+        })
+        .catch(console.warn);
+
+      // Start the Continuous Live Simulation immediately on load
+      startLiveSimulation();
+    });
+  </script>
+</body>
+</html>

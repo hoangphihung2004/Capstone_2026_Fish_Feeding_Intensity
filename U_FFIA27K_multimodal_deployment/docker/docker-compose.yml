@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  aquaffia-edge:
+    # Image pulled directly from Docker Hub
+    image: ${DOCKER_IMAGE:-hoanghung442004/aquaffia-edge:v1.1.0}
+    container_name: aquaffia-edge
+    restart: always
+    runtime: nvidia
+    network_mode: host
+    volumes:
+      # Runtime data only. Application source is immutable inside the image.
+      - ./samples:/app/samples:ro
+      - ./cache:/app/cache
+      - ./results:/app/benchmarking/results
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - AQUAFFIA_AUDIO_DEVICE=${AQUAFFIA_AUDIO_DEVICE:-auto}
+      - AQUAFFIA_INPUT_CACHE=${AQUAFFIA_INPUT_CACHE:-1}
+      - AQUAFFIA_CACHE_DIR=/app/cache
+    command: uvicorn web_dashboard.app:app --host 0.0.0.0 --port 8000

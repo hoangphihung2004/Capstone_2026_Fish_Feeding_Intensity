@@ -1,11 +1,11 @@
 """
 Dataset preparation script for Jetson Orin Nano Edge Deployment.
 
-Module: deployment.data_preparation
+Module: data_preparation
 Responsibilities:
-- Extract balanced test subset (50 samples x 4 classes = 200 samples) from Fold 00 test split
-- Organize sample media into audio/ and video/ directories with unique names
-- Generate manifest CSV and zipped package for transfer to Jetson
+- Extract full test set (5,415 samples) from Fold 00 test split (or optional balanced subset)
+- Safely COPY (shutil.copy2) media from raw dataset to samples/ preserving original dataset intact
+- Generate clean manifest CSV for evaluation and web serving
 """
 
 import argparse
@@ -13,7 +13,6 @@ import logging
 import os
 import shutil
 import sys
-import zipfile
 from pathlib import Path
 import pandas as pd
 
@@ -27,18 +26,18 @@ logger = logging.getLogger("DataPreparation")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Prepare balanced test samples for Jetson evaluation")
+    parser = argparse.ArgumentParser(description="Prepare test samples for Jetson Orin Nano evaluation")
     parser.add_argument(
         "--dataset_root",
         type=str,
         default=os.path.normpath(os.path.join(project_root, "..", "Dataset", "U_FFIA")),
-        help="Root directory of the raw U_FFIA dataset (containing audio/ and video/)",
+        help="Root directory of raw U_FFIA dataset (containing audio/ and video/)",
     )
     parser.add_argument(
         "--test_csv",
         type=str,
         default=os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "splits", "test.csv"),
-        help="Path to the test.csv split file from Fold 00",
+        help="Path to test.csv split file from Fold 00",
     )
     parser.add_argument(
         "--output_dir",
@@ -47,16 +46,16 @@ def parse_args():
         help="Directory to save extracted sample files",
     )
     parser.add_argument(
-        "--samples_per_class",
-        type=int,
-        default=50,
-        help="Number of samples to pick per class (default: 50, total 200)",
+        "--clean",
+        action="store_true",
+        default=True,
+        help="Clean output directory before copying",
     )
     parser.add_argument(
-        "--seed",
+        "--max_samples",
         type=int,
-        default=42,
-        help="Random seed for deterministic selection",
+        default=None,
+        help="Optional limit on number of samples (default: None, full 5,415 samples)",
     )
     return parser.parse_args()
 
@@ -68,18 +67,27 @@ def prepare_samples():
     if not os.path.exists(args.dataset_root):
         raise FileNotFoundError(f"Dataset root not found: {args.dataset_root}")
 
-    logger.info(f"Reading test split: {args.test_csv}")
+    logger.info(f"Reading Fold 00 test split: {args.test_csv}")
     df = pd.read_csv(args.test_csv)
-    logger.info(f"Total samples in test split: {len(df)}")
+    total_test = len(df)
+    logger.info(f"Total samples in Fold 00 test split: {total_test}")
+    logger.info(f"Class breakdown in test split: {df['class_name'].value_counts().to_dict()}")
 
-    classes = ["none", "strong", "medium", "weak"]
-    selected_subsets = []
-    for cls in classes:
-        cls_df = df[df["class_name"] == cls].sample(n=args.samples_per_class, random_state=args.seed)
-        selected_subsets.append(cls_df)
+    if args.max_samples and args.max_samples < total_test:
+        logger.info(f"Limiting to first {args.max_samples} samples as requested...")
+        df = df.iloc[:args.max_samples]
 
-    sample_df = pd.concat(selected_subsets, ignore_index=True)
-    logger.info(f"Selected {len(sample_df)} balanced samples: {sample_df['class_name'].value_counts().to_dict()}")
+    if args.clean and os.path.exists(args.output_dir):
+        logger.info(f"Cleaning existing contents in: {args.output_dir}...")
+        for item in os.listdir(args.output_dir):
+            item_path = os.path.join(args.output_dir, item)
+            try:
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                else:
+                    os.remove(item_path)
+            except Exception as e:
+                logger.warning(f"Could not remove {item_path}: {e}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     audio_out_dir = os.path.join(args.output_dir, "audio")
@@ -87,58 +95,113 @@ def prepare_samples():
     os.makedirs(audio_out_dir, exist_ok=True)
     os.makedirs(video_out_dir, exist_ok=True)
 
+    # 1. Pre-collect and pre-create all unique subdirectories
+    logger.info("Pre-creating output subdirectories...")
+    all_tasks = []
+    unique_dirs = set()
+
+    for idx, row in df.iterrows():
+        rel_video = row["video_path"].replace("/marimo/Fish_Feeding_Intensity_Dataset/", "").replace("/", os.sep)
+        rel_audio = row["audio_path"].replace("/marimo/Fish_Feeding_Intensity_Dataset/", "").replace("/", os.sep)
+
+        src_video = os.path.normpath(os.path.join(args.dataset_root, rel_video))
+        src_audio = os.path.normpath(os.path.join(args.dataset_root, rel_audio))
+
+        v_sub = os.path.join(video_out_dir, row["date"], row["session"], row["class_name"])
+        a_sub = os.path.join(audio_out_dir, row["date"], row["session"], row["class_name"])
+        unique_dirs.add(v_sub)
+        unique_dirs.add(a_sub)
+
+        dst_video = os.path.join(v_sub, os.path.basename(src_video))
+        dst_audio = os.path.join(a_sub, os.path.basename(src_audio))
+
+        rel_dst_video = os.path.relpath(dst_video, args.output_dir).replace(os.sep, "/")
+        rel_dst_audio = os.path.relpath(dst_audio, args.output_dir).replace(os.sep, "/")
+
+        all_tasks.append((idx, row, src_video, src_audio, dst_video, dst_audio, rel_dst_video, rel_dst_audio))
+
+    for d in unique_dirs:
+        os.makedirs(d, exist_ok=True)
+
+    logger.info(f"Created {len(unique_dirs)} subdirectories. Starting parallel safe COPY (shutil.copy2)...")
+
+    # 2. Worker function for fast safe copy (pure copy, never move/delete)
+    import ctypes
+    is_windows = os.name == "nt"
+    CopyFileW = ctypes.windll.kernel32.CopyFileW if is_windows else None
+
+    def fast_copy(src, dst):
+        if is_windows:
+            success = CopyFileW(str(src), str(dst), False)
+            if not success:
+                raise OSError(f"CopyFileW failed from {src} to {dst}")
+        else:
+            shutil.copyfile(src, dst)
+
+    def process_sample(task):
+        idx, row, src_video, src_audio, dst_video, dst_audio, rel_dst_video, rel_dst_audio = task
+        if not os.path.exists(src_video) or not os.path.exists(src_audio):
+            return None
+
+        # Check if already copied with identical size (fast resume support)
+        v_exists = os.path.exists(dst_video) and os.path.getsize(dst_video) == os.path.getsize(src_video)
+        a_exists = os.path.exists(dst_audio) and os.path.getsize(dst_audio) == os.path.getsize(src_audio)
+
+        if not v_exists:
+            fast_copy(src_video, dst_video)
+        if not a_exists:
+            fast_copy(src_audio, dst_audio)
+
+        size = os.path.getsize(dst_video) + os.path.getsize(dst_audio)
+        return {
+            "sample_index": idx,
+            "video_path": rel_dst_video,
+            "audio_path": rel_dst_audio,
+            "label": int(row["label"]),
+            "class_name": row["class_name"],
+            "date": row["date"],
+            "session": row["session"],
+            "orig_sample_id": row["sample_id"],
+            "size": size,
+        }
+
     records = []
-    zip_path = os.path.join(args.output_dir, "test_samples_200.zip")
+    total_bytes = 0
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for idx, row in sample_df.iterrows():
-            rel_video = row["video_path"].replace("/marimo/Fish_Feeding_Intensity_Dataset/", "").replace("/", os.sep)
-            rel_audio = row["audio_path"].replace("/marimo/Fish_Feeding_Intensity_Dataset/", "").replace("/", os.sep)
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {executor.submit(process_sample, t): t for t in all_tasks}
+        count = 0
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                total_bytes += res.pop("size")
+                records.append(res)
+                count += 1
+                if count % 500 == 0 or count == len(all_tasks):
+                    logger.info(f"Progress: Copied {count}/{len(all_tasks)} samples ({total_bytes / (1024**3):.2f} GB)...")
 
-            src_video = os.path.normpath(os.path.join(args.dataset_root, rel_video))
-            src_audio = os.path.normpath(os.path.join(args.dataset_root, rel_audio))
+    # Sort records back by original sample_index
+    records.sort(key=lambda r: r["sample_index"])
 
-            if not os.path.exists(src_video):
-                logger.error(f"Missing video file: {src_video}")
-                continue
-            if not os.path.exists(src_audio):
-                logger.error(f"Missing audio file: {src_audio}")
-                continue
+    # 3. Save manifest CSV
+    manifest_df = pd.DataFrame(records)
+    manifest_csv = os.path.join(args.output_dir, "manifest.csv")
+    manifest_df.to_csv(manifest_csv, index=False)
 
-            v_name = f"{row['class_name']}_{idx:03d}_{os.path.basename(src_video)}"
-            a_name = f"{row['class_name']}_{idx:03d}_{os.path.basename(src_audio)}"
-
-            dst_video = os.path.join(video_out_dir, v_name)
-            dst_audio = os.path.join(audio_out_dir, a_name)
-
-            shutil.copy2(src_video, dst_video)
-            shutil.copy2(src_audio, dst_audio)
-
-            archive_video = f"video/{v_name}"
-            archive_audio = f"audio/{a_name}"
-            zipf.write(dst_video, archive_video)
-            zipf.write(dst_audio, archive_audio)
-
-            records.append({
-                "sample_id": idx,
-                "video_path": archive_video,
-                "audio_path": archive_audio,
-                "label": int(row["label"]),
-                "class_name": row["class_name"],
-                "date": row["date"],
-                "session": row["session"],
-                "orig_sample_id": row["sample_id"]
-            })
-
-        out_df = pd.DataFrame(records)
-        csv_path = os.path.join(args.output_dir, "test_samples.csv")
-        out_df.to_csv(csv_path, index=False)
-        zipf.write(csv_path, "test_samples.csv")
-
-    logger.info(f"Successfully prepared {len(records)} samples in: {args.output_dir}")
-    logger.info(f"Manifest saved to: {csv_path}")
-    logger.info(f"Zip package created: {zip_path} ({os.path.getsize(zip_path) / (1024*1024):.2f} MB)")
+    logger.info("==========================================================")
+    logger.info("Fold 00 Full Test Set Preparation Completed Successfully!")
+    logger.info(f"Total samples processed:  {len(records)} / {len(df)}")
+    logger.info(f"Total size on disk:       {total_bytes / (1024**3):.2f} GB")
+    logger.info(f"Samples directory:        {args.output_dir}")
+    logger.info(f"Manifest saved to:        {manifest_csv}")
+    logger.info(f"Class distribution:       {manifest_df['class_name'].value_counts().to_dict()}")
+    logger.info("Original dataset integrity: 100% UNTOUCHED (safe read-only copy)")
+    logger.info("==========================================================")
 
 
 if __name__ == "__main__":
     prepare_samples()
+
+
+
