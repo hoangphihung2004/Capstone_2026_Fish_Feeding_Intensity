@@ -153,9 +153,38 @@
             <img id="farm-live-img" class="hidden w-full h-full object-contain" src="/static/img/farm_screen.png" alt="Live Pond Camera">
           </div>
 
-          <!-- Underwater Hydrophone Acoustic Waveform (100% Pure Raw Waveform, Zero Text) -->
-          <div class="h-32 shrink-0 w-full rounded-xl bg-slate-950 p-1.5 border border-slate-800 mb-2 shadow-inner overflow-hidden">
-            <canvas id="farm-audio-canvas" class="w-full h-full block"></canvas>
+          <!-- Underwater Hydrophone Acoustic Waveform (White Background with Axes & Units) -->
+          <div class="h-32 shrink-0 w-full rounded-xl bg-white px-2.5 py-1.5 border border-slate-300 mb-2 shadow-xs flex flex-col justify-between overflow-hidden">
+            <!-- Y-Axis Title & Window Info -->
+            <div class="flex items-center justify-between text-[10px] font-mono text-slate-600 font-semibold px-0.5">
+              <span>Amplitude (Normalized)</span>
+              <span class="text-slate-400 font-normal">2.0s Window · 64 kHz</span>
+            </div>
+
+            <!-- Plot Area: Y-Axis Ticks & Canvas -->
+            <div class="relative flex-1 w-full my-0.5 min-h-0 flex items-stretch gap-1">
+              <!-- Y-Axis Scale Values -->
+              <div class="flex flex-col justify-between text-[8px] font-mono text-slate-500 font-medium select-none py-0.5 leading-none text-right w-5 shrink-0">
+                <span>+1.0</span>
+                <span>+0.5</span>
+                <span class="font-bold text-slate-700">0.0</span>
+                <span>-0.5</span>
+                <span>-1.0</span>
+              </div>
+              <!-- Canvas Area with Left & Bottom Coordinate Axes -->
+              <div class="relative flex-1 h-full min-w-0 border-l border-b border-slate-400">
+                <canvas id="farm-audio-canvas" class="w-full h-full block bg-white"></canvas>
+              </div>
+            </div>
+
+            <!-- X-Axis Labels & Unit -->
+            <div class="flex items-center justify-between text-[8px] font-mono text-slate-500 pl-6 pr-0.5 leading-none pt-0.5">
+              <span>0.0s</span>
+              <span>0.5s</span>
+              <span class="font-bold text-slate-700">Time (s)</span>
+              <span>1.5s</span>
+              <span>2.0s</span>
+            </div>
           </div>
 
           <!-- Bottom Metadata Row for Live Pond -->
@@ -440,14 +469,17 @@
 
       ctx.save();
       ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, w, h);
+
+      // Clean White Background fill
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
 
       const midY = h / 2;
       const maxAmp = (h / 2) * 0.92;
 
-      // 1. Scientific Oscilloscope Grid
-      // Faint horizontal amplitude grid lines (+0.5, -0.5)
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.28)';
+      // 1. Clean Scientific Grid for White Background
+      // Horizontal amplitude grid lines (+0.5, -0.5)
+      ctx.strokeStyle = '#e2e8f0'; // Clean faint light gray
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, midY - 0.5 * maxAmp);
@@ -456,8 +488,8 @@
       ctx.lineTo(w, midY + 0.5 * maxAmp);
       ctx.stroke();
 
-      // Prominent Horizontal Center Baseline (0.0V level)
-      ctx.strokeStyle = 'rgba(71, 85, 105, 0.75)';
+      // Horizontal Center Baseline (0.0 Level)
+      ctx.strokeStyle = '#94a3b8'; // Crisp slate gray
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.setLineDash([4, 3]);
@@ -467,16 +499,10 @@
       ctx.setLineDash([]);
 
       // Vertical Time Markers (every 0.25s: 8 sections)
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.30)';
-      ctx.lineWidth = 1;
       for (let i = 1; i < 8; i++) {
         const gx = (w / 8) * i;
+        ctx.strokeStyle = (i % 2 === 0) ? '#cbd5e1' : '#f1f5f9';
         ctx.beginPath();
-        if (i % 2 === 0) {
-          ctx.strokeStyle = 'rgba(71, 85, 105, 0.50)'; // 0.5s, 1.0s, 1.5s markers are slightly more prominent
-        } else {
-          ctx.strokeStyle = 'rgba(51, 65, 85, 0.25)';
-        }
         ctx.moveTo(gx, 0);
         ctx.lineTo(gx, h);
         ctx.stroke();
@@ -490,8 +516,8 @@
       const n = waveform.length;
       const barWidth = Math.max(1.1, w / n);
 
-      // 2. Layer 1: Outer Transient Peak Bars (Audacity / DAW Body)
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.40)'; // Translucent Cyan Body
+      // 2. Layer 1: Outer Transient Peak Bars (Deep Ocean Blue Body)
+      ctx.fillStyle = 'rgba(2, 132, 199, 0.40)'; // Translucent Sky/Ocean Blue
       for (let i = 0; i < n; i++) {
         const x = (i / n) * w;
         let mn = 0, mx = 0;
@@ -508,8 +534,8 @@
         ctx.fillRect(x, Math.min(yTop, yBottom), barWidth, barH);
       }
 
-      // 3. Layer 2: Inner RMS Acoustic Core (Continuous Sound Energy Power)
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.70)'; // Emerald Energy Core
+      // 3. Layer 2: Inner RMS Acoustic Core (Solid Teal/Emerald Core)
+      ctx.fillStyle = 'rgba(13, 148, 136, 0.75)'; // Rich Teal/Emerald
       for (let i = 0; i < n; i++) {
         if (Array.isArray(waveform[i]) && waveform[i].length > 2) {
           const x = (i / n) * w;
@@ -521,11 +547,10 @@
         }
       }
 
-      // 4. Layer 3: Razor-Sharp Glowing Outer Peak Contour (Fish Feeding Transient Spikes)
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#22d3ee'; // Sharp Neon Cyan
-      ctx.shadowColor = '#06b6d4';
-      ctx.shadowBlur = 4;
+      // 4. Layer 3: Razor-Sharp Outer Peak Contour (Deep Ocean Blue Outline)
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#0284c7'; // Deep Sky Blue for clean contrast on white
+      ctx.shadowColor = 'transparent';
 
       // Top Peak Line
       ctx.beginPath();
