@@ -238,6 +238,79 @@ class AudioFrontendTRT:
             return np.copy(self.h_out)
 
 
+class VideoFrontendTRT:
+    """Wrapper for GPU-accelerated Video Preprocessor TensorRT Engine (Flip, Concat, Normalize)."""
+
+    def __init__(self, engine_path: str):
+        if not TRT_AVAILABLE:
+            raise RuntimeError("Neither cuda-python nor PyCUDA is installed.")
+        if not os.path.exists(engine_path):
+            raise FileNotFoundError(f"VideoFrontend TensorRT engine not found at: {engine_path}")
+
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            self.runtime = trt.Runtime(self.logger)
+            self.engine = self.runtime.deserialize_cuda_engine(f.read())
+        if self.engine is None:
+            raise RuntimeError(f"Failed to deserialize VideoFrontend TensorRT engine from: {engine_path}")
+
+        self.context = self.engine.create_execution_context()
+        self.backend = TRT_BACKEND
+
+        # Input: raw_frames [1, 2, 224, 224, 3] float32
+        self.input_shape = (1, 2, 224, 224, 3)
+        self.input_nbytes = int(np.prod(self.input_shape) * 4)
+
+        # Output: video_features [1, 6, 224, 224] float32
+        self.out_shape = (1, 6, 224, 224)
+        self.out_nbytes = int(np.prod(self.out_shape) * 4)
+        self.h_out = np.zeros(self.out_shape, dtype=np.float32)
+
+        if self.backend == "cuda-python":
+            _, self.d_in = cudart.cudaMalloc(self.input_nbytes)
+            _, self.d_out = cudart.cudaMalloc(self.out_nbytes)
+            _, self.stream = cudart.cudaStreamCreate()
+
+            self.context.set_tensor_address("raw_frames", int(self.d_in))
+            self.context.set_tensor_address("video_features", int(self.d_out))
+        else:
+            self.stream = cuda.Stream()
+            self.h_in = cuda.pagelocked_empty(self.input_shape, dtype=np.float32)
+            self.h_out = cuda.pagelocked_empty(self.out_shape, dtype=np.float32)
+            self.d_in = cuda.mem_alloc(self.input_nbytes)
+            self.d_out = cuda.mem_alloc(self.out_nbytes)
+            self.bindings = [int(self.d_in), int(self.d_out)]
+
+        logger.info(f"Loaded VideoFrontend TensorRT Engine successfully ({self.backend}): {engine_path}")
+
+    def __call__(self, raw_frames: Any) -> np.ndarray:
+        return self.infer(raw_frames)
+
+    def infer(self, raw_frames: Any) -> np.ndarray:
+        if isinstance(raw_frames, torch.Tensor):
+            raw_frames = raw_frames.detach().cpu().numpy()
+        raw_frames = np.ascontiguousarray(raw_frames, dtype=np.float32)
+        if raw_frames.ndim == 4:
+            raw_frames = np.expand_dims(raw_frames, axis=0)
+
+        if self.backend == "cuda-python":
+            cudart.cudaMemcpy(self.d_in, raw_frames.ctypes.data, self.input_nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
+            self.context.execute_async_v3(self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            cudart.cudaMemcpy(self.h_out.ctypes.data, self.d_out, self.out_nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
+            return self.h_out.copy()
+        else:
+            np.copyto(self.h_in, raw_frames)
+            cuda.memcpy_htod_async(self.d_in, self.h_in, self.stream)
+            if hasattr(self.context, "execute_async_v2"):
+                self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+            else:
+                self.context.execute_v2(bindings=self.bindings)
+            cuda.memcpy_dtoh_async(self.h_out, self.d_out, self.stream)
+            self.stream.synchronize()
+            return np.copy(self.h_out)
+
+
 class ONNXRuntimeInference:
     def __init__(self, onnx_path: str):
         if not ORT_AVAILABLE:
@@ -274,6 +347,7 @@ class ModelPipelineService:
         fp16_engine = os.path.join(project_root, "weights", "multimodal_core_fold_00_fp16.engine")
         self.engine_path = fp32_engine if os.path.exists(fp32_engine) else fp16_engine
         self.audio_engine_path = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
+        self.video_engine_path = os.path.join(project_root, "weights", "video_frontend_fp32.engine")
         self.onnx_path = os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx")
         self.ckpt_path = os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "multimodal_best.pt")
         self.manifest_path = os.path.join(project_root, "samples", "manifest.csv")
@@ -287,8 +361,10 @@ class ModelPipelineService:
 
         self.runtime_name = "Not Loaded"
         self.audio_frontend_device = "cpu"
+        self.video_frontend_device = "cpu"
         self.model_runner = None
         self.frontend = None
+        self.video_frontend = None
         self.manifest_df = None
 
         self._init_service()
@@ -334,7 +410,19 @@ class ModelPipelineService:
             self.audio_frontend_device = "cpu"
             logger.info("AudioFrontend JIT traced and frozen for accelerated CPU inference.")
 
-        # 2. Load Core Model
+        # 2. Load VideoFrontend (Prefer TensorRT GPU engine if available)
+        self.video_frontend = None
+        self.video_frontend_device = "cpu"
+        if TRT_AVAILABLE and os.path.exists(self.video_engine_path):
+            try:
+                self.video_frontend = VideoFrontendTRT(self.video_engine_path)
+                self.video_frontend_device = f"gpu ({self.video_frontend.backend})"
+                logger.info(f"Loaded GPU VideoFrontend TensorRT Engine: {self.video_engine_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load TensorRT VideoFrontend: {e}. Falling back to CPU.")
+                self.video_frontend = None
+
+        # 3. Load Core Model
         if TRT_AVAILABLE and os.path.exists(self.engine_path):
             try:
                 self.model_runner = TensorRTInference(self.engine_path)
@@ -684,8 +772,7 @@ class ContinuousStreamManager:
                 audio_feat = feat.detach().cpu().numpy()
             t_audio = (time.perf_counter() - t_a0) * 1000.0
 
-            # 2. On-The-Fly Video Preprocessing:
-            # Extracts f0 (oldest) and f1 (latest) from video ring buffer, resizes and normalizes live
+            # 2. On-The-Fly Video Preprocessing (GPU TensorRT FP32 or CPU fallback):
             t_v0 = time.perf_counter()
             if len(self.video_ring) > 0:
                 f0 = self.video_ring[0]
@@ -699,10 +786,16 @@ class ContinuousStreamManager:
             if f1.shape[:2] != (224, 224):
                 f1 = cv2.resize(f1, (224, 224))
 
-            f0_rgb = cv2.cvtColor(f0, cv2.COLOR_BGR2RGB)
-            f1_rgb = cv2.cvtColor(f1, cv2.COLOR_BGR2RGB)
-            v_raw = np.concatenate([f0_rgb, f1_rgb], axis=-1).transpose(2, 0, 1)
-            video_feat = ((v_raw.astype(np.float32) / 255.0).reshape(1, 6, 224, 224) - self._mean) / self._std
+            pair_raw = np.stack([f0, f1], axis=0)
+
+            if hasattr(self.service, "video_frontend") and self.service.video_frontend is not None:
+                with self.service.engine_lock:
+                    video_feat = self.service.video_frontend.infer(pair_raw)
+            else:
+                f0_rgb = cv2.cvtColor(f0, cv2.COLOR_BGR2RGB)
+                f1_rgb = cv2.cvtColor(f1, cv2.COLOR_BGR2RGB)
+                v_raw = np.concatenate([f0_rgb, f1_rgb], axis=-1).transpose(2, 0, 1)
+                video_feat = ((v_raw.astype(np.float32) / 255.0).reshape(1, 6, 224, 224) - self._mean) / self._std
             t_video = (time.perf_counter() - t_v0) * 1000.0
 
             # 3. Model Inference on Jetson Orin Nano GPU (FP32)
@@ -819,6 +912,9 @@ async def startup_event():
     try:
         if stream_manager.is_available():
             stream_manager._ensure_loaded()
+        if hasattr(service, "video_frontend") and service.video_frontend is not None:
+            dummy_pair = np.zeros((2, 224, 224, 3), dtype=np.uint8)
+            service.video_frontend.infer(dummy_pair)
         # Warmup GPU TensorRT runner
         dummy_audio = np.zeros((1, 1, 128, 128), dtype=np.float32)
         dummy_video = np.zeros((1, 6, 224, 224), dtype=np.float32)
@@ -846,6 +942,7 @@ async def get_system_status():
         "status": "online",
         "runtime": service.runtime_name,
         "audio_frontend_device": service.audio_frontend_device,
+        "video_frontend_device": service.video_frontend_device,
         "device": "NVIDIA Jetson Orin Nano (MAXN Mode)" if TRT_AVAILABLE else "PC Host Environment",
         "total_test_samples": len(service.manifest_df) if service.manifest_df is not None else 0,
         "fold": "Fold 00 (Representative Edge Benchmark)",
