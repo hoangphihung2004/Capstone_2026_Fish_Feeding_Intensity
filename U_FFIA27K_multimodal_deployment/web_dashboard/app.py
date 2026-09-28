@@ -44,6 +44,15 @@ from fastapi.templating import Jinja2Templates
 from features.audio_frontend import AudioFrontend
 from runtime import InputTensorCache
 
+try:
+    import decord
+    decord.bridge.set_bridge("torch")
+except Exception:
+    pass
+
+_IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406, 0.485, 0.456, 0.406], dtype=torch.float32).view(6, 1, 1)
+_IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225, 0.229, 0.224, 0.225], dtype=torch.float32).view(6, 1, 1)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("AquaFeedServer")
 
@@ -227,6 +236,10 @@ class ModelPipelineService:
             except Exception as e:
                 logger.warning(f"Failed to load checkpoint weights into AudioFrontend: {e}")
         self.frontend.eval()
+        dummy_audio = torch.zeros((1, 128000), dtype=torch.float32)
+        with torch.no_grad():
+            self.frontend = torch.jit.freeze(torch.jit.trace(self.frontend, dummy_audio))
+        logger.info("AudioFrontend JIT traced and frozen for accelerated CPU inference.")
 
         # 2. Load Core Model
         if TRT_AVAILABLE and os.path.exists(self.engine_path):
@@ -252,9 +265,10 @@ class ModelPipelineService:
     def preprocess_audio(self, audio_path: str) -> Tuple[np.ndarray, float]:
         t0 = time.perf_counter()
         samples, original_sr = sf.read(audio_path, dtype="float32", always_2d=True)
-        waveform = torch.from_numpy(samples.T.copy())
-        if waveform.ndim == 2 and waveform.size(0) > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
+        if samples.shape[1] == 1:
+            waveform = torch.as_tensor(samples.T)
+        else:
+            waveform = torch.as_tensor(samples.T).mean(dim=0, keepdim=True)
         if original_sr != 64000:
             if original_sr not in self._resampler_cache:
                 self._resampler_cache[original_sr] = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=64000)
@@ -274,26 +288,27 @@ class ModelPipelineService:
 
     def preprocess_video(self, video_path: str, image_size: int = 224) -> Tuple[np.ndarray, float, Optional[str]]:
         t0 = time.perf_counter()
-        video_uint8 = None
+        normed_tensor = None
         preview_b64 = None
         try:
             from decord import VideoReader, cpu
-            vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
+            vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=4)
             if len(vr) > 0:
-                indices = [0, len(vr) - 1]
-                batch = vr.get_batch(indices).asnumpy()
-                image = np.concatenate([batch[0], batch[1]], axis=-1)
-                video_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
-                disp_bgr = cv2.cvtColor(batch[0], cv2.COLOR_RGB2BGR)
+                batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor
+                img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)
+                img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+                normed_tensor = img
+                # Extract preview frame for dashboard
+                disp_bgr = cv2.cvtColor(batch[0].numpy(), cv2.COLOR_RGB2BGR)
                 _, buf = cv2.imencode('.jpg', disp_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 preview_b64 = base64.b64encode(buf).decode('ascii')
         except Exception:
             pass
 
-        if video_uint8 is None:
+        if normed_tensor is None:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
-                video_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
+                normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
             else:
                 frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 indices = [0, max(0, frame_count - 1)]
@@ -314,13 +329,13 @@ class ModelPipelineService:
                 cap.release()
                 if len(frames) == 2:
                     video_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8)
+                    img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
+                    img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+                    normed_tensor = img
                 else:
-                    video_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
+                    normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
 
-        img = torch.from_numpy(video_uint8).float() / 255.0
-        mean = torch.tensor([0.485, 0.456, 0.406, 0.485, 0.456, 0.406]).view(6, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225, 0.229, 0.224, 0.225]).view(6, 1, 1)
-        video_normed = ((img - mean) / std).unsqueeze(0).numpy()
+        video_normed = normed_tensor.unsqueeze(0).numpy()
         elapsed = (time.perf_counter() - t0) * 1000.0
         return video_normed, elapsed, preview_b64
 

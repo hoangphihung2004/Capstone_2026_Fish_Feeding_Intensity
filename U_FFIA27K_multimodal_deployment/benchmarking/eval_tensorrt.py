@@ -45,6 +45,12 @@ import soundfile as sf
 import torch
 import torchaudio
 
+try:
+    import decord
+    decord.bridge.set_bridge("torch")
+except Exception:
+    pass
+
 from features.audio_frontend import AudioFrontend
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -285,8 +291,12 @@ class ONNXRuntimeInference:
 # ==============================================================================
 # 3. PREPROCESSING HELPERS
 # ==============================================================================
-def load_audio_frontend(checkpoint_path: str) -> AudioFrontend:
-    """Load AudioFrontend module with trained BatchNorm weights from checkpoint."""
+_IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406, 0.485, 0.456, 0.406], dtype=torch.float32).view(6, 1, 1)
+_IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225, 0.229, 0.224, 0.225], dtype=torch.float32).view(6, 1, 1)
+
+
+def load_audio_frontend(checkpoint_path: str) -> torch.nn.Module:
+    """Load AudioFrontend module with trained BatchNorm weights and JIT freeze for speed."""
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found at: {checkpoint_path}")
 
@@ -303,6 +313,12 @@ def load_audio_frontend(checkpoint_path: str) -> AudioFrontend:
     if missing or unexpected:
         raise RuntimeError(f"AudioFrontend checkpoint mismatch: missing={missing}, unexpected={unexpected}")
     frontend.eval()
+
+    # Accelerate AudioFrontend via TorchScript JIT freeze
+    dummy = torch.zeros((1, 128000), dtype=torch.float32)
+    with torch.no_grad():
+        frontend = torch.jit.freeze(torch.jit.trace(frontend, dummy))
+    logger.info("AudioFrontend JIT traced and frozen for accelerated CPU inference.")
     return frontend
 
 
@@ -311,16 +327,16 @@ _RESAMPLER_CACHE: Dict[Tuple[int, int], torchaudio.transforms.Resample] = {}
 
 def preprocess_audio(
     audio_path: str,
-    frontend: AudioFrontend,
+    frontend: torch.nn.Module,
     target_sr: int = 64000,
 ) -> Tuple[np.ndarray, float]:
     """Load WAV audio, resample to 64kHz, and compute Log-Mel Spectrogram (1, 1, 128, 128)."""
     t0 = time.perf_counter()
     samples, original_sr = sf.read(audio_path, dtype="float32", always_2d=True)
-    waveform = torch.from_numpy(samples.T.copy())
-
-    if waveform.ndim == 2 and waveform.size(0) > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
+    if samples.shape[1] == 1:
+        waveform = torch.as_tensor(samples.T)
+    else:
+        waveform = torch.as_tensor(samples.T).mean(dim=0, keepdim=True)
 
     if original_sr != target_sr:
         key = (original_sr, target_sr)
@@ -346,25 +362,25 @@ def preprocess_audio(
 def preprocess_video(video_path: str, image_size: int = 224) -> Tuple[np.ndarray, float]:
     """Decode first and last video frames and apply ImageNet normalization (1, 6, 224, 224)."""
     t0 = time.perf_counter()
-    video_uint8 = None
+    normed_tensor = None
 
-    # Try decord first for exact frame extraction matching training pipeline
+    # Try decord first for fast zero-copy frame extraction matching training pipeline
     try:
         from decord import VideoReader, cpu
-        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=4)
         if len(vr) > 0:
-            indices = [0, len(vr) - 1]
-            batch = vr.get_batch(indices).asnumpy()
-            image = np.concatenate([batch[0], batch[1]], axis=-1)
-            video_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
+            batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor [2, 224, 224, 3]
+            img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)
+            img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+            normed_tensor = img
     except Exception:
         pass
 
     # OpenCV fallback
-    if video_uint8 is None:
+    if normed_tensor is None:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            video_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
+            normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
         else:
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             indices = [0, max(0, frame_count - 1)]
@@ -378,16 +394,13 @@ def preprocess_video(video_path: str, image_size: int = 224) -> Tuple[np.ndarray
             cap.release()
             if len(frames) == 2:
                 video_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8)
+                img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
+                img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+                normed_tensor = img
             else:
-                video_uint8 = np.zeros((6, image_size, image_size), dtype=np.uint8)
+                normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
 
-    # Standard ImageNet normalization for both frames
-    img = torch.from_numpy(video_uint8).float() / 255.0
-    mean = torch.tensor([0.485, 0.456, 0.406, 0.485, 0.456, 0.406]).view(6, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225, 0.229, 0.224, 0.225]).view(6, 1, 1)
-    normed = (img - mean) / std
-
-    video_np = normed.unsqueeze(0).numpy()
+    video_np = normed_tensor.unsqueeze(0).numpy()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return video_np, elapsed_ms
 

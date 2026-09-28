@@ -18,6 +18,7 @@ fi
 docker run --rm \
   --runtime nvidia \
   --network host \
+  -e PYTHONUNBUFFERED=1 \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
   -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
   -v "${RESULTS_DIR}:/app/benchmarking/results" \
