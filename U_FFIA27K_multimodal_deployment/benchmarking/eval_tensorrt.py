@@ -367,7 +367,7 @@ def preprocess_video(video_path: str, image_size: int = 224) -> Tuple[np.ndarray
     # Try decord first for fast zero-copy frame extraction matching training pipeline
     try:
         from decord import VideoReader, cpu
-        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=4)
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
         if len(vr) > 0:
             batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor [2, 224, 224, 3]
             img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)

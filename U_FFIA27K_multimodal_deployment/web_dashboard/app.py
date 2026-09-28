@@ -292,7 +292,7 @@ class ModelPipelineService:
         preview_b64 = None
         try:
             from decord import VideoReader, cpu
-            vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=4)
+            vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
             if len(vr) > 0:
                 batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor
                 img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)
