@@ -147,7 +147,7 @@
 
           <!-- Video Stream Frame (Completely Clean & Unobstructed) -->
           <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-900 shadow-inner group flex items-center justify-center mb-2">
-            <video id="farm-video" class="w-full h-full object-cover" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
+            <video id="farm-video" class="w-full h-full object-cover" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
               <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" type="video/mp4">
             </video>
             <img id="farm-live-img" class="hidden w-full h-full object-cover" src="/static/img/farm_screen.png" alt="Live Pond Camera">
@@ -412,7 +412,12 @@
     function startLiveSimulation() {
       if (liveTimer) clearInterval(liveTimer);
       const farmVideo = document.getElementById('farm-video');
-      if (farmVideo) farmVideo.play().catch(() => {});
+      if (farmVideo) {
+        farmVideo.load();
+        farmVideo.play().catch(err => {
+          console.warn('Video playback notice:', err);
+        });
+      }
       runLiveStep();
       liveTimer = setInterval(runLiveStep, 2000);
     }
