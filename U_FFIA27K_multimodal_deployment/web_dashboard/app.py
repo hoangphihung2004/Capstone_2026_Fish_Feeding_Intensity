@@ -777,7 +777,7 @@ class ContinuousStreamManager:
             t_a0 = time.perf_counter()
             waveform_slice = self.audio_ring.get_window()
 
-            # Compute Raw Audio Oscilloscope Envelope (300 bins, DC-bias removed, Audacity-style)
+            # Compute High-Definition Raw Audio Oscilloscope Envelope (600 bins, ~3.3ms resolution)
             w_raw = waveform_slice[:128000]
             w_centered = w_raw - np.mean(w_raw)
 
@@ -785,20 +785,22 @@ class ContinuousStreamManager:
             rms_val = float(np.sqrt(np.mean(w_centered**2)))
             audio_rms_db = round(float(20 * np.log10(max(1e-5, rms_val))), 1)
 
-            n_bins = 300
-            bin_size = 128000 // n_bins  # 426 samples per bin (~6.6ms resolution)
+            n_bins = 600
+            bin_size = 128000 // n_bins  # 213 samples per bin (~3.3ms resolution)
             w_bins = w_centered[: n_bins * bin_size].reshape(n_bins, bin_size)
             bin_mins = w_bins.min(axis=1)
             bin_maxs = w_bins.max(axis=1)
+            bin_rms = np.sqrt(np.mean(w_bins**2, axis=1))
 
             # Auto-scale headroom: adaptive reference floor (0.12) to ensure wave is always crisp and visible
             headroom = max(0.12, min(0.60, peak_amp * 1.15))
             mins_norm = np.clip(bin_mins / headroom, -1.0, 1.0)
             maxs_norm = np.clip(bin_maxs / headroom, -1.0, 1.0)
+            rms_norm = np.clip(bin_rms / headroom, 0.0, 1.0)
 
             audio_envelope = [
-                [round(float(mn), 3), round(float(mx), 3)]
-                for mn, mx in zip(mins_norm, maxs_norm)
+                [round(float(mn), 3), round(float(mx), 3), round(float(r), 3)]
+                for mn, mx, r in zip(mins_norm, maxs_norm, rms_norm)
             ]
 
             if hasattr(self.service.frontend, "infer"):

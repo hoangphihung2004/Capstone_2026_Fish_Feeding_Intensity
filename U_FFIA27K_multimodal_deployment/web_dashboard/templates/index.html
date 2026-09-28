@@ -153,17 +153,51 @@
             <img id="farm-live-img" class="hidden w-full h-full object-contain" src="/static/img/farm_screen.png" alt="Live Pond Camera">
           </div>
 
-          <!-- Underwater Hydrophone Acoustic Waveform (Compact, Clean, Zero Space Wasted) -->
-          <div class="relative h-14 shrink-0 w-full rounded-xl bg-slate-950 px-2 py-1 border border-slate-800/80 mb-2 overflow-hidden shadow-inner flex items-center">
-            <!-- Floating Minimal Overlay Badges (Zero Vertical Layout Footprint) -->
-            <div class="absolute top-1 left-2 flex items-center gap-1 z-10 pointer-events-none opacity-60">
-              <span class="material-symbols-outlined text-primary-fixed-dim text-[12px]">graphic_eq</span>
-              <span class="text-[9px] font-mono uppercase tracking-wider text-slate-400">Audio Raw</span>
+          <!-- Underwater Hydrophone Acoustic Waveform (High-Definition Laboratory Oscillogram) -->
+          <div class="h-32 shrink-0 w-full rounded-xl bg-slate-950 px-3 py-2 border border-slate-800 flex flex-col justify-between mb-2 shadow-inner">
+            <!-- Header bar with telemetry -->
+            <div class="flex items-center justify-between text-[11px] font-label-sm text-slate-400">
+              <div class="flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-primary-fixed-dim text-[16px]">graphic_eq</span>
+                <span class="font-bold text-slate-200">HYDROPHONE ACOUSTIC OSCILLOGRAM</span>
+                <span class="text-slate-500 text-[10px] hidden sm:inline">(2.0s · 64 kHz · 600 Bins · 3.3ms Res)</span>
+              </div>
+              <div class="flex items-center gap-3 font-mono text-[10px]">
+                <div class="flex items-center gap-1">
+                  <span class="text-slate-500">Peak:</span>
+                  <span id="farm-audio-peak" class="font-bold text-slate-300 tabular-nums">0.000</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <span class="text-slate-500">RMS:</span>
+                  <span id="farm-audio-rms" class="font-bold text-primary-fixed-dim tabular-nums">-24.0 dB</span>
+                </div>
+              </div>
             </div>
-            <div class="absolute top-1 right-2 z-10 pointer-events-none opacity-70">
-              <span id="farm-audio-rms" class="text-[9px] font-mono text-primary-fixed-dim font-bold tabular-nums">-24.0 dB</span>
+
+            <!-- Canvas Container with Y-Axis Amplitude Ticks -->
+            <div class="relative flex-1 w-full my-1 min-h-0 flex items-stretch gap-1">
+              <!-- Y-Axis Labels -->
+              <div class="flex flex-col justify-between text-[8px] font-mono text-slate-500 select-none py-0.5 leading-none pr-0.5 text-right w-5 shrink-0">
+                <span>+1.0</span>
+                <span>+0.5</span>
+                <span class="text-slate-400">0.0</span>
+                <span>-0.5</span>
+                <span>-1.0</span>
+              </div>
+              <!-- Oscilloscope Canvas -->
+              <div class="relative flex-1 h-full min-w-0">
+                <canvas id="farm-audio-canvas" class="w-full h-full block"></canvas>
+              </div>
             </div>
-            <canvas id="farm-audio-canvas" class="w-full h-full block"></canvas>
+
+            <!-- Time Axis Labels aligned with 0.0s, 0.5s, 1.0s, 1.5s, 2.0s -->
+            <div class="flex items-center justify-between text-[9px] font-mono text-slate-500 pl-6 pr-0.5 leading-none">
+              <span>0.0s</span>
+              <span>0.5s</span>
+              <span class="text-slate-400">1.0s (Window Midpoint)</span>
+              <span>1.5s</span>
+              <span>2.0s</span>
+            </div>
           </div>
 
           <!-- Bottom Metadata Row for Live Pond -->
@@ -461,9 +495,19 @@
       const midY = h / 2;
       const maxAmp = (h / 2) * 0.92;
 
-      // 1. Technical Baseline & Time Grid
-      // Horizontal Center Baseline (0.0 Level)
-      ctx.strokeStyle = 'rgba(71, 85, 105, 0.7)';
+      // 1. Scientific Oscilloscope Grid
+      // Faint horizontal amplitude grid lines (+0.5, -0.5)
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.28)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, midY - 0.5 * maxAmp);
+      ctx.lineTo(w, midY - 0.5 * maxAmp);
+      ctx.moveTo(0, midY + 0.5 * maxAmp);
+      ctx.lineTo(w, midY + 0.5 * maxAmp);
+      ctx.stroke();
+
+      // Prominent Horizontal Center Baseline (0.0V level)
+      ctx.strokeStyle = 'rgba(71, 85, 105, 0.75)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.setLineDash([4, 3]);
@@ -472,12 +516,17 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Vertical Time Markers (0.5s, 1.0s, 1.5s)
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
+      // Vertical Time Markers (every 0.25s: 8 sections)
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.30)';
       ctx.lineWidth = 1;
-      for (let i = 1; i < 4; i++) {
-        const gx = (w / 4) * i;
+      for (let i = 1; i < 8; i++) {
+        const gx = (w / 8) * i;
         ctx.beginPath();
+        if (i % 2 === 0) {
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.50)'; // 0.5s, 1.0s, 1.5s markers are slightly more prominent
+        } else {
+          ctx.strokeStyle = 'rgba(51, 65, 85, 0.25)';
+        }
         ctx.moveTo(gx, 0);
         ctx.lineTo(gx, h);
         ctx.stroke();
@@ -489,10 +538,10 @@
       }
 
       const n = waveform.length;
-      const barWidth = Math.max(1.2, w / n);
+      const barWidth = Math.max(1.1, w / n);
 
-      // 2. Audacity / Soundcloud Raw Oscillogram Vertical Symmetrical Bars
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.50)'; // Translucent Cyan Body
+      // 2. Layer 1: Outer Transient Peak Bars (Audacity / DAW Body)
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.40)'; // Translucent Cyan Body
       for (let i = 0; i < n; i++) {
         const x = (i / n) * w;
         let mn = 0, mx = 0;
@@ -509,9 +558,22 @@
         ctx.fillRect(x, Math.min(yTop, yBottom), barWidth, barH);
       }
 
-      // 3. Crisp Top & Bottom Peak Envelopes (Audacity Spiky Outer Bounds)
-      ctx.lineWidth = 1.6;
-      ctx.strokeStyle = '#22d3ee'; // Sharp bright cyan
+      // 3. Layer 2: Inner RMS Acoustic Core (Continuous Sound Energy Power)
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.70)'; // Emerald Energy Core
+      for (let i = 0; i < n; i++) {
+        if (Array.isArray(waveform[i]) && waveform[i].length > 2) {
+          const x = (i / n) * w;
+          const rms = waveform[i][2];
+          const yRmsTop = midY - rms * maxAmp;
+          const yRmsBottom = midY + rms * maxAmp;
+          const rH = Math.max(1.0, yRmsBottom - yRmsTop);
+          ctx.fillRect(x, yRmsTop, barWidth, rH);
+        }
+      }
+
+      // 4. Layer 3: Razor-Sharp Glowing Outer Peak Contour (Fish Feeding Transient Spikes)
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#22d3ee'; // Sharp Neon Cyan
       ctx.shadowColor = '#06b6d4';
       ctx.shadowBlur = 4;
 
