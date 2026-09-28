@@ -108,11 +108,19 @@ def parse_args():
         default=os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx"),
         help="Path to fallback ONNX model file",
     )
+    default_audio = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
     parser.add_argument(
         "--audio_engine",
         type=str,
-        default="",
-        help="Path to compiled TensorRT AudioFrontend engine file (GPU, optional). Default is empty to preserve exact 97.08% paper baseline.",
+        default=default_audio if os.path.exists(default_audio) else "",
+        help="Path to compiled TensorRT AudioFrontend engine file (GPU, optional).",
+    )
+    default_video = os.path.join(project_root, "weights", "video_frontend_fp32.engine")
+    parser.add_argument(
+        "--video_engine",
+        type=str,
+        default=default_video if os.path.exists(default_video) else "",
+        help="Path to compiled TensorRT VideoFrontend engine file (GPU, optional).",
     )
     parser.add_argument(
         "--checkpoint",
@@ -335,6 +343,79 @@ class AudioFrontendTRT:
             return np.copy(self.h_out)
 
 
+class VideoFrontendTRT:
+    """Wrapper for GPU-accelerated Video Preprocessor TensorRT Engine (Flip, Concat, Normalize)."""
+
+    def __init__(self, engine_path: str):
+        if not TRT_AVAILABLE:
+            raise RuntimeError("Neither cuda-python nor PyCUDA is installed.")
+        if not os.path.exists(engine_path):
+            raise FileNotFoundError(f"VideoFrontend TensorRT engine not found at: {engine_path}")
+
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            self.runtime = trt.Runtime(self.logger)
+            self.engine = self.runtime.deserialize_cuda_engine(f.read())
+        if self.engine is None:
+            raise RuntimeError(f"Failed to deserialize VideoFrontend TensorRT engine from: {engine_path}")
+
+        self.context = self.engine.create_execution_context()
+        self.backend = TRT_BACKEND
+
+        # Input: raw_frames [1, 2, 224, 224, 3] float32
+        self.input_shape = (1, 2, 224, 224, 3)
+        self.input_nbytes = int(np.prod(self.input_shape) * 4)
+
+        # Output: video_features [1, 6, 224, 224] float32
+        self.out_shape = (1, 6, 224, 224)
+        self.out_nbytes = int(np.prod(self.out_shape) * 4)
+        self.h_out = np.zeros(self.out_shape, dtype=np.float32)
+
+        if self.backend == "cuda-python":
+            _, self.d_in = cudart.cudaMalloc(self.input_nbytes)
+            _, self.d_out = cudart.cudaMalloc(self.out_nbytes)
+            _, self.stream = cudart.cudaStreamCreate()
+
+            self.context.set_tensor_address("raw_frames", int(self.d_in))
+            self.context.set_tensor_address("video_features", int(self.d_out))
+        else:
+            self.stream = cuda.Stream()
+            self.h_in = cuda.pagelocked_empty(self.input_shape, dtype=np.float32)
+            self.h_out = cuda.pagelocked_empty(self.out_shape, dtype=np.float32)
+            self.d_in = cuda.mem_alloc(self.input_nbytes)
+            self.d_out = cuda.mem_alloc(self.out_nbytes)
+            self.bindings = [int(self.d_in), int(self.d_out)]
+
+        logger.info(f"Loaded VideoFrontend TensorRT Engine successfully ({self.backend}): {engine_path}")
+
+    def __call__(self, raw_frames: Any) -> np.ndarray:
+        return self.infer(raw_frames)
+
+    def infer(self, raw_frames: Any) -> np.ndarray:
+        if isinstance(raw_frames, torch.Tensor):
+            raw_frames = raw_frames.detach().cpu().numpy()
+        raw_frames = np.ascontiguousarray(raw_frames, dtype=np.float32)
+        if raw_frames.ndim == 4:
+            raw_frames = np.expand_dims(raw_frames, axis=0)
+
+        if self.backend == "cuda-python":
+            cudart.cudaMemcpy(self.d_in, raw_frames.ctypes.data, self.input_nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
+            self.context.execute_async_v3(self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            cudart.cudaMemcpy(self.h_out.ctypes.data, self.d_out, self.out_nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
+            return self.h_out.copy()
+        else:
+            np.copyto(self.h_in, raw_frames)
+            cuda.memcpy_htod_async(self.d_in, self.h_in, self.stream)
+            if hasattr(self.context, "execute_async_v2"):
+                self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+            else:
+                self.context.execute_v2(bindings=self.bindings)
+            cuda.memcpy_dtoh_async(self.h_out, self.d_out, self.stream)
+            self.stream.synchronize()
+            return np.copy(self.h_out)
+
+
 # ==============================================================================
 # 2. ONNX RUNTIME FALLBACK WRAPPER
 # ==============================================================================
@@ -446,48 +527,40 @@ def preprocess_audio(
     return audio_feature_np, elapsed_ms
 
 
-def preprocess_video(video_path: str, image_size: int = 224) -> Tuple[np.ndarray, float]:
+def preprocess_video(video_path: str, video_frontend: Optional[Any] = None, image_size: int = 224) -> Tuple[np.ndarray, float]:
     """Decode first and last video frames and apply ImageNet normalization (1, 6, 224, 224)."""
     t0 = time.perf_counter()
-    normed_tensor = None
+    pair_bgr = None
 
-    # Try decord first for fast zero-copy frame extraction matching training pipeline
-    try:
-        from decord import VideoReader, cpu
-        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
-        if len(vr) > 0:
-            batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor [2, 224, 224, 3]
-            img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)
-            img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
-            normed_tensor = img
-    except Exception:
-        pass
+    cap = cv2.VideoCapture(video_path)
+    if cap.isOpened():
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        indices = [0, max(0, frame_count - 1)]
+        frames = []
+        for f_idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+            ok, frame = cap.read()
+            if ok:
+                if frame.shape[:2] != (image_size, image_size):
+                    frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_AREA)
+                frames.append(frame)
+        cap.release()
+        if len(frames) == 2:
+            pair_bgr = np.stack(frames, axis=0)
 
-    # OpenCV fallback
-    if normed_tensor is None:
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
-        else:
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            indices = [0, max(0, frame_count - 1)]
-            frames = []
-            for f_idx in indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-                ok, frame = cap.read()
-                if ok:
-                    frame = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (image_size, image_size), interpolation=cv2.INTER_AREA)
-                    frames.append(frame)
-            cap.release()
-            if len(frames) == 2:
-                video_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8)
-                img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
-                img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
-                normed_tensor = img
-            else:
-                normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
+    if pair_bgr is None:
+        pair_bgr = np.zeros((2, image_size, image_size, 3), dtype=np.uint8)
 
-    video_np = normed_tensor.unsqueeze(0).numpy()
+    if video_frontend is not None and hasattr(video_frontend, "infer"):
+        video_np = video_frontend.infer(pair_bgr)
+    else:
+        f0_rgb = cv2.cvtColor(pair_bgr[0], cv2.COLOR_BGR2RGB)
+        f1_rgb = cv2.cvtColor(pair_bgr[1], cv2.COLOR_BGR2RGB)
+        video_uint8 = np.concatenate([f0_rgb, f1_rgb], axis=-1).transpose(2, 0, 1).astype(np.uint8)
+        img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
+        img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+        video_np = img.unsqueeze(0).numpy()
+
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return video_np, elapsed_ms
 
@@ -558,6 +631,7 @@ def print_ascii_dashboard(
     latency_stats: Dict[str, float],
     runtime_name: str,
     audio_frontend_info: str = "GPU TensorRT",
+    video_frontend_info: str = "GPU TensorRT",
     baseline_acc: float = 0.971006,
 ):
     """Print clean, professional ASCII summary dashboard in the Terminal."""
@@ -570,6 +644,7 @@ def print_ascii_dashboard(
     print("=" * 76)
     print(f" Runtime Engine:      {runtime_name}")
     print(f" Audio Frontend:      {audio_frontend_info}")
+    print(f" Video Frontend:      {video_frontend_info}")
     print(" Target Hardware:     NVIDIA Jetson Orin Nano")
     print(f" Total Evaluated:     {metrics['total_samples']:,} samples")
     print(f" Accuracy Achieved:   {acc * 100.0:.2f}% ({metrics['correct_samples']:,} / {metrics['total_samples']:,})")
@@ -666,6 +741,19 @@ def main():
         audio_frontend_device = "CPU (TorchScript JIT)"
         logger.info(f"AudioFrontend device: {audio_frontend_device}")
 
+    # 2b. Load VideoFrontend (Prefer GPU TensorRT engine if available)
+    video_frontend = None
+    video_frontend_device = "CPU (OpenCV/Decord)"
+    if args.video_engine and TRT_AVAILABLE and os.path.exists(args.video_engine):
+        try:
+            video_frontend = VideoFrontendTRT(args.video_engine)
+            video_frontend_device = f"GPU TensorRT ({video_frontend.backend})"
+            logger.info(f"Loaded GPU VideoFrontend TensorRT Engine: {args.video_engine}")
+        except Exception as exc:
+            logger.warning(f"Failed to load VideoFrontend TensorRT Engine: {exc}. Falling back to CPU.")
+            video_frontend = None
+    logger.info(f"VideoFrontend device: {video_frontend_device}")
+
     # 3. Load Manifest
     logger.info(f"Loading samples manifest: {args.manifest}")
     df = pd.read_csv(args.manifest)
@@ -690,6 +778,7 @@ def main():
     # 4. Warmup
     logger.info(f"Warming up inference engines for {args.warmup} iterations...")
     dummy_raw_audio = torch.zeros((1, 128000), dtype=torch.float32)
+    dummy_raw_pair = np.zeros((2, 224, 224, 3), dtype=np.uint8)
     dummy_audio = np.zeros((1, 1, 128, 128), dtype=np.float32)
     dummy_video = np.zeros((1, 6, 224, 224), dtype=np.float32)
     for _ in range(args.warmup):
@@ -698,6 +787,8 @@ def main():
         else:
             with torch.no_grad():
                 frontend(dummy_raw_audio)
+        if video_frontend is not None and hasattr(video_frontend, "infer"):
+            video_frontend.infer(dummy_raw_pair)
         engine_runner.infer(dummy_audio, dummy_video)
 
     # 5. Benchmark Loop
@@ -729,7 +820,7 @@ def main():
             a_file = samples_dir / row["audio_path"]
             lbl = int(row["label"])
             a_feat, t_a = preprocess_audio(str(a_file), frontend)
-            v_feat, t_v = preprocess_video(str(v_file))
+            v_feat, t_v = preprocess_video(str(v_file), video_frontend)
             return idx, lbl, a_feat, v_feat, t_a, t_v
 
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -788,7 +879,7 @@ def main():
 
             # Preprocessing
             audio_feat, t_audio = preprocess_audio(str(a_file), frontend)
-            video_feat, t_video = preprocess_video(str(v_file))
+            video_feat, t_video = preprocess_video(str(v_file), video_frontend)
 
             # Model Inference
             t_gpu_0 = time.perf_counter()
@@ -831,7 +922,13 @@ def main():
     }
 
     # 7. Print Terminal ASCII Dashboard
-    print_ascii_dashboard(metrics, latency_stats, runtime_name, audio_frontend_info=audio_frontend_device)
+    print_ascii_dashboard(
+        metrics,
+        latency_stats,
+        runtime_name,
+        audio_frontend_info=audio_frontend_device,
+        video_frontend_info=video_frontend_device,
+    )
 
     # 8. Save Metrics to JSON
     summary_payload = {
@@ -843,6 +940,7 @@ def main():
             "torch_version": torch.__version__,
             "cuda_available": torch.cuda.is_available(),
             "audio_frontend_device": audio_frontend_device,
+            "video_frontend_device": video_frontend_device,
         },
     }
 
