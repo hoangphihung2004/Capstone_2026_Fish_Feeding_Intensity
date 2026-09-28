@@ -121,13 +121,13 @@
     <div id="view-farm" class="h-full flex flex-col overflow-hidden">
       <!-- 2-COLUMN BALANCED GRID -->
       <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
-        <!-- KHỐI TRÁI: LIVE CAMERA (7 Cols) -->
+        <!-- KHỐI TRÁI: LIVE MULTIMODAL STREAM (7 Cols) -->
         <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
           <!-- Card Header with Live Simulation Controls in One Clean Line -->
           <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
             <div class="flex items-center gap-2">
-              <span class="material-symbols-outlined text-primary text-[20px]">videocam</span>
-              <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Live Camera</h2>
+              <span class="material-symbols-outlined text-primary text-[20px]">sensors</span>
+              <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Live Multimodal Stream (Camera & Hydrophone)</h2>
             </div>
 
             <!-- Right Controls: Timestamp & Play/Pause & Reset -->
@@ -153,8 +153,38 @@
             <img id="farm-live-img" class="hidden w-full h-full object-cover" src="/static/img/farm_screen.png" alt="Live Pond Camera">
           </div>
 
+          <!-- Underwater Hydrophone Acoustic Waveform (Real-time Oscilloscope) -->
+          <div class="h-20 shrink-0 w-full rounded-xl bg-slate-950 px-3 py-1.5 border border-slate-800 flex flex-col justify-between mb-2 shadow-inner">
+            <!-- Waveform Header -->
+            <div class="flex items-center justify-between text-[11px] font-label-sm text-slate-400">
+              <div class="flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-primary-fixed-dim text-[15px]">graphic_eq</span>
+                <span class="font-bold text-slate-200">HYDROPHONE ACOUSTIC STREAM</span>
+                <span class="text-slate-500 text-[10px] hidden sm:inline">(2.0s Window · 64 kHz)</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-slate-400">RMS:</span>
+                <span id="farm-audio-rms" class="font-mono text-primary-fixed-dim font-bold text-[11px] tabular-nums">-24.0 dB</span>
+              </div>
+            </div>
+
+            <!-- Oscilloscope Canvas -->
+            <div class="relative flex-1 w-full my-0.5 min-h-0">
+              <canvas id="farm-audio-canvas" class="w-full h-full block"></canvas>
+            </div>
+
+            <!-- Time Axis Labels -->
+            <div class="flex items-center justify-between text-[9px] font-mono text-slate-500 px-0.5 leading-none">
+              <span>0.0s</span>
+              <span>0.5s</span>
+              <span>1.0s</span>
+              <span>1.5s</span>
+              <span>2.0s</span>
+            </div>
+          </div>
+
           <!-- Bottom Metadata Row for Live Pond -->
-          <div class="flex items-center justify-between text-xs text-outline pt-2 border-t border-surface-container-low shrink-0">
+          <div class="flex items-center justify-between text-xs text-outline pt-1.5 border-t border-surface-container-low shrink-0">
             <div>Feed Relay: <span id="farm-relay-status" class="font-bold text-error uppercase font-mono">OFF (CUTOFF)</span></div>
             <div class="flex items-center gap-1 font-body-sm text-outline">
               <span id="farm-cam-fps-val" class="font-bold text-primary font-mono text-xs tabular-nums">9.4</span>
@@ -305,6 +335,7 @@
   <script>
     let liveTimer = null;
     let isLiveRunning = true;
+    let currentAudioWaveform = null;
 
     async function runLiveStep() {
       if (!isLiveRunning) return;
@@ -407,6 +438,98 @@
       if (farmLiveImg && data.frame_base64) {
         farmLiveImg.src = 'data:image/jpeg;base64,' + data.frame_base64;
       }
+
+      // 5. Underwater Hydrophone Acoustic Waveform
+      const audioTel = data.audio_telemetry || {};
+      const farmAudioRms = document.getElementById('farm-audio-rms');
+      if (farmAudioRms && audioTel.rms_db !== undefined) {
+        farmAudioRms.textContent = `${audioTel.rms_db.toFixed(1)} dB`;
+      }
+      if (audioTel.waveform) {
+        currentAudioWaveform = audioTel.waveform;
+        drawAudioWaveform(audioTel.waveform);
+      }
+    }
+
+    function drawAudioWaveform(waveform) {
+      const canvas = document.getElementById('farm-audio-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = rect.width;
+      const h = rect.height;
+
+      if (w === 0 || h === 0) return;
+
+      if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+      }
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, w, h);
+
+      // Subtle horizontal baseline
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.setLineDash([3, 3]);
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Subtle vertical time markers (0.5s, 1.0s, 1.5s)
+      for (let i = 1; i < 4; i++) {
+        const gx = (w / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, h);
+        ctx.stroke();
+      }
+
+      if (!waveform || waveform.length === 0) {
+        ctx.restore();
+        return;
+      }
+
+      const midY = h / 2;
+      const maxAmp = (h / 2) * 0.90;
+
+      // Filled gradient area under waveform
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, 'rgba(107, 216, 203, 0.35)');
+      grad.addColorStop(0.5, 'rgba(0, 131, 120, 0.06)');
+      grad.addColorStop(1, 'rgba(107, 216, 203, 0.35)');
+
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (let i = 0; i < waveform.length; i++) {
+        const x = (i / (waveform.length - 1)) * w;
+        const y = midY - (waveform[i] * maxAmp);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, midY);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Glowing stroke line
+      ctx.shadowColor = '#6bd8cb';
+      ctx.shadowBlur = 4;
+      ctx.strokeStyle = '#6bd8cb';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let i = 0; i < waveform.length; i++) {
+        const x = (i / (waveform.length - 1)) * w;
+        const y = midY - (waveform[i] * maxAmp);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
     }
 
     function startLiveSimulation() {
@@ -453,6 +576,12 @@
       if (e.key === ' ') {
         e.preventDefault();
         toggleLiveSimulation();
+      }
+    });
+
+    window.addEventListener('resize', function () {
+      if (currentAudioWaveform) {
+        drawAudioWaveform(currentAudioWaveform);
       }
     });
 

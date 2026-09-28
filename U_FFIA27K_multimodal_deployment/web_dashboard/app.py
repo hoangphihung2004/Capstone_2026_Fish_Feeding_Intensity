@@ -776,6 +776,16 @@ class ContinuousStreamManager:
             # Slices the rolling 128k samples from circular buffer and runs TensorRT on GPU
             t_a0 = time.perf_counter()
             waveform_slice = self.audio_ring.get_window()
+
+            # Subsample waveform to 128 points for real-time oscilloscope visualization
+            w_reshaped = waveform_slice[:128000].reshape(128, 1000)
+            w_max = w_reshaped.max(axis=1)
+            w_min = w_reshaped.min(axis=1)
+            w_peaks = np.where(np.abs(w_max) >= np.abs(w_min), w_max, w_min)
+            audio_waveform = [round(float(x), 3) for x in w_peaks]
+            rms_val = float(np.sqrt(np.mean(waveform_slice**2)))
+            audio_rms_db = round(float(20 * np.log10(max(1e-5, rms_val))), 1)
+
             if hasattr(self.service.frontend, "infer"):
                 with self.service.engine_lock:
                     audio_feat = self.service.frontend.infer(waveform_slice)
@@ -866,6 +876,12 @@ class ContinuousStreamManager:
                     "status": feeder_status,
                     "reason": feeder_reason,
                     "color": feeder_color,
+                },
+                "audio_telemetry": {
+                    "waveform": audio_waveform,
+                    "rms_db": audio_rms_db,
+                    "window_sec": self.window_sec,
+                    "sample_rate": 64000,
                 },
                 "frame_base64": None,
                 "stream_info": {
