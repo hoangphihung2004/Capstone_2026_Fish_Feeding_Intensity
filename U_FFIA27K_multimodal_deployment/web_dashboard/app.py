@@ -644,20 +644,20 @@ class ContinuousStreamManager:
 
     def __init__(self, pipeline_service: ModelPipelineService):
         self.service = pipeline_service
-        self.video_rel = "continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak.mp4"
-        self.audio_rel = "continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak.wav"
+        self.video_rel = "continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4"
+        self.audio_rel = "continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.wav"
         self.video_path = os.path.join(project_root, "samples", self.video_rel)
         self.audio_path = os.path.join(project_root, "samples", self.audio_rel)
 
         # Pre-downscaled 224x224 video for fast frame extraction if available
-        video_224_rel = "continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak_224.mp4"
+        video_224_rel = "continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak_224.mp4"
         video_224_path = os.path.join(project_root, "samples", video_224_rel)
         self.decode_video_path = video_224_path if os.path.exists(video_224_path) else self.video_path
 
         self.current_step = 0
         self.window_sec = 2.0
-        self.total_duration_sec = 570.0
-        self.total_steps = int(self.total_duration_sec / self.window_sec)  # 285 steps
+        self.total_duration_sec = 258.0
+        self.total_steps = int(self.total_duration_sec / self.window_sec)  # 129 steps
 
         self.video_ring = collections.deque(maxlen=50)
         self.audio_ring = AudioCircularBuffer(capacity=128000)
@@ -863,7 +863,7 @@ class ContinuousStreamManager:
                     "window_sec": self.window_sec,
                     "video_url": f"/samples/{self.video_rel}",
                     "audio_url": f"/samples/{self.audio_rel}",
-                    "session": "2022_6_18 · AM_100",
+                    "session": "2022_6_25 · PM_100",
                 },
             }
 
@@ -1016,7 +1016,7 @@ async def get_live_simulation_info():
         "total_steps": stream_manager.total_steps,
         "window_sec": stream_manager.window_sec,
         "total_duration_sec": stream_manager.total_duration_sec,
-        "session": "2022_6_18 · AM_100",
+        "session": "2022_6_25 · PM_100",
         "video_url": f"/samples/{stream_manager.video_rel}",
         "audio_url": f"/samples/{stream_manager.audio_rel}",
     }

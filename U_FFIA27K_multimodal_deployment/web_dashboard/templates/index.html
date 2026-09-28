@@ -134,7 +134,7 @@
             <div class="flex items-center gap-2">
               <div class="flex items-center gap-1.5 bg-surface-container-low px-2 py-0.5 rounded-lg border border-surface-container text-xs">
                 <span class="material-symbols-outlined text-primary text-[14px]">schedule</span>
-                <span id="farm-stream-time" class="font-mono text-xs font-bold text-on-surface">00:00 / 09:30</span>
+                <span id="farm-stream-time" class="font-mono text-xs font-bold text-on-surface">00:00 / 04:18</span>
               </div>
               <button id="farm-play-btn" onclick="toggleLiveSimulation()" title="Play / Pause Live Feed" class="h-7 w-7 rounded-lg bg-surface-container hover:bg-primary-container text-primary flex items-center justify-center border border-surface-container-high shadow-2xs transition-all active:scale-95">
                 <span id="farm-play-icon" class="material-symbols-outlined text-[16px]">pause</span>
@@ -148,7 +148,7 @@
           <!-- Video Stream Frame (Completely Clean & Unobstructed) -->
           <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-900 shadow-inner group flex items-center justify-center mb-2">
             <video id="farm-video" class="w-full h-full object-cover" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
-              <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak.mp4" type="video/mp4">
+              <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" type="video/mp4">
             </video>
             <img id="farm-live-img" class="hidden w-full h-full object-cover" src="/static/img/farm_screen.png" alt="Live Pond Camera">
           </div>
