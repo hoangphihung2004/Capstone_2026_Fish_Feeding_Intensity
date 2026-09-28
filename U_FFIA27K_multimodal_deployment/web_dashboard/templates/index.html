@@ -156,6 +156,10 @@
           <!-- Bottom Metadata Row for Live Pond -->
           <div class="flex items-center justify-between text-xs text-outline pt-2 border-t border-surface-container-low shrink-0">
             <div>Feed Relay: <span id="farm-relay-status" class="font-bold text-error uppercase font-mono">OFF (CUTOFF)</span></div>
+            <div class="flex items-center gap-1.5 font-body-sm text-outline">
+              <span>Pipeline:</span>
+              <span id="farm-cam-fps" class="font-bold text-primary font-mono text-xs">9.4 FPS</span>
+            </div>
           </div>
         </section>
 
@@ -214,22 +218,22 @@
 
             <!-- 6 Harmonious Telemetry Stat Boxes (2x3 Grid) -->
             <div class="grid grid-cols-2 gap-2 sm:gap-2.5 my-auto shrink-0">
-              <!-- Stat 1: Latency (Total Pipeline) -->
+              <!-- Stat 1: Data Prep (Audio + Video) -->
               <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
-                  <span>Latency</span>
-                  <span class="material-symbols-outlined text-[16px] text-primary">timer</span>
+                  <span>Data Prep</span>
+                  <span class="material-symbols-outlined text-[16px] text-primary">perm_media</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-latency">112.0</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-dataprep">79.5</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
               </div>
 
-              <!-- Stat 2: FPS (Total Pipeline) -->
+              <!-- Stat 2: AI Inference (TensorRT Core) -->
               <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
-                  <span>FPS</span>
-                  <span class="material-symbols-outlined text-[16px] text-secondary">speed</span>
+                  <span>AI Inference</span>
+                  <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-fps">8.9</span> <span class="text-xs font-label-sm text-outline">FPS</span></div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-inference">26.4</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
               </div>
 
               <!-- Stat 3: GPU Load -->
@@ -335,13 +339,21 @@
       }
 
       // 3. Hardware & Telemetry Stats
-      const farmStatLat = document.getElementById('farm-stat-latency');
-      const farmStatFps = document.getElementById('farm-stat-fps');
+      const farmStatDataPrep = document.getElementById('farm-stat-dataprep');
+      const farmStatInference = document.getElementById('farm-stat-inference');
+      const farmCamFps = document.getElementById('farm-cam-fps');
       const farmStreamTime = document.getElementById('farm-stream-time');
       const farmRelayStatus = document.getElementById('farm-relay-status');
 
-      if (farmStatLat) farmStatLat.textContent = (lat.total_ms !== undefined) ? lat.total_ms : (lat.gpu_ms || '112.0');
-      if (farmStatFps) farmStatFps.textContent = (lat.pipeline_fps !== undefined) ? lat.pipeline_fps : (lat.fps || '8.9');
+      const aMs = parseFloat(lat.audio_ms) || 0;
+      const vMs = parseFloat(lat.video_ms) || 0;
+      const dataPrepMs = (aMs + vMs).toFixed(1);
+      const gpuMs = lat.gpu_ms !== undefined ? lat.gpu_ms : '26.4';
+      const pipeFps = lat.pipeline_fps !== undefined ? lat.pipeline_fps : '9.4';
+
+      if (farmStatDataPrep) farmStatDataPrep.textContent = dataPrepMs;
+      if (farmStatInference) farmStatInference.textContent = gpuMs;
+      if (farmCamFps) farmCamFps.textContent = pipeFps + ' FPS';
       if (farmStreamTime && sInfo.time_str) farmStreamTime.textContent = sInfo.time_str;
       if (farmRelayStatus && feeder.relay) {
         farmRelayStatus.textContent = feeder.relay === 'ON' ? 'ON (FEEDING)' : 'OFF (CUTOFF)';
