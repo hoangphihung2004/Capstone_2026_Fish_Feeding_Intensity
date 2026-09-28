@@ -214,22 +214,22 @@
 
             <!-- 6 Harmonious Telemetry Stat Boxes (2x3 Grid) -->
             <div class="grid grid-cols-2 gap-2 sm:gap-2.5 my-auto shrink-0">
-              <!-- Stat 1: Inference Latency -->
+              <!-- Stat 1: Latency (Total Pipeline) -->
               <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
-                  <span>Inference Latency</span>
+                  <span>Latency</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">timer</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-latency">12.5</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-latency">112.0</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
               </div>
 
-              <!-- Stat 2: Processing FPS -->
+              <!-- Stat 2: FPS (Total Pipeline) -->
               <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
-                  <span>Processing FPS</span>
+                  <span>FPS</span>
                   <span class="material-symbols-outlined text-[16px] text-secondary">speed</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-fps">79.2</span> <span class="text-xs font-label-sm text-outline">FPS</span></div>
+                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-fps">8.9</span> <span class="text-xs font-label-sm text-outline">FPS</span></div>
               </div>
 
               <!-- Stat 3: GPU Load -->
@@ -340,8 +340,8 @@
       const farmStreamTime = document.getElementById('farm-stream-time');
       const farmRelayStatus = document.getElementById('farm-relay-status');
 
-      if (farmStatLat) farmStatLat.textContent = lat.gpu_ms || '12.5';
-      if (farmStatFps) farmStatFps.textContent = lat.fps || '79.2';
+      if (farmStatLat) farmStatLat.textContent = (lat.total_ms !== undefined) ? lat.total_ms : (lat.gpu_ms || '112.0');
+      if (farmStatFps) farmStatFps.textContent = (lat.pipeline_fps !== undefined) ? lat.pipeline_fps : (lat.fps || '8.9');
       if (farmStreamTime && sInfo.time_str) farmStreamTime.textContent = sInfo.time_str;
       if (farmRelayStatus && feeder.relay) {
         farmRelayStatus.textContent = feeder.relay === 'ON' ? 'ON (FEEDING)' : 'OFF (CUTOFF)';
