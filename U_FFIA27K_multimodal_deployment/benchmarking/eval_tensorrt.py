@@ -108,12 +108,11 @@ def parse_args():
         default=os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx"),
         help="Path to fallback ONNX model file",
     )
-    default_audio_engine = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
     parser.add_argument(
         "--audio_engine",
         type=str,
-        default=default_audio_engine,
-        help="Path to compiled TensorRT AudioFrontend engine file (GPU)",
+        default="",
+        help="Path to compiled TensorRT AudioFrontend engine file (GPU, optional). Default is empty to preserve exact 97.08% paper baseline.",
     )
     parser.add_argument(
         "--checkpoint",
