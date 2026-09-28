@@ -36,9 +36,10 @@ import soundfile as sf
 import torch
 import torchaudio
 import subprocess
+import mimetypes
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -900,8 +901,78 @@ os.makedirs(static_dir, exist_ok=True)
 os.makedirs(templates_dir, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-if os.path.exists(samples_dir):
-    app.mount("/samples", StaticFiles(directory=samples_dir), name="samples")
+
+@app.get("/samples/{file_path:path}")
+@app.head("/samples/{file_path:path}")
+async def serve_sample_media(file_path: str, request: Request):
+    full_path = os.path.realpath(os.path.join(samples_dir, file_path))
+    real_samples = os.path.realpath(samples_dir)
+    if not full_path.startswith(real_samples) or not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="Sample media file not found")
+
+    file_size = os.path.getsize(full_path)
+    content_type, _ = mimetypes.guess_type(full_path)
+    if content_type is None:
+        content_type = "video/mp4" if full_path.endswith(".mp4") else "application/octet-stream"
+
+    range_header = request.headers.get("range")
+    if request.method == "HEAD":
+        headers = {
+            "Content-Length": str(file_size),
+            "Content-Type": content_type,
+            "Accept-Ranges": "bytes",
+        }
+        return Response(status_code=200, headers=headers)
+
+    if not range_header or not range_header.startswith("bytes="):
+        def full_iter():
+            with open(full_path, "rb") as f:
+                while chunk := f.read(1024 * 512):
+                    yield chunk
+        return StreamingResponse(
+            full_iter(),
+            status_code=200,
+            headers={
+                "Content-Length": str(file_size),
+                "Content-Type": content_type,
+                "Accept-Ranges": "bytes",
+            },
+        )
+
+    # Parse Range: bytes=start-end
+    range_val = range_header.strip().split("=")[1]
+    parts = range_val.split("-")
+    start = int(parts[0]) if parts[0] else 0
+    end = int(parts[1]) if parts[1] else file_size - 1
+    if end >= file_size:
+        end = file_size - 1
+    if start > end or start >= file_size:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+
+    content_length = end - start + 1
+
+    def range_iter(start_pos: int, length: int):
+        with open(full_path, "rb") as f:
+            f.seek(start_pos)
+            remaining = length
+            chunk_size = 1024 * 512
+            while remaining > 0:
+                chunk = f.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        range_iter(start, content_length),
+        status_code=206,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+            "Content-Type": content_type,
+        },
+    )
 
 templates = Jinja2Templates(directory=templates_dir)
 
