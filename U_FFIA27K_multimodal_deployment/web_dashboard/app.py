@@ -650,10 +650,12 @@ class ContinuousStreamManager:
         self.video_path = os.path.join(project_root, "samples", self.video_rel)
         self.audio_path = os.path.join(project_root, "samples", self.audio_rel)
 
-        # Pre-downscaled 224x224 video for fast frame extraction if available
-        video_224_rel = "continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak_224.mp4"
-        video_224_path = os.path.join(project_root, "samples", video_224_rel)
-        self.decode_video_path = video_224_path if os.path.exists(video_224_path) else self.video_path
+        # Native Camera / Video Ingestion:
+        # Directly reads raw native resolution frames (1080p, 720p, 4K) from hardware camera or simulation file.
+        # Supports hardware USB/CSI cameras (e.g., CAMERA_SOURCE=0) or RTSP streams (CAMERA_SOURCE=rtsp://...).
+        # ZERO reliance on pre-downscaled files.
+        self.camera_source = os.environ.get("CAMERA_SOURCE", self.video_path)
+        self.decode_video_path = int(self.camera_source) if self.camera_source.isdigit() else self.camera_source
 
         self.current_step = 0
         self.window_sec = 2.0
@@ -757,6 +759,16 @@ class ContinuousStreamManager:
                         chunk_64k = chunk_raw
                     self.audio_ring.extend(chunk_64k[:128000])
 
+            # =========================================================================
+            # PIPELINE PROCESSING LATENCY:
+            # Starts strictly when both frames (f0 at t=0s and f1 at t=2.0s) and full
+            # audio window (128k samples) have arrived and are available in the buffers.
+            # Measures:
+            #   1) Audio extraction & GPU STFT Spectrogram (t_audio)
+            #   2) Video on-the-fly extraction, resize native 1080p -> 224x224 & norm (t_video)
+            #   3) TensorRT Multimodal Model Inference on Jetson Orin GPU (t_gpu)
+            #   4) Feeder actuation decisions and probability distribution
+            # =========================================================================
             t_start = time.perf_counter()
             time_sec = self.current_step * self.window_sec
 
@@ -773,7 +785,7 @@ class ContinuousStreamManager:
                 audio_feat = feat.detach().cpu().numpy()
             t_audio = (time.perf_counter() - t_a0) * 1000.0
 
-            # 2. On-The-Fly Video Preprocessing (GPU TensorRT FP32 or CPU fallback):
+            # 2. On-The-Fly Video Preprocessing (Native 1080p/720p/4K -> 224x224):
             t_v0 = time.perf_counter()
             if len(self.video_ring) > 0:
                 f0 = self.video_ring[0]
@@ -782,10 +794,11 @@ class ContinuousStreamManager:
                 f0 = np.zeros((224, 224, 3), dtype=np.uint8)
                 f1 = np.zeros((224, 224, 3), dtype=np.uint8)
 
+            # Resize on-the-fly from camera native resolution (1080p/720p) to 224x224
             if f0.shape[:2] != (224, 224):
-                f0 = cv2.resize(f0, (224, 224))
+                f0 = cv2.resize(f0, (224, 224), interpolation=cv2.INTER_LINEAR)
             if f1.shape[:2] != (224, 224):
-                f1 = cv2.resize(f1, (224, 224))
+                f1 = cv2.resize(f1, (224, 224), interpolation=cv2.INTER_LINEAR)
 
             pair_raw = np.stack([f0, f1], axis=0)
 

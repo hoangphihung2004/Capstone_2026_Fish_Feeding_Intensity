@@ -529,38 +529,49 @@ def preprocess_audio(
 
 def preprocess_video(video_path: str, video_frontend: Optional[Any] = None, image_size: int = 224) -> Tuple[np.ndarray, float]:
     """Decode first and last video frames and apply ImageNet normalization (1, 6, 224, 224)."""
+    if isinstance(video_frontend, int):
+        image_size = video_frontend
+        video_frontend = None
     t0 = time.perf_counter()
-    pair_bgr = None
+    normed_tensor = None
 
-    cap = cv2.VideoCapture(video_path)
-    if cap.isOpened():
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        indices = [0, max(0, frame_count - 1)]
-        frames = []
-        for f_idx in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-            ok, frame = cap.read()
-            if ok:
-                if frame.shape[:2] != (image_size, image_size):
-                    frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_AREA)
-                frames.append(frame)
-        cap.release()
-        if len(frames) == 2:
-            pair_bgr = np.stack(frames, axis=0)
+    # Try decord first for fast zero-copy frame extraction matching training pipeline
+    try:
+        from decord import VideoReader, cpu
+        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0), num_threads=2)
+        if len(vr) > 0:
+            batch = vr.get_batch([0, len(vr) - 1])  # PyTorch uint8 tensor [2, 224, 224, 3]
+            img = torch.cat([batch[0], batch[1]], dim=-1).permute(2, 0, 1).float().mul_(1.0 / 255.0)
+            img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+            normed_tensor = img
+    except Exception:
+        pass
 
-    if pair_bgr is None:
-        pair_bgr = np.zeros((2, image_size, image_size, 3), dtype=np.uint8)
+    # OpenCV fallback
+    if normed_tensor is None:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
+        else:
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            indices = [0, max(0, frame_count - 1)]
+            frames = []
+            for f_idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+                ok, frame = cap.read()
+                if ok:
+                    frame = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (image_size, image_size), interpolation=cv2.INTER_AREA)
+                    frames.append(frame)
+            cap.release()
+            if len(frames) == 2:
+                video_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8)
+                img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
+                img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
+                normed_tensor = img
+            else:
+                normed_tensor = torch.zeros((6, image_size, image_size), dtype=torch.float32)
 
-    if video_frontend is not None and hasattr(video_frontend, "infer"):
-        video_np = video_frontend.infer(pair_bgr)
-    else:
-        f0_rgb = cv2.cvtColor(pair_bgr[0], cv2.COLOR_BGR2RGB)
-        f1_rgb = cv2.cvtColor(pair_bgr[1], cv2.COLOR_BGR2RGB)
-        video_uint8 = np.concatenate([f0_rgb, f1_rgb], axis=-1).transpose(2, 0, 1).astype(np.uint8)
-        img = torch.from_numpy(video_uint8).float().mul_(1.0 / 255.0)
-        img.sub_(_IMAGENET_MEAN).div_(_IMAGENET_STD)
-        video_np = img.unsqueeze(0).numpy()
-
+    video_np = normed_tensor.unsqueeze(0).numpy()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return video_np, elapsed_ms
 
@@ -627,14 +638,15 @@ def calculate_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
 
 
 def print_ascii_dashboard(
+    y_true: List[int],
+    y_pred: List[int],
     metrics: Dict[str, Any],
-    latency_stats: Dict[str, float],
     runtime_name: str,
-    audio_frontend_info: str = "GPU TensorRT",
-    video_frontend_info: str = "GPU TensorRT",
     baseline_acc: float = 0.971006,
 ):
-    """Print clean, professional ASCII summary dashboard in the Terminal."""
+    """Print clean, professional ASCII summary dashboard matching scikit-learn classification report."""
+    from sklearn.metrics import classification_report
+
     cm = np.array(metrics["confusion_matrix"])
     acc = metrics["accuracy"]
     acc_diff = (acc - baseline_acc) * 100.0
@@ -643,41 +655,23 @@ def print_ascii_dashboard(
     print("      MULTIMODAL FISH FEEDING INTENSITY - EDGE EVALUATION REPORT      ")
     print("=" * 76)
     print(f" Runtime Engine:      {runtime_name}")
-    print(f" Audio Frontend:      {audio_frontend_info}")
-    print(f" Video Frontend:      {video_frontend_info}")
     print(" Target Hardware:     NVIDIA Jetson Orin Nano")
     print(f" Total Evaluated:     {metrics['total_samples']:,} samples")
     print(f" Accuracy Achieved:   {acc * 100.0:.2f}% ({metrics['correct_samples']:,} / {metrics['total_samples']:,})")
     print(f" Published Baseline:  {baseline_acc * 100.0:.2f}% (Deviation: {acc_diff:+.2f}%)")
     print("-" * 76)
-    print(" 1. LATENCY BREAKDOWN & THROUGHPUT PROFILING:")
-    print(f"    - Audio Preprocessing (Log-Mel STFT):  {latency_stats['audio_ms']:>6.2f} ms")
-    print(f"    - Video Preprocessing (Decord/CV2):     {latency_stats['video_ms']:>6.2f} ms")
-    print(f"    - Model Inference (TensorRT/GPU):      {latency_stats['gpu_ms']:>6.2f} ms")
-    print(f"    - End-to-End Pipeline Latency:         {latency_stats['total_ms']:>6.2f} ms")
-    print(f"    - System Throughput (Real-time FPS):   {latency_stats['fps']:>6.2f} FPS")
-    print("-" * 76)
-    print(" 2. CLASSIFICATION METRICS PER CLASS:")
-    print(f"    {'Class':<10} {'Precision':>12} {'Recall':>12} {'F1-Score':>12} {'Support':>12}")
-    for cname in CLASS_NAMES:
-        cm_data = metrics["class_metrics"][cname]
-        print(
-            f"    {cname:<10} "
-            f"{cm_data['precision'] * 100.0:>11.2f}% "
-            f"{cm_data['recall'] * 100.0:>11.2f}% "
-            f"{cm_data['f1_score'] * 100.0:>11.2f}% "
-            f"{cm_data['support']:>12,}"
-        )
-    macro = metrics["macro_avg"]
-    print(
-        f"    {'Macro Avg':<10} "
-        f"{macro['precision'] * 100.0:>11.2f}% "
-        f"{macro['recall'] * 100.0:>11.2f}% "
-        f"{macro['f1_score'] * 100.0:>11.2f}% "
-        f"{metrics['total_samples']:>12,}"
+    print(" 1. CLASSIFICATION REPORT (scikit-learn):\n")
+    report_str = classification_report(
+        y_true,
+        y_pred,
+        labels=[0, 1, 2, 3],
+        target_names=CLASS_NAMES,
+        digits=4,
+        zero_division=0,
     )
+    print(report_str)
     print("-" * 76)
-    print(" 3. CONFUSION MATRIX (4x4):")
+    print(" 2. CONFUSION MATRIX (4x4):")
     header_title = "Actual \\ Pred"
     print(f"    {header_title:<14} {'none':>10} {'strong':>10} {'medium':>10} {'weak':>10}")
     for idx, cname in enumerate(CLASS_NAMES):
@@ -686,6 +680,7 @@ def print_ascii_dashboard(
             row_str += f"{cm[idx, col]:>10,}"
         print(row_str)
     print("=" * 76 + "\n")
+    return report_str
 
 
 # ==============================================================================
@@ -741,17 +736,9 @@ def main():
         audio_frontend_device = "CPU (TorchScript JIT)"
         logger.info(f"AudioFrontend device: {audio_frontend_device}")
 
-    # 2b. Load VideoFrontend (Prefer GPU TensorRT engine if available)
+    # 2b. Video Frontend
     video_frontend = None
-    video_frontend_device = "CPU (OpenCV/Decord)"
-    if args.video_engine and TRT_AVAILABLE and os.path.exists(args.video_engine):
-        try:
-            video_frontend = VideoFrontendTRT(args.video_engine)
-            video_frontend_device = f"GPU TensorRT ({video_frontend.backend})"
-            logger.info(f"Loaded GPU VideoFrontend TensorRT Engine: {args.video_engine}")
-        except Exception as exc:
-            logger.warning(f"Failed to load VideoFrontend TensorRT Engine: {exc}. Falling back to CPU.")
-            video_frontend = None
+    video_frontend_device = "Decord (RGB PyTorch)"
     logger.info(f"VideoFrontend device: {video_frontend_device}")
 
     # 3. Load Manifest
@@ -820,7 +807,7 @@ def main():
             a_file = samples_dir / row["audio_path"]
             lbl = int(row["label"])
             a_feat, t_a = preprocess_audio(str(a_file), frontend)
-            v_feat, t_v = preprocess_video(str(v_file), video_frontend)
+            v_feat, t_v = preprocess_video(str(v_file))
             return idx, lbl, a_feat, v_feat, t_a, t_v
 
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -863,11 +850,9 @@ def main():
                 if len(y_true) % 500 == 0 or len(y_true) == total_samples:
                     gc.collect()
                     current_acc = np.mean(np.array(y_true) == np.array(y_pred)) * 100.0
-                    wall_fps = len(y_true) / (time.perf_counter() - start_eval_time)
                     logger.info(
                         f"Progress: [{len(y_true):>5}/{total_samples:>5}] | "
-                        f"Acc: {current_acc:>6.2f}% | "
-                        f"Real Throughput: {wall_fps:>5.1f} FPS"
+                        f"Acc: {current_acc:>6.2f}%"
                     )
     else:
         for idx, row in df.iterrows():
@@ -879,7 +864,7 @@ def main():
 
             # Preprocessing
             audio_feat, t_audio = preprocess_audio(str(a_file), frontend)
-            video_feat, t_video = preprocess_video(str(v_file), video_frontend)
+            video_feat, t_video = preprocess_video(str(v_file))
 
             # Model Inference
             t_gpu_0 = time.perf_counter()
@@ -900,41 +885,35 @@ def main():
 
             if (idx + 1) % 500 == 0 or (idx + 1) == total_samples:
                 current_acc = np.mean(np.array(y_true) == np.array(y_pred)) * 100.0
-                avg_lat = np.mean(total_times)
                 logger.info(
                     f"Progress: [{idx + 1:>5}/{total_samples:>5}] | "
-                    f"Acc: {current_acc:>6.2f}% | "
-                    f"Latency: {avg_lat:>5.2f} ms ({1000.0 / avg_lat:>5.1f} FPS)"
+                    f"Acc: {current_acc:>6.2f}%"
                 )
 
     total_eval_duration = time.perf_counter() - start_eval_time
-    wall_clock_fps = total_samples / max(0.001, total_eval_duration)
 
     # 6. Compute Results
     metrics = calculate_metrics(y_true, y_pred)
-    latency_stats = {
-        "audio_ms": round(float(np.mean(audio_times)), 2),
-        "video_ms": round(float(np.mean(video_times)), 2),
-        "gpu_ms": round(float(np.mean(gpu_times)), 2),
-        "total_ms": round(float(np.mean(total_times)), 2),
-        "fps": round(float(wall_clock_fps if args.workers > 1 else (1000.0 / np.mean(total_times))), 2),
-        "total_duration_s": round(total_eval_duration, 2),
-    }
 
-    # 7. Print Terminal ASCII Dashboard
-    print_ascii_dashboard(
-        metrics,
-        latency_stats,
-        runtime_name,
-        audio_frontend_info=audio_frontend_device,
-        video_frontend_info=video_frontend_device,
+    # 7. Print Terminal Classification Report & Confusion Matrix
+    report_str = print_ascii_dashboard(
+        y_true=y_true,
+        y_pred=y_pred,
+        metrics=metrics,
+        runtime_name=runtime_name,
     )
+
+    # Save classification report to txt file
+    report_txt = os.path.join(args.output_dir, "classification_report_test.txt")
+    with open(report_txt, "w", encoding="utf-8") as f:
+        f.write(report_str)
+    logger.info(f"Classification report saved to: {report_txt}")
 
     # 8. Save Metrics to JSON
     summary_payload = {
         "runtime": runtime_name,
         "evaluation_metrics": metrics,
-        "latency_profiling": latency_stats,
+        "total_duration_s": round(total_eval_duration, 2),
         "device_info": {
             "python_version": sys.version,
             "torch_version": torch.__version__,
