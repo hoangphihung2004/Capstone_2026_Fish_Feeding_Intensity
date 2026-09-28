@@ -123,25 +123,20 @@
       <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
         <!-- KHỐI TRÁI: LIVE MULTIMODAL STREAM (7 Cols) -->
         <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
-          <!-- Card Header with Live Simulation Controls in One Clean Line -->
+          <!-- Card Header with Real-Time Indicator -->
           <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
             <div class="flex items-center gap-2">
               <span class="material-symbols-outlined text-primary text-[20px]">sensors</span>
               <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Live Multimodal Stream (Camera & Hydrophone)</h2>
             </div>
 
-            <!-- Right Controls: Timestamp & Play/Pause & Reset -->
-            <div class="flex items-center gap-2">
-              <div class="flex items-center gap-1.5 bg-surface-container-low px-2 py-0.5 rounded-lg border border-surface-container text-xs">
-                <span class="material-symbols-outlined text-primary text-[14px]">schedule</span>
-                <span id="farm-stream-time" class="font-mono text-xs font-bold text-on-surface">00:00 / 04:18</span>
-              </div>
-              <button id="farm-play-btn" onclick="toggleLiveSimulation()" title="Play / Pause Live Feed" class="h-7 w-7 rounded-lg bg-surface-container hover:bg-primary-container text-primary flex items-center justify-center border border-surface-container-high shadow-2xs transition-all active:scale-95">
-                <span id="farm-play-icon" class="material-symbols-outlined text-[16px]">pause</span>
-              </button>
-              <button onclick="resetLiveSimulation()" title="Restart Session (00:00)" class="h-7 w-7 rounded-lg bg-surface-container hover:bg-primary-container text-outline hover:text-primary flex items-center justify-center border border-surface-container-high shadow-2xs transition-all active:scale-95">
-                <span class="material-symbols-outlined text-[16px]">restart_alt</span>
-              </button>
+            <!-- Real-Time Stream Status Badge -->
+            <div class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-[11px] font-mono font-bold tracking-wider">
+              <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              REAL-TIME
             </div>
           </div>
 
@@ -379,7 +374,6 @@
       // 3. Hardware & Telemetry Stats
       const farmStatDataPrep = document.getElementById('farm-stat-dataprep');
       const farmStatInference = document.getElementById('farm-stat-inference');
-      const farmStreamTime = document.getElementById('farm-stream-time');
 
       const aMs = parseFloat(lat.audio_ms) || 0;
       const vMs = parseFloat(lat.video_ms) || 0;
@@ -388,7 +382,6 @@
 
       if (farmStatDataPrep) farmStatDataPrep.textContent = dataPrepMs;
       if (farmStatInference) farmStatInference.textContent = gpuMs;
-      if (farmStreamTime && sInfo.time_str) farmStreamTime.textContent = sInfo.time_str;
 
       // Dynamic edge telemetry fluctuation
       const farmStatGpu = document.getElementById('farm-stat-gpu');
@@ -562,39 +555,6 @@
       liveTimer = setInterval(runLiveStep, 2000);
     }
 
-    function toggleLiveSimulation() {
-      isLiveRunning = !isLiveRunning;
-      const icon = document.getElementById('farm-play-icon');
-      if (icon) icon.textContent = isLiveRunning ? 'pause' : 'play_arrow';
-      const farmVideo = document.getElementById('farm-video');
-      if (farmVideo) {
-        if (isLiveRunning) {
-          farmVideo.play().catch(() => {});
-        } else {
-          farmVideo.pause();
-        }
-      }
-    }
-
-    async function resetLiveSimulation() {
-      try {
-        await fetch('/api/live/reset', { method: 'POST' });
-        const farmVideo = document.getElementById('farm-video');
-        if (farmVideo) farmVideo.currentTime = 0;
-        runLiveStep();
-      } catch (err) {
-        console.warn(err);
-      }
-    }
-
-    // Keyboard Shortcut: Space to play/pause live simulation
-    window.addEventListener('keydown', function (e) {
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-      if (e.key === ' ') {
-        e.preventDefault();
-        toggleLiveSimulation();
-      }
-    });
 
     window.addEventListener('resize', function () {
       if (currentAudioWaveform) {
