@@ -66,7 +66,7 @@ def export_and_fix_onnx(checkpoint_path: str, raw_onnx_path: str, fixed_onnx_pat
                     if init.name == max_name:
                         arr = numpy_helper.to_array(init)
                         if not np.isfinite(arr).all():
-                            new_arr = np.where(np.isinf(arr), 1e6, arr).astype(arr.dtype)
+                            new_arr = np.where(np.isinf(arr), 1e30, arr).astype(arr.dtype)
                             init.CopyFrom(numpy_helper.from_array(new_arr, name=init.name))
                             fixed_count += 1
                 for n in model.graph.node:
@@ -75,7 +75,7 @@ def export_and_fix_onnx(checkpoint_path: str, raw_onnx_path: str, fixed_onnx_pat
                             if attr.name == "value":
                                 arr = numpy_helper.to_array(attr.t)
                                 if not np.isfinite(arr).all():
-                                    new_arr = np.where(np.isinf(arr), 1e6, arr).astype(arr.dtype)
+                                    new_arr = np.where(np.isinf(arr), 1e30, arr).astype(arr.dtype)
                                     attr.t.CopyFrom(numpy_helper.from_array(new_arr))
                                     fixed_count += 1
 
