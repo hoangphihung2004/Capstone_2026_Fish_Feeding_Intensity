@@ -156,9 +156,10 @@
           <!-- Bottom Metadata Row for Live Pond -->
           <div class="flex items-center justify-between text-xs text-outline pt-2 border-t border-surface-container-low shrink-0">
             <div>Feed Relay: <span id="farm-relay-status" class="font-bold text-error uppercase font-mono">OFF (CUTOFF)</span></div>
-            <div class="flex items-center gap-1.5 font-body-sm text-outline">
+            <div class="flex items-center gap-1 font-body-sm text-outline">
               <span>Pipeline:</span>
-              <span id="farm-cam-fps" class="font-bold text-primary font-mono text-xs">9.4 FPS</span>
+              <span id="farm-cam-fps-val" class="font-bold text-primary font-mono text-xs tabular-nums inline-block w-8 text-right">9.4</span>
+              <span class="font-bold text-primary font-mono text-xs">FPS</span>
             </div>
           </div>
         </section>
@@ -224,7 +225,10 @@
                   <span>Data Preprocessing</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">perm_media</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-dataprep">79.5</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-dataprep" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">79.5</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">ms</span>
+                </div>
               </div>
 
               <!-- Stat 2: Inference (TensorRT Core) -->
@@ -233,7 +237,10 @@
                   <span>Inference</span>
                   <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-inference">26.4</span> <span class="text-xs font-label-sm text-outline">ms</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-inference" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">26.4</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">ms</span>
+                </div>
               </div>
 
               <!-- Stat 3: GPU Load -->
@@ -242,7 +249,10 @@
                   <span>GPU Load</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">analytics</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-gpu">42</span> <span class="text-xs font-label-sm text-outline">%</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-gpu" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">42</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">%</span>
+                </div>
               </div>
 
               <!-- Stat 4: CPU Load -->
@@ -251,7 +261,10 @@
                   <span>CPU Load</span>
                   <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-cpu">24</span> <span class="text-xs font-label-sm text-outline">%</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-cpu" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">24</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">%</span>
+                </div>
               </div>
 
               <!-- Stat 5: Device Temperature -->
@@ -260,7 +273,10 @@
                   <span>Device Temperature</span>
                   <span class="material-symbols-outlined text-[16px] text-amber-600">device_thermostat</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-temp">46</span> <span class="text-xs font-label-sm text-outline">°C</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-temp" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">46</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">°C</span>
+                </div>
               </div>
 
               <!-- Stat 6: System Memory (RAM) -->
@@ -269,7 +285,10 @@
                   <span>Memory (RAM)</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">developer_board</span>
                 </div>
-                <div class="text-xl sm:text-2xl font-display font-bold text-on-surface leading-tight"><span id="farm-stat-ram">3.2</span> <span class="text-xs font-label-sm text-outline">/ 8.0 GB</span></div>
+                <div class="flex items-baseline justify-between leading-tight">
+                  <span id="farm-stat-ram" class="text-xl sm:text-2xl font-display font-bold text-on-surface tabular-nums">3.2</span>
+                  <span class="text-xs font-label-sm text-outline font-semibold">/ 8.0 GB</span>
+                </div>
               </div>
             </div>
           </section>
@@ -341,6 +360,7 @@
       // 3. Hardware & Telemetry Stats
       const farmStatDataPrep = document.getElementById('farm-stat-dataprep');
       const farmStatInference = document.getElementById('farm-stat-inference');
+      const farmCamFpsVal = document.getElementById('farm-cam-fps-val');
       const farmCamFps = document.getElementById('farm-cam-fps');
       const farmStreamTime = document.getElementById('farm-stream-time');
       const farmRelayStatus = document.getElementById('farm-relay-status');
@@ -348,12 +368,16 @@
       const aMs = parseFloat(lat.audio_ms) || 0;
       const vMs = parseFloat(lat.video_ms) || 0;
       const dataPrepMs = (aMs + vMs).toFixed(1);
-      const gpuMs = lat.gpu_ms !== undefined ? lat.gpu_ms : '26.4';
-      const pipeFps = lat.pipeline_fps !== undefined ? lat.pipeline_fps : '9.4';
+      const gpuMs = lat.gpu_ms !== undefined ? (parseFloat(lat.gpu_ms) || 26.4).toFixed(1) : '26.4';
+      const pipeFps = lat.pipeline_fps !== undefined ? (parseFloat(lat.pipeline_fps) || 9.4).toFixed(1) : '9.4';
 
       if (farmStatDataPrep) farmStatDataPrep.textContent = dataPrepMs;
       if (farmStatInference) farmStatInference.textContent = gpuMs;
-      if (farmCamFps) farmCamFps.textContent = pipeFps + ' FPS';
+      if (farmCamFpsVal) {
+        farmCamFpsVal.textContent = pipeFps;
+      } else if (farmCamFps) {
+        farmCamFps.textContent = pipeFps + ' FPS';
+      }
       if (farmStreamTime && sInfo.time_str) farmStreamTime.textContent = sInfo.time_str;
       if (farmRelayStatus && feeder.relay) {
         farmRelayStatus.textContent = feeder.relay === 'ON' ? 'ON (FEEDING)' : 'OFF (CUTOFF)';
