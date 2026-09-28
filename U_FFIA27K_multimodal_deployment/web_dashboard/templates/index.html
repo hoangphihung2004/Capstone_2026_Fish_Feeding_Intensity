@@ -153,23 +153,29 @@
             <img id="farm-live-img" class="hidden w-full h-full object-cover" src="/static/img/farm_screen.png" alt="Live Pond Camera">
           </div>
 
-          <!-- Underwater Hydrophone Acoustic Waveform (Real-time Oscilloscope) -->
-          <div class="h-20 shrink-0 w-full rounded-xl bg-slate-950 px-3 py-1.5 border border-slate-800 flex flex-col justify-between mb-2 shadow-inner">
+          <!-- Underwater Hydrophone Acoustic Waveform (Real-time Raw Oscilloscope) -->
+          <div class="h-24 shrink-0 w-full rounded-xl bg-slate-950 px-3 py-1.5 border border-slate-800 flex flex-col justify-between mb-2 shadow-inner">
             <!-- Waveform Header -->
             <div class="flex items-center justify-between text-[11px] font-label-sm text-slate-400">
               <div class="flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-primary-fixed-dim text-[15px]">graphic_eq</span>
-                <span class="font-bold text-slate-200">HYDROPHONE ACOUSTIC STREAM</span>
-                <span class="text-slate-500 text-[10px] hidden sm:inline">(2.0s Window · 64 kHz)</span>
+                <span class="material-symbols-outlined text-primary-fixed-dim text-[16px]">graphic_eq</span>
+                <span class="font-bold text-slate-200">RAW ACOUSTIC HYDROPHONE WAVEFORM</span>
+                <span class="text-slate-500 text-[10px] hidden sm:inline">(2.0s · 64 kHz Oscillogram)</span>
               </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-slate-400">RMS:</span>
-                <span id="farm-audio-rms" class="font-mono text-primary-fixed-dim font-bold text-[11px] tabular-nums">-24.0 dB</span>
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1">
+                  <span class="text-[10px] text-slate-400">Peak:</span>
+                  <span id="farm-audio-peak" class="font-mono text-slate-300 font-bold text-[11px] tabular-nums">0.000</span>
+                </div>
+                <div class="flex items-center gap-1">
+                  <span class="text-[10px] text-slate-400">RMS:</span>
+                  <span id="farm-audio-rms" class="font-mono text-primary-fixed-dim font-bold text-[11px] tabular-nums">-24.0 dB</span>
+                </div>
               </div>
             </div>
 
-            <!-- Oscilloscope Canvas -->
-            <div class="relative flex-1 w-full my-0.5 min-h-0">
+            <!-- Oscilloscope Canvas with dB / Amplitude Scale on Left -->
+            <div class="relative flex-1 w-full my-0.5 min-h-0 flex items-center">
               <canvas id="farm-audio-canvas" class="w-full h-full block"></canvas>
             </div>
 
@@ -177,7 +183,7 @@
             <div class="flex items-center justify-between text-[9px] font-mono text-slate-500 px-0.5 leading-none">
               <span>0.0s</span>
               <span>0.5s</span>
-              <span>1.0s</span>
+              <span>1.0s (Feeding Strike Transient)</span>
               <span>1.5s</span>
               <span>2.0s</span>
             </div>
@@ -442,8 +448,12 @@
       // 5. Underwater Hydrophone Acoustic Waveform
       const audioTel = data.audio_telemetry || {};
       const farmAudioRms = document.getElementById('farm-audio-rms');
+      const farmAudioPeak = document.getElementById('farm-audio-peak');
       if (farmAudioRms && audioTel.rms_db !== undefined) {
         farmAudioRms.textContent = `${audioTel.rms_db.toFixed(1)} dB`;
+      }
+      if (farmAudioPeak && audioTel.peak_amp !== undefined) {
+        farmAudioPeak.textContent = `${audioTel.peak_amp.toFixed(3)}`;
       }
       if (audioTel.waveform) {
         currentAudioWaveform = audioTel.waveform;
@@ -471,17 +481,23 @@
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, w, h);
 
-      // Subtle horizontal baseline
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.45)';
+      const midY = h / 2;
+      const maxAmp = (h / 2) * 0.92;
+
+      // 1. Technical Baseline & Time Grid
+      // Horizontal Center Baseline (0.0 Level)
+      ctx.strokeStyle = 'rgba(71, 85, 105, 0.7)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(0, h / 2);
-      ctx.lineTo(w, h / 2);
+      ctx.setLineDash([4, 3]);
+      ctx.moveTo(0, midY);
+      ctx.lineTo(w, midY);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Subtle vertical time markers (0.5s, 1.0s, 1.5s)
+      // Vertical Time Markers (0.5s, 1.0s, 1.5s)
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
+      ctx.lineWidth = 1;
       for (let i = 1; i < 4; i++) {
         const gx = (w / 4) * i;
         ctx.beginPath();
@@ -495,40 +511,55 @@
         return;
       }
 
-      const midY = h / 2;
-      const maxAmp = (h / 2) * 0.90;
+      const n = waveform.length;
+      const barWidth = Math.max(1.2, w / n);
 
-      // Filled gradient area under waveform
-      const grad = ctx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, 'rgba(107, 216, 203, 0.35)');
-      grad.addColorStop(0.5, 'rgba(0, 131, 120, 0.06)');
-      grad.addColorStop(1, 'rgba(107, 216, 203, 0.35)');
-
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      for (let i = 0; i < waveform.length; i++) {
-        const x = (i / (waveform.length - 1)) * w;
-        const y = midY - (waveform[i] * maxAmp);
-        ctx.lineTo(x, y);
+      // 2. Audacity / Soundcloud Raw Oscillogram Vertical Symmetrical Bars
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.50)'; // Translucent Cyan Body
+      for (let i = 0; i < n; i++) {
+        const x = (i / n) * w;
+        let mn = 0, mx = 0;
+        if (Array.isArray(waveform[i])) {
+          mn = waveform[i][0];
+          mx = waveform[i][1];
+        } else {
+          mn = -Math.abs(waveform[i]);
+          mx = Math.abs(waveform[i]);
+        }
+        const yTop = midY - mx * maxAmp;
+        const yBottom = midY - mn * maxAmp;
+        const barH = Math.max(1.5, yBottom - yTop);
+        ctx.fillRect(x, Math.min(yTop, yBottom), barWidth, barH);
       }
-      ctx.lineTo(w, midY);
-      ctx.closePath();
-      ctx.fillStyle = grad;
-      ctx.fill();
 
-      // Glowing stroke line
-      ctx.shadowColor = '#6bd8cb';
+      // 3. Crisp Top & Bottom Peak Envelopes (Audacity Spiky Outer Bounds)
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = '#22d3ee'; // Sharp bright cyan
+      ctx.shadowColor = '#06b6d4';
       ctx.shadowBlur = 4;
-      ctx.strokeStyle = '#6bd8cb';
-      ctx.lineWidth = 1.8;
+
+      // Top Peak Line
       ctx.beginPath();
-      for (let i = 0; i < waveform.length; i++) {
-        const x = (i / (waveform.length - 1)) * w;
-        const y = midY - (waveform[i] * maxAmp);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * w;
+        const mx = Array.isArray(waveform[i]) ? waveform[i][1] : Math.abs(waveform[i]);
+        const y = midY - mx * maxAmp;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+
+      // Bottom Peak Line
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * w;
+        const mn = Array.isArray(waveform[i]) ? waveform[i][0] : -Math.abs(waveform[i]);
+        const y = midY - mn * maxAmp;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
       ctx.restore();
     }
 
