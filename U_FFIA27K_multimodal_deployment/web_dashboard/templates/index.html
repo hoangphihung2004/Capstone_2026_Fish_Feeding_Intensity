@@ -171,7 +171,7 @@
         <!-- RIGHT COLUMN: 2 FOCUSED CARDS (5 Cols) -->
         <div class="lg:col-span-5 flex flex-col gap-3.5 h-full overflow-hidden">
           <!-- CARD 1: FEEDING STATUS -->
-          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-4 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
             <div class="flex items-center justify-between pb-1.5 shrink-0">
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary text-[20px]">set_meal</span>
@@ -213,7 +213,7 @@
           </section>
 
           <!-- CARD 2: DEVICE STATUS (Option 1: Hardware Health & AI Speed) -->
-          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-4 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
             <div class="flex items-center justify-between pb-1.5 shrink-0">
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-primary text-[20px]">memory</span>
@@ -221,10 +221,10 @@
               </div>
             </div>
 
-            <!-- 6 Harmonious Telemetry Stat Boxes (2x3 Grid) -->
-            <div class="grid grid-cols-2 gap-2 sm:gap-2.5 my-auto shrink-0">
+            <!-- 6 Harmonious Telemetry Stat Boxes (2x3 Grid Perfectly Aligned with Audio Bottom) -->
+            <div class="flex-1 min-h-0 grid grid-cols-2 grid-rows-3 gap-2 sm:gap-2.5 mt-2">
               <!-- Stat 1: Data Preprocessing (Audio + Video) -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>Data Preprocessing</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">perm_media</span>
@@ -236,7 +236,7 @@
               </div>
 
               <!-- Stat 2: Inference (TensorRT Core) -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>Inference</span>
                   <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
@@ -248,7 +248,7 @@
               </div>
 
               <!-- Stat 3: GPU Load -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>GPU Load</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">analytics</span>
@@ -260,7 +260,7 @@
               </div>
 
               <!-- Stat 4: CPU Load -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>CPU Load</span>
                   <span class="material-symbols-outlined text-[16px] text-secondary">memory</span>
@@ -272,7 +272,7 @@
               </div>
 
               <!-- Stat 5: Device Temperature -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>Device Temperature</span>
                   <span class="material-symbols-outlined text-[16px] text-amber-600">device_thermostat</span>
@@ -284,7 +284,7 @@
               </div>
 
               <!-- Stat 6: System Memory (RAM) -->
-              <div class="bg-surface-container-low p-2.5 sm:p-3 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
+              <div class="bg-surface-container-low p-2 sm:p-2.5 rounded-xl border border-surface-container flex flex-col justify-center gap-0.5">
                 <div class="text-[11px] sm:text-xs text-outline font-body-sm flex items-center justify-between">
                   <span>Memory (RAM)</span>
                   <span class="material-symbols-outlined text-[16px] text-primary">developer_board</span>
