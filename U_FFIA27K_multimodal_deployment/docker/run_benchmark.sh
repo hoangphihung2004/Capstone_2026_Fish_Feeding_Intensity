@@ -21,6 +21,7 @@ docker run --rm \
   -e PYTHONUNBUFFERED=1 \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
   -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
+  -v /home/fptdanang/audio_frontend_fp32.engine:/app/weights/audio_frontend_fp32.engine:ro \
   -v "${RESULTS_DIR}:/app/benchmarking/results" \
   -v /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro \

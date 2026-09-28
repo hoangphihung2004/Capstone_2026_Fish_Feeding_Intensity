@@ -160,6 +160,83 @@ class TensorRTInference:
             return np.copy(self.h_out)
 
 
+class AudioFrontendTRT:
+    """Wrapper for GPU-accelerated AudioFrontend Log-Mel Spectrogram TensorRT Engine."""
+
+    def __init__(self, engine_path: str):
+        if not TRT_AVAILABLE:
+            raise RuntimeError("Neither cuda-python nor PyCUDA is installed.")
+        if not os.path.exists(engine_path):
+            raise FileNotFoundError(f"AudioFrontend TensorRT engine not found at: {engine_path}")
+
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            self.runtime = trt.Runtime(self.logger)
+            self.engine = self.runtime.deserialize_cuda_engine(f.read())
+        if self.engine is None:
+            raise RuntimeError(f"Failed to deserialize AudioFrontend TensorRT engine from: {engine_path}")
+
+        self.context = self.engine.create_execution_context()
+        self.backend = TRT_BACKEND
+
+        # Input: waveform [1, 128000] float32
+        self.input_shape = (1, 128000)
+        self.input_nbytes = int(np.prod(self.input_shape) * 4)
+
+        # Output: audio_features [1, 1, 128, 128] float32
+        self.out_shape = (1, 1, 128, 128)
+        self.out_nbytes = int(np.prod(self.out_shape) * 4)
+        self.h_out = np.zeros(self.out_shape, dtype=np.float32)
+
+        if self.backend == "cuda-python":
+            _, self.d_in = cudart.cudaMalloc(self.input_nbytes)
+            _, self.d_out = cudart.cudaMalloc(self.out_nbytes)
+            _, self.stream = cudart.cudaStreamCreate()
+
+            self.context.set_tensor_address("waveform", int(self.d_in))
+            self.context.set_tensor_address("audio_features", int(self.d_out))
+        else:
+            self.stream = cuda.Stream()
+            self.h_in = cuda.pagelocked_empty(self.input_shape, dtype=np.float32)
+            self.h_out = cuda.pagelocked_empty(self.out_shape, dtype=np.float32)
+
+            self.d_in = cuda.mem_alloc(self.input_nbytes)
+            self.d_out = cuda.mem_alloc(self.out_nbytes)
+
+            self.bindings = [int(self.d_in), int(self.d_out)]
+
+        logger.info(f"Loaded AudioFrontend TensorRT Engine successfully ({self.backend}): {engine_path}")
+
+    def __call__(self, waveform: Any) -> np.ndarray:
+        return self.infer(waveform)
+
+    def infer(self, waveform: Any) -> np.ndarray:
+        if isinstance(waveform, torch.Tensor):
+            waveform = waveform.detach().cpu().numpy()
+        waveform = np.ascontiguousarray(waveform, dtype=np.float32)
+        if waveform.ndim == 1:
+            waveform = waveform.reshape(1, -1)
+
+        if self.backend == "cuda-python":
+            cudart.cudaMemcpy(self.d_in, waveform.ctypes.data, self.input_nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
+            self.context.execute_async_v3(self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            cudart.cudaMemcpy(self.h_out.ctypes.data, self.d_out, self.out_nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
+            return self.h_out.copy()
+        else:
+            np.copyto(self.h_in, waveform)
+            cuda.memcpy_htod_async(self.d_in, self.h_in, self.stream)
+
+            if hasattr(self.context, "execute_async_v2"):
+                self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+            else:
+                self.context.execute_v2(bindings=self.bindings)
+
+            cuda.memcpy_dtoh_async(self.h_out, self.d_out, self.stream)
+            self.stream.synchronize()
+            return np.copy(self.h_out)
+
+
 class ONNXRuntimeInference:
     def __init__(self, onnx_path: str):
         if not ORT_AVAILABLE:
@@ -195,6 +272,7 @@ class ModelPipelineService:
         fp32_engine = os.path.join(project_root, "weights", "multimodal_core_fold_00_fp32.engine")
         fp16_engine = os.path.join(project_root, "weights", "multimodal_core_fold_00_fp16.engine")
         self.engine_path = fp32_engine if os.path.exists(fp32_engine) else fp16_engine
+        self.audio_engine_path = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
         self.onnx_path = os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx")
         self.ckpt_path = os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "multimodal_best.pt")
         self.manifest_path = os.path.join(project_root, "samples", "manifest.csv")
@@ -207,6 +285,7 @@ class ModelPipelineService:
         )
 
         self.runtime_name = "Not Loaded"
+        self.audio_frontend_device = "cpu"
         self.model_runner = None
         self.frontend = None
         self.manifest_df = None
@@ -222,24 +301,37 @@ class ModelPipelineService:
         return digest.hexdigest()
 
     def _init_service(self):
-        # 1. Load AudioFrontend
-        self.frontend = AudioFrontend()
-        if os.path.exists(self.ckpt_path):
+        # 1. Load AudioFrontend (Prefer TensorRT GPU engine if available)
+        self.frontend = None
+        self.audio_frontend_device = "cpu"
+        if TRT_AVAILABLE and os.path.exists(self.audio_engine_path):
             try:
-                ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
-                sd = ckpt.get("model_state_dict", ckpt)
-                front_sd = {k.replace("frontend.", ""): v for k, v in sd.items() if k.startswith("frontend.") and not k.endswith("total_ops") and not k.endswith("total_params")}
-                missing, unexpected = self.frontend.load_state_dict(front_sd, strict=False)
-                if missing or unexpected:
-                    raise RuntimeError(f"AudioFrontend checkpoint mismatch: missing={missing}, unexpected={unexpected}")
-                logger.info("AudioFrontend loaded successfully from checkpoint.")
+                self.frontend = AudioFrontendTRT(self.audio_engine_path)
+                self.audio_frontend_device = f"gpu ({self.frontend.backend})"
+                logger.info(f"Loaded GPU AudioFrontend TensorRT Engine: {self.audio_engine_path}")
             except Exception as e:
-                logger.warning(f"Failed to load checkpoint weights into AudioFrontend: {e}")
-        self.frontend.eval()
-        dummy_audio = torch.zeros((1, 128000), dtype=torch.float32)
-        with torch.no_grad():
-            self.frontend = torch.jit.freeze(torch.jit.trace(self.frontend, dummy_audio))
-        logger.info("AudioFrontend JIT traced and frozen for accelerated CPU inference.")
+                logger.warning(f"Failed to load TensorRT AudioFrontend: {e}. Falling back to CPU.")
+                self.frontend = None
+
+        if self.frontend is None:
+            self.frontend = AudioFrontend()
+            if os.path.exists(self.ckpt_path):
+                try:
+                    ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=False)
+                    sd = ckpt.get("model_state_dict", ckpt)
+                    front_sd = {k.replace("frontend.", ""): v for k, v in sd.items() if k.startswith("frontend.") and not k.endswith("total_ops") and not k.endswith("total_params")}
+                    missing, unexpected = self.frontend.load_state_dict(front_sd, strict=False)
+                    if missing or unexpected:
+                        raise RuntimeError(f"AudioFrontend checkpoint mismatch: missing={missing}, unexpected={unexpected}")
+                    logger.info("AudioFrontend loaded successfully from checkpoint.")
+                except Exception as e:
+                    logger.warning(f"Failed to load checkpoint weights into AudioFrontend: {e}")
+            self.frontend.eval()
+            dummy_audio = torch.zeros((1, 128000), dtype=torch.float32)
+            with torch.no_grad():
+                self.frontend = torch.jit.freeze(torch.jit.trace(self.frontend, dummy_audio))
+            self.audio_frontend_device = "cpu"
+            logger.info("AudioFrontend JIT traced and frozen for accelerated CPU inference.")
 
         # 2. Load Core Model
         if TRT_AVAILABLE and os.path.exists(self.engine_path):
@@ -280,9 +372,13 @@ class ModelPipelineService:
         elif y.numel() < target_len:
             y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
-        with torch.no_grad():
-            feat = self.frontend(y.unsqueeze(0))
-        audio_feat = feat.detach().cpu().numpy()
+        if hasattr(self.frontend, "infer"):
+            with self.engine_lock:
+                audio_feat = self.frontend.infer(y.unsqueeze(0))
+        else:
+            with torch.no_grad():
+                feat = self.frontend(y.unsqueeze(0))
+            audio_feat = feat.detach().cpu().numpy()
         elapsed = (time.perf_counter() - t0) * 1000.0
         return audio_feat, elapsed
 
@@ -484,9 +580,13 @@ class ContinuousStreamManager:
         elif y.numel() < target_len:
             y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
-        with torch.no_grad():
-            feat = self.service.frontend(y.unsqueeze(0))
-        audio_feat = feat.detach().cpu().numpy()
+        if hasattr(self.service.frontend, "infer"):
+            with self.service.engine_lock:
+                audio_feat = self.service.frontend.infer(y.unsqueeze(0))
+        else:
+            with torch.no_grad():
+                feat = self.service.frontend(y.unsqueeze(0))
+            audio_feat = feat.detach().cpu().numpy()
         t_audio = (time.perf_counter() - t_a0) * 1000.0
 
         # 2. Slice video frames (first & last of 2s window)
@@ -650,6 +750,7 @@ async def get_system_status():
     return {
         "status": "online",
         "runtime": service.runtime_name,
+        "audio_frontend_device": service.audio_frontend_device,
         "device": "NVIDIA Jetson Orin Nano (MAXN Mode)" if TRT_AVAILABLE else "PC Host Environment",
         "total_test_samples": len(service.manifest_df) if service.manifest_df is not None else 0,
         "fold": "Fold 00 (Representative Edge Benchmark)",
@@ -842,7 +943,7 @@ async def get_benchmark_summary():
     # Fallback to certified baseline if benchmark script has not run yet
     return {
         "runtime": service.runtime_name,
-        "audio_frontend_device": "cpu",
+        "audio_frontend_device": service.audio_frontend_device,
         "input_cache_enabled": service.input_cache.enabled,
         "evaluation_metrics": {
             "accuracy": 0.9710,

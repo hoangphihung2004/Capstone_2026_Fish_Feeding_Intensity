@@ -108,11 +108,18 @@ def parse_args():
         default=os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx"),
         help="Path to fallback ONNX model file",
     )
+    default_audio_engine = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
+    parser.add_argument(
+        "--audio_engine",
+        type=str,
+        default=default_audio_engine,
+        help="Path to compiled TensorRT AudioFrontend engine file (GPU)",
+    )
     parser.add_argument(
         "--checkpoint",
         type=str,
         default=os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "multimodal_best.pt"),
-        help="Path to PyTorch checkpoint (for AudioFrontend weights)",
+        help="Path to PyTorch checkpoint (for AudioFrontend weights fallback)",
     )
     parser.add_argument(
         "--manifest",
@@ -251,6 +258,84 @@ class TensorRTInference:
             return np.copy(self.h_out)
 
 
+class AudioFrontendTRT:
+    """Wrapper for GPU-accelerated AudioFrontend Log-Mel Spectrogram TensorRT Engine."""
+
+    def __init__(self, engine_path: str):
+        if not TRT_AVAILABLE:
+            raise RuntimeError("Neither cuda-python nor PyCUDA is installed in this environment.")
+        if not os.path.exists(engine_path):
+            raise FileNotFoundError(f"AudioFrontend TensorRT engine not found at: {engine_path}")
+
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            self.runtime = trt.Runtime(self.logger)
+            self.engine = self.runtime.deserialize_cuda_engine(f.read())
+        if self.engine is None:
+            raise RuntimeError(f"Failed to deserialize AudioFrontend TensorRT engine from: {engine_path}")
+
+        self.context = self.engine.create_execution_context()
+        self.backend = TRT_BACKEND
+
+        # Input: waveform [1, 128000] float32
+        self.input_shape = (1, 128000)
+        self.input_nbytes = int(np.prod(self.input_shape) * 4)
+
+        # Output: audio_features [1, 1, 128, 128] float32
+        self.out_shape = (1, 1, 128, 128)
+        self.out_nbytes = int(np.prod(self.out_shape) * 4)
+        self.h_out = np.zeros(self.out_shape, dtype=np.float32)
+
+        if self.backend == "cuda-python":
+            _, self.d_in = cudart.cudaMalloc(self.input_nbytes)
+            _, self.d_out = cudart.cudaMalloc(self.out_nbytes)
+            _, self.stream = cudart.cudaStreamCreate()
+
+            # Set tensor addresses for TensorRT 10.x API
+            self.context.set_tensor_address("waveform", int(self.d_in))
+            self.context.set_tensor_address("audio_features", int(self.d_out))
+        else:
+            self.stream = cuda.Stream()
+            self.h_in = cuda.pagelocked_empty(self.input_shape, dtype=np.float32)
+            self.h_out = cuda.pagelocked_empty(self.out_shape, dtype=np.float32)
+
+            self.d_in = cuda.mem_alloc(self.input_nbytes)
+            self.d_out = cuda.mem_alloc(self.out_nbytes)
+
+            self.bindings = [int(self.d_in), int(self.d_out)]
+
+        logger.info(f"Loaded AudioFrontend TensorRT Engine successfully ({self.backend}): {engine_path}")
+
+    def __call__(self, waveform: Any) -> np.ndarray:
+        return self.infer(waveform)
+
+    def infer(self, waveform: Any) -> np.ndarray:
+        if isinstance(waveform, torch.Tensor):
+            waveform = waveform.detach().cpu().numpy()
+        waveform = np.ascontiguousarray(waveform, dtype=np.float32)
+        if waveform.ndim == 1:
+            waveform = waveform.reshape(1, -1)
+
+        if self.backend == "cuda-python":
+            cudart.cudaMemcpy(self.d_in, waveform.ctypes.data, self.input_nbytes, cudart.cudaMemcpyKind.cudaMemcpyHostToDevice)
+            self.context.execute_async_v3(self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            cudart.cudaMemcpy(self.h_out.ctypes.data, self.d_out, self.out_nbytes, cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost)
+            return self.h_out.copy()
+        else:
+            np.copyto(self.h_in, waveform)
+            cuda.memcpy_htod_async(self.d_in, self.h_in, self.stream)
+
+            if hasattr(self.context, "execute_async_v2"):
+                self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+            else:
+                self.context.execute_v2(bindings=self.bindings)
+
+            cuda.memcpy_dtoh_async(self.h_out, self.d_out, self.stream)
+            self.stream.synchronize()
+            return np.copy(self.h_out)
+
+
 # ==============================================================================
 # 2. ONNX RUNTIME FALLBACK WRAPPER
 # ==============================================================================
@@ -327,7 +412,7 @@ _RESAMPLER_CACHE: Dict[Tuple[int, int], torchaudio.transforms.Resample] = {}
 
 def preprocess_audio(
     audio_path: str,
-    frontend: torch.nn.Module,
+    frontend: Any,
     target_sr: int = 64000,
 ) -> Tuple[np.ndarray, float]:
     """Load WAV audio, resample to 64kHz, and compute Log-Mel Spectrogram (1, 1, 128, 128)."""
@@ -351,10 +436,13 @@ def preprocess_audio(
     elif y.numel() < target_len:
         y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
 
-    with torch.no_grad():
-        feat = frontend(y.unsqueeze(0))
+    if hasattr(frontend, "infer"):
+        audio_feature_np = frontend.infer(y.unsqueeze(0))
+    else:
+        with torch.no_grad():
+            feat = frontend(y.unsqueeze(0))
+        audio_feature_np = feat.detach().cpu().numpy()
 
-    audio_feature_np = feat.detach().cpu().numpy()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return audio_feature_np, elapsed_ms
 
@@ -470,6 +558,7 @@ def print_ascii_dashboard(
     metrics: Dict[str, Any],
     latency_stats: Dict[str, float],
     runtime_name: str,
+    audio_frontend_info: str = "GPU TensorRT",
     baseline_acc: float = 0.971006,
 ):
     """Print clean, professional ASCII summary dashboard in the Terminal."""
@@ -481,6 +570,7 @@ def print_ascii_dashboard(
     print("      MULTIMODAL FISH FEEDING INTENSITY - EDGE EVALUATION REPORT      ")
     print("=" * 76)
     print(f" Runtime Engine:      {runtime_name}")
+    print(f" Audio Frontend:      {audio_frontend_info}")
     print(" Target Hardware:     NVIDIA Jetson Orin Nano")
     print(f" Total Evaluated:     {metrics['total_samples']:,} samples")
     print(f" Accuracy Achieved:   {acc * 100.0:.2f}% ({metrics['correct_samples']:,} / {metrics['total_samples']:,})")
@@ -559,10 +649,23 @@ def main():
                 f"No working inference runtime found. Neither TensorRT ({args.engine}) nor ONNX ({args.onnx}) could be loaded."
             )
 
-    # 2. Load AudioFrontend
-    logger.info("Loading AudioFrontend from checkpoint...")
-    frontend = load_audio_frontend(args.checkpoint)
-    logger.info("AudioFrontend device: cpu")
+    # 2. Load AudioFrontend (Prefer GPU TensorRT engine if available)
+    frontend = None
+    audio_frontend_device = "cpu"
+    if args.audio_engine and TRT_AVAILABLE and os.path.exists(args.audio_engine):
+        try:
+            frontend = AudioFrontendTRT(args.audio_engine)
+            audio_frontend_device = f"GPU TensorRT ({frontend.backend})"
+            logger.info(f"Loaded GPU AudioFrontend TensorRT Engine: {args.audio_engine}")
+        except Exception as exc:
+            logger.warning(f"Failed to load AudioFrontend TensorRT Engine: {exc}. Falling back to PyTorch CPU.")
+            frontend = None
+
+    if frontend is None:
+        logger.info("Loading PyTorch AudioFrontend fallback from checkpoint...")
+        frontend = load_audio_frontend(args.checkpoint)
+        audio_frontend_device = "CPU (TorchScript JIT)"
+        logger.info(f"AudioFrontend device: {audio_frontend_device}")
 
     # 3. Load Manifest
     logger.info(f"Loading samples manifest: {args.manifest}")
@@ -586,10 +689,16 @@ def main():
         logger.info(f"Evaluating FULL test set: {len(df):,} samples")
 
     # 4. Warmup
-    logger.info(f"Warming up inference engine for {args.warmup} iterations...")
+    logger.info(f"Warming up inference engines for {args.warmup} iterations...")
+    dummy_raw_audio = torch.zeros((1, 128000), dtype=torch.float32)
     dummy_audio = np.zeros((1, 1, 128, 128), dtype=np.float32)
     dummy_video = np.zeros((1, 6, 224, 224), dtype=np.float32)
     for _ in range(args.warmup):
+        if hasattr(frontend, "infer"):
+            frontend.infer(dummy_raw_audio)
+        else:
+            with torch.no_grad():
+                frontend(dummy_raw_audio)
         engine_runner.infer(dummy_audio, dummy_video)
 
     # 5. Benchmark Loop
@@ -723,7 +832,7 @@ def main():
     }
 
     # 7. Print Terminal ASCII Dashboard
-    print_ascii_dashboard(metrics, latency_stats, runtime_name)
+    print_ascii_dashboard(metrics, latency_stats, runtime_name, audio_frontend_info=audio_frontend_device)
 
     # 8. Save Metrics to JSON
     summary_payload = {
@@ -734,7 +843,7 @@ def main():
             "python_version": sys.version,
             "torch_version": torch.__version__,
             "cuda_available": torch.cuda.is_available(),
-            "audio_frontend_device": "cpu",
+            "audio_frontend_device": audio_frontend_device,
         },
     }
 

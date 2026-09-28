@@ -20,6 +20,7 @@ docker run -d \
   --network host \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
   -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
+  -v /home/fptdanang/audio_frontend_fp32.engine:/app/weights/audio_frontend_fp32.engine:ro \
   -v "${CACHE_DIR}:/app/cache" \
   -v "${RESULTS_DIR}:/app/benchmarking/results" \
   -v /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro \
@@ -30,4 +31,5 @@ docker run -d \
   -v /home/fptdanang/.local/lib/python3.10/site-packages/cuda:/usr/local/lib/python3.10/dist-packages/cuda:ro \
   -v /home/fptdanang/.local/lib/python3.10/site-packages/cuda_python-12.9.7.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_python-12.9.7.dist-info:ro \
   -v /home/fptdanang/.local/lib/python3.10/site-packages/cuda_bindings-12.9.9.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_bindings-12.9.9.dist-info:ro \
-  "${IMAGE}"
+  "${IMAGE}" \
+  uvicorn web_dashboard.app:app --host 0.0.0.0 --port 8000
