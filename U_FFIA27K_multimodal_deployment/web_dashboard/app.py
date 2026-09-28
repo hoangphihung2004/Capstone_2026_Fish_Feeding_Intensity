@@ -522,6 +522,11 @@ class ContinuousStreamManager:
         self.video_path = os.path.join(project_root, "samples", self.video_rel)
         self.audio_path = os.path.join(project_root, "samples", self.audio_rel)
 
+        # Pre-downscaled 224x224 video for fast frame extraction if available
+        video_224_rel = "continuous_simulation/U_FFIA_2022_6_18_AM_100_none_strong_medium_weak_224.mp4"
+        video_224_path = os.path.join(project_root, "samples", video_224_rel)
+        self.decode_video_path = video_224_path if os.path.exists(video_224_path) else self.video_path
+
         self.current_step = 0
         self.window_sec = 2.0
         self.total_duration_sec = 570.0
@@ -552,10 +557,10 @@ class ContinuousStreamManager:
         if sr != 64000:
             self.resampler = torchaudio.transforms.Resample(sr, 64000)
 
-        self.cap = cv2.VideoCapture(self.video_path)
+        self.cap = cv2.VideoCapture(self.decode_video_path)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 25.0
         self._is_initialized = True
-        logger.info(f"ContinuousStreamManager ready: 570.0s ({self.total_steps} 2.0s-steps).")
+        logger.info(f"ContinuousStreamManager ready: 570.0s ({self.total_steps} 2.0s-steps) using {os.path.basename(self.decode_video_path)}.")
 
     def step(self, target_step: Optional[int] = None) -> dict:
         self._ensure_loaded()
@@ -602,11 +607,7 @@ class ContinuousStreamManager:
         frame_b64 = None
         if ret0 and f0_raw is not None:
             try:
-                hd, wd = f0_raw.shape[:2]
-                disp_w = 640
-                disp_h = int(hd * disp_w / max(1, wd))
-                disp_frame = cv2.resize(f0_raw, (disp_w, disp_h))
-                _, buf = cv2.imencode('.jpg', disp_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                _, buf = cv2.imencode('.jpg', f0_raw, [cv2.IMWRITE_JPEG_QUALITY, 80])
                 frame_b64 = base64.b64encode(buf).decode('ascii')
             except Exception as e:
                 logger.warning(f"Failed to encode frame: {e}")
@@ -614,12 +615,18 @@ class ContinuousStreamManager:
         if not ret0 or f0_raw is None:
             f0 = np.zeros((224, 224, 3), dtype=np.uint8)
         else:
-            f0 = cv2.resize(cv2.cvtColor(f0_raw, cv2.COLOR_BGR2RGB), (224, 224))
+            if f0_raw.shape[:2] == (224, 224):
+                f0 = cv2.cvtColor(f0_raw, cv2.COLOR_BGR2RGB)
+            else:
+                f0 = cv2.resize(cv2.cvtColor(f0_raw, cv2.COLOR_BGR2RGB), (224, 224))
 
         if not ret1 or f1_raw is None:
             f1 = np.zeros((224, 224, 3), dtype=np.uint8)
         else:
-            f1 = cv2.resize(cv2.cvtColor(f1_raw, cv2.COLOR_BGR2RGB), (224, 224))
+            if f1_raw.shape[:2] == (224, 224):
+                f1 = cv2.cvtColor(f1_raw, cv2.COLOR_BGR2RGB)
+            else:
+                f1 = cv2.resize(cv2.cvtColor(f1_raw, cv2.COLOR_BGR2RGB), (224, 224))
 
         v_raw = np.concatenate([f0, f1], axis=-1).transpose(2, 0, 1)
         img_t = torch.from_numpy(v_raw).float() / 255.0
@@ -758,179 +765,6 @@ async def get_system_status():
     }
 
 
-@app.get("/api/sample/random")
-async def get_random_sample(label: Optional[int] = None):
-    if service.manifest_df is None or len(service.manifest_df) == 0:
-        raise HTTPException(status_code=404, detail="No samples manifest found.")
-    df = service.manifest_df
-    if label is not None and "label" in df.columns:
-        filtered = df[df["label"] == label]
-        if len(filtered) > 0:
-            df = filtered
-    row = df.sample(n=1).iloc[0]
-    return {
-        "sample_index": int(row["sample_index"]),
-        "class_name": str(row["class_name"]),
-        "label": int(row["label"]),
-        "date": str(row["date"]),
-        "session": str(row["session"]),
-        "video_url": f"/samples/{row['video_path']}",
-        "audio_url": f"/samples/{row['audio_path']}",
-        "orig_sample_id": int(row["orig_sample_id"]),
-    }
-
-
-@app.get("/api/sample/{index}")
-async def get_sample_by_index(index: int):
-    if service.manifest_df is None:
-        raise HTTPException(status_code=404, detail="No samples manifest found.")
-    if index < 0 or index >= len(service.manifest_df):
-        raise HTTPException(status_code=400, detail=f"Index {index} out of range (0-{len(service.manifest_df)-1})")
-    row = service.manifest_df.iloc[index]
-    return {
-        "sample_index": int(row["sample_index"]),
-        "class_name": str(row["class_name"]),
-        "label": int(row["label"]),
-        "date": str(row["date"]),
-        "session": str(row["session"]),
-        "video_url": f"/api/sample/video/{index}",
-        "audio_url": f"/samples/{row['audio_path']}",
-        "preview_url": f"/api/sample/frame/{index}",
-        "orig_sample_id": int(row["orig_sample_id"]),
-    }
-
-
-@app.post("/api/predict/sample/{index}")
-async def predict_sample(index: int):
-    if service.manifest_df is None or service.model_runner is None:
-        raise HTTPException(status_code=500, detail="Model service not initialized.")
-    if index < 0 or index >= len(service.manifest_df):
-        raise HTTPException(status_code=400, detail=f"Index {index} out of range")
-
-    row = service.manifest_df.iloc[index]
-    # Cache stores only preprocessed tensors. TensorRT inference is executed on
-    # every request, including cache hits.
-    result = service.predict_manifest_sample(row)
-    ground_truth_label = int(row["label"])
-    ground_truth_name = str(row["class_name"])
-
-    result["sample_info"] = {
-        "sample_index": index,
-        "date": str(row["date"]),
-        "session": str(row["session"]),
-        "orig_sample_id": int(row["orig_sample_id"]),
-        "ground_truth_label": ground_truth_label,
-        "ground_truth_name": ground_truth_name,
-        "is_match": (result["predicted_class"] == ground_truth_label),
-        "video_url": f"/api/sample/video/{index}",
-        "audio_url": f"/samples/{row['audio_path']}",
-        "preview_url": f"/api/sample/frame/{index}",
-    }
-    return result
-
-
-H264_CACHE_DIR = "/tmp/aquaffia_h264_cache"
-os.makedirs(H264_CACHE_DIR, exist_ok=True)
-
-
-@app.get("/api/sample/video/{index}")
-async def get_sample_video(index: int):
-    if service.manifest_df is None or index < 0 or index >= len(service.manifest_df):
-        raise HTTPException(status_code=404, detail="Sample not found")
-
-    cached_path = os.path.join(H264_CACHE_DIR, f"sample_{index}.mp4")
-    if not os.path.exists(cached_path) or os.path.getsize(cached_path) == 0:
-        row = service.manifest_df.iloc[index]
-        orig_video = os.path.join(service.samples_dir, row["video_path"])
-        if not os.path.exists(orig_video):
-            raise HTTPException(status_code=404, detail="Original video not found")
-
-        # Convert MPEG-4 to H.264 AVC (960x540, 25fps) with +faststart for native browser playback
-        cmd = [
-            "ffmpeg", "-y", "-i", orig_video,
-            "-vf", "scale=960:540",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-movflags", "+faststart",
-            "-pix_fmt", "yuv420p",
-            cached_path
-        ]
-        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if proc.returncode != 0 or not os.path.exists(cached_path):
-            raise HTTPException(status_code=500, detail="Failed to transcode video")
-
-    return FileResponse(cached_path, media_type="video/mp4")
-
-
-@app.get("/api/sample/frame/{index}")
-async def get_sample_frame(index: int):
-    if service.manifest_df is None or index < 0 or index >= len(service.manifest_df):
-        raise HTTPException(status_code=404, detail="Sample not found")
-    row = service.manifest_df.iloc[index]
-    video_full = os.path.join(service.samples_dir, row["video_path"])
-    cap = cv2.VideoCapture(video_full)
-    ok, frame = cap.read()
-    cap.release()
-    if not ok or frame is None:
-        raise HTTPException(status_code=404, detail="Frame not available")
-    hd, wd = frame.shape[:2]
-    disp_w = 640
-    disp_h = int(hd * disp_w / max(1, wd))
-    disp_f = cv2.resize(frame, (disp_w, disp_h))
-    ok_enc, buf = cv2.imencode('.jpg', disp_f, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    return Response(content=buf.tobytes(), media_type="image/jpeg")
-
-
-@app.get("/api/live/frame")
-async def get_live_frame(step: Optional[int] = None):
-    try:
-        stream_manager._ensure_loaded()
-        cur_step = stream_manager.current_step if step is None else (step % stream_manager.total_steps)
-        time_sec = cur_step * stream_manager.window_sec
-        f_idx = int(time_sec * stream_manager.fps)
-        stream_manager.cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-        ok, frame = stream_manager.cap.read()
-        if not ok or frame is None:
-            raise HTTPException(status_code=404, detail="Frame not available")
-        hd, wd = frame.shape[:2]
-        disp_w = 640
-        disp_h = int(hd * disp_w / max(1, wd))
-        disp_f = cv2.resize(frame, (disp_w, disp_h))
-        ok_enc, buf = cv2.imencode('.jpg', disp_f, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return Response(content=buf.tobytes(), media_type="image/jpeg")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/predict/upload")
-async def predict_upload(video: UploadFile = File(...), audio: UploadFile = File(...)):
-    if service.model_runner is None:
-        raise HTTPException(status_code=500, detail="Model runner not initialized.")
-
-    upload_temp_dir = os.path.join(project_root, "web_dashboard", "static", "uploads")
-    os.makedirs(upload_temp_dir, exist_ok=True)
-
-    v_path = os.path.join(upload_temp_dir, f"temp_{int(time.time())}_{video.filename}")
-    a_path = os.path.join(upload_temp_dir, f"temp_{int(time.time())}_{audio.filename}")
-
-    with open(v_path, "wb") as f:
-        f.write(await video.read())
-    with open(a_path, "wb") as f:
-        f.write(await audio.read())
-
-    try:
-        res = service.predict(a_path, v_path)
-        res["sample_info"] = {
-            "uploaded": True,
-            "video_filename": video.filename,
-            "audio_filename": audio.filename,
-            "video_url": f"/static/uploads/{os.path.basename(v_path)}",
-            "audio_url": f"/static/uploads/{os.path.basename(a_path)}",
-        }
-        return res
-    except Exception as e:
-        logger.error(f"Upload prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/benchmark/summary")
