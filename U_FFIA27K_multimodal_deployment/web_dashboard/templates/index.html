@@ -131,12 +131,17 @@
             </div>
           </div>
 
-          <!-- Video Stream Frame (100% Full Uncropped View with object-contain) -->
-          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center mb-2">
-            <video id="farm-video" class="w-full h-full object-contain" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
+          <!-- Video Stream Frame (100% Full Uncropped View with object-contain & Zoom Toggle) -->
+          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center mb-2 cursor-pointer" ondblclick="toggleVideoFit()" title="Nhấp đúp chuột để Phóng to lấp đầy (Zoom) hoặc Vừa khung (Fit)">
+            <video id="farm-video" class="w-full h-full object-contain transition-all duration-200" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
               <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" type="video/mp4">
             </video>
-            <img id="farm-live-img" class="hidden w-full h-full object-contain" src="/static/img/farm_screen.png" alt="Live Pond Camera">
+            <img id="farm-live-img" class="hidden w-full h-full object-contain transition-all duration-200" src="/static/img/farm_screen.png" alt="Live Pond Camera">
+
+            <!-- Hover Zoom / Fit Toggle Button -->
+            <button id="farm-fit-toggle" onclick="toggleVideoFit()" title="Chuyển chế độ: Vừa khung (Fit) / Phóng to lấp đầy (Zoom)" class="absolute top-2.5 right-2.5 z-10 h-7 w-7 rounded-lg bg-black/60 hover:bg-black/85 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs border border-white/10 shadow-xs">
+              <span id="farm-fit-icon" class="material-symbols-outlined text-[16px]">zoom_out_map</span>
+            </button>
           </div>
 
           <!-- Underwater Hydrophone Acoustic Waveform (White Background with Numeric Ticks Only) -->
@@ -545,7 +550,24 @@
       runLiveStep();
       liveTimer = setInterval(runLiveStep, 2000);
     }
-
+    function toggleVideoFit() {
+      const v = document.getElementById('farm-video');
+      const img = document.getElementById('farm-live-img');
+      const icon = document.getElementById('farm-fit-icon');
+      if (!v) return;
+      const isCover = v.classList.contains('object-cover');
+      if (isCover) {
+        v.classList.remove('object-cover');
+        v.classList.add('object-contain');
+        if (img) { img.classList.remove('object-cover'); img.classList.add('object-contain'); }
+        if (icon) icon.textContent = 'zoom_out_map';
+      } else {
+        v.classList.remove('object-contain');
+        v.classList.add('object-cover');
+        if (img) { img.classList.remove('object-contain'); img.classList.add('object-cover'); }
+        if (icon) icon.textContent = 'zoom_in_map';
+      }
+    }
 
     window.addEventListener('resize', function () {
       if (currentAudioWaveform) {
