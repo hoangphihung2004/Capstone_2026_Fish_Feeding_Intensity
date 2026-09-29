@@ -113,7 +113,7 @@
   <!-- ============================================================================== -->
   <!-- MAIN FULL-VIEWPORT CONTAINER (100% NO SCROLL)                                  -->
   <!-- ============================================================================== -->
-  <main class="flex-1 min-h-0 w-full max-w-[1600px] mx-auto p-3 sm:p-4 flex flex-col overflow-hidden">
+  <main class="flex-1 min-h-0 w-full max-w-[1920px] 2xl:max-w-full mx-auto p-3 sm:p-4 flex flex-col overflow-hidden">
 
     <!-- ============================================================================ -->
     <!-- TAB 1: SMART FARM LIVE MONITORING VIEW                                       -->
@@ -121,8 +121,8 @@
     <div id="view-farm" class="h-full flex flex-col overflow-hidden">
       <!-- 2-COLUMN BALANCED GRID -->
       <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
-        <!-- KHỐI TRÁI: CAMERA & HYDROPHONE (7 Cols) -->
-        <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+        <!-- KHỐI TRÁI: CAMERA & HYDROPHONE (7/8 Cols) -->
+        <section class="lg:col-span-7 xl:col-span-8 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
           <!-- Card Header: Camera & Hydrophone -->
           <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
             <div class="flex items-center gap-2">
@@ -131,16 +131,21 @@
             </div>
           </div>
 
-          <!-- Video Stream Frame (100% Full Uncropped View with object-contain) -->
-          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center mb-2">
+          <!-- Video Stream Frame (100% Full Uncropped View with 16:9 Aspect Ratio) -->
+          <div class="relative w-full aspect-video max-h-[calc(100%-125px)] rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center mb-2 shrink-0 cursor-pointer" ondblclick="toggleVideoFit()" title="Nhấp đúp chuột để chuyển đổi giữa Vừa khung (Fit) và Lấp đầy (Fill)">
             <video id="farm-video" class="w-full h-full object-contain" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
               <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" type="video/mp4">
             </video>
             <img id="farm-live-img" class="hidden w-full h-full object-contain" src="/static/img/farm_screen.png" alt="Live Pond Camera">
+
+            <!-- Hover Fit/Fill Toggle Button -->
+            <button id="farm-fit-toggle" onclick="toggleVideoFit()" title="Chuyển chế độ: Vừa khung (Fit) / Lấp đầy (Fill)" class="absolute top-2.5 right-2.5 z-10 h-7 w-7 rounded-lg bg-black/60 hover:bg-black/85 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs border border-white/10 shadow-xs">
+              <span id="farm-fit-icon" class="material-symbols-outlined text-[16px]">fit_screen</span>
+            </button>
           </div>
 
           <!-- Underwater Hydrophone Acoustic Waveform (White Background with Numeric Ticks Only) -->
-          <div class="h-32 shrink-0 w-full rounded-xl bg-white px-2.5 py-1.5 border border-slate-300 shadow-xs flex flex-col justify-between overflow-hidden">
+          <div class="flex-1 min-h-[110px] w-full rounded-xl bg-white px-2.5 py-1.5 border border-slate-300 shadow-xs flex flex-col justify-between overflow-hidden">
             <!-- Plot Area: Y-Axis Numeric Ticks & Canvas -->
             <div class="relative flex-1 w-full min-h-0 flex items-stretch gap-1">
               <!-- Y-Axis Scale Values -->
@@ -168,8 +173,8 @@
           </div>
         </section>
 
-        <!-- RIGHT COLUMN: 2 FOCUSED CARDS (5 Cols) -->
-        <div class="lg:col-span-5 flex flex-col gap-3.5 h-full overflow-hidden">
+        <!-- RIGHT COLUMN: 2 FOCUSED CARDS (5/4 Cols) -->
+        <div class="lg:col-span-5 xl:col-span-4 flex flex-col gap-3.5 h-full overflow-hidden">
           <!-- CARD 1: FEEDING STATUS -->
           <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
             <div class="flex items-center justify-between pb-1.5 shrink-0">
@@ -545,7 +550,24 @@
       runLiveStep();
       liveTimer = setInterval(runLiveStep, 2000);
     }
-
+    function toggleVideoFit() {
+      const v = document.getElementById('farm-video');
+      const img = document.getElementById('farm-live-img');
+      const icon = document.getElementById('farm-fit-icon');
+      if (!v) return;
+      const isCover = v.classList.contains('object-cover');
+      if (isCover) {
+        v.classList.remove('object-cover');
+        v.classList.add('object-contain');
+        if (img) { img.classList.remove('object-cover'); img.classList.add('object-contain'); }
+        if (icon) icon.textContent = 'fit_screen';
+      } else {
+        v.classList.remove('object-contain');
+        v.classList.add('object-cover');
+        if (img) { img.classList.remove('object-contain'); img.classList.add('object-cover'); }
+        if (icon) icon.textContent = 'aspect_ratio';
+      }
+    }
 
     window.addEventListener('resize', function () {
       if (currentAudioWaveform) {
