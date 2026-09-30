@@ -20,10 +20,11 @@ docker run --rm \
   --network host \
   -e PYTHONUNBUFFERED=1 \
   -v /home/fptdanang/AquaFFIA_data/samples:/app/samples:ro \
-  -v /home/fptdanang/multimodal_core_fold_00_fp32.engine:/app/weights/multimodal_core_fold_00_fp32.engine:ro \
+  -v /home/fptdanang/multimodal_core_fold_04_fp32.engine:/app/weights/multimodal_core_fold_04_fp32.engine:ro \
   -v /home/fptdanang/audio_frontend_fp32.engine:/app/weights/audio_frontend_fp32.engine:ro \
   -v /home/fptdanang/video_frontend_fp32.engine:/app/weights/video_frontend_fp32.engine:ro \
   -v "${RESULTS_DIR}:/app/benchmarking/results" \
+  -v /home/fptdanang/eval_tensorrt.py:/app/benchmarking/eval_tensorrt.py:ro \
   -v /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro \
   -v /lib/aarch64-linux-gnu/libnvonnxparser.so.10:/lib/aarch64-linux-gnu/libnvonnxparser.so.10:ro \
@@ -33,4 +34,4 @@ docker run --rm \
   -v /home/fptdanang/.local/lib/python3.10/site-packages/cuda_python-12.9.7.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_python-12.9.7.dist-info:ro \
   -v /home/fptdanang/.local/lib/python3.10/site-packages/cuda_bindings-12.9.9.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_bindings-12.9.9.dist-info:ro \
   "${IMAGE}" \
-  python3 /app/benchmarking/eval_tensorrt.py "$@"
+  python3 /app/benchmarking/eval_tensorrt.py --engine /app/weights/multimodal_core_fold_04_fp32.engine "$@"

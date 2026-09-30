@@ -80,6 +80,8 @@ def prepare_samples():
     if args.clean and os.path.exists(args.output_dir):
         logger.info(f"Cleaning existing contents in: {args.output_dir}...")
         for item in os.listdir(args.output_dir):
+            if item == "continuous_simulation":
+                continue
             item_path = os.path.join(args.output_dir, item)
             try:
                 if os.path.isdir(item_path):

@@ -52,3 +52,20 @@ Execute the offline benchmark evaluation across the entire test set (5,415 sampl
 
 * Results and metrics will be saved to: `/home/fptdanang/aquaffia-edge/results/benchmark_results.json`
 * Confusion matrix plot will be saved to: `/home/fptdanang/aquaffia-edge/results/confusion_matrix.png`
+
+---
+
+## 5. Maximum Performance Mode (Lock Clocks)
+
+Lock GPU (765 MHz) and CPU (1.98 GHz) to maximum frequencies to prevent dynamic power-saving throttling (DVFS) and achieve optimal latency (reduces model inference from ~25 ms down to ~11–12 ms):
+
+```bash
+sudo jetson_clocks
+```
+
+Inspect current clock frequencies and governor status:
+
+```bash
+sudo jetson_clocks --show
+```
+

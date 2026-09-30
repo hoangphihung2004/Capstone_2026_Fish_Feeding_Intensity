@@ -90,9 +90,9 @@ except Exception:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Multimodal Fish Feeding Intensity TensorRT Benchmarking")
-    default_engine = os.path.join(project_root, "weights", "multimodal_core_fold_00_fp32.engine")
+    default_engine = os.path.join(project_root, "weights", "multimodal_core_fold_04_fp32.engine")
     if not os.path.exists(default_engine):
-        fallback_fp16 = os.path.join(project_root, "weights", "multimodal_core_fold_00_fp16.engine")
+        fallback_fp16 = os.path.join(project_root, "weights", "multimodal_core_fold_04_fp16.engine")
         if os.path.exists(fallback_fp16):
             default_engine = fallback_fp16
 
@@ -105,7 +105,7 @@ def parse_args():
     parser.add_argument(
         "--onnx",
         type=str,
-        default=os.path.join(project_root, "weights", "multimodal_core_fold_00_sim.onnx"),
+        default=os.path.join(project_root, "weights", "multimodal_core_fold_04_sim.onnx"),
         help="Path to fallback ONNX model file",
     )
     default_audio = os.path.join(project_root, "weights", "audio_frontend_fp32.engine")
@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default=os.path.join(project_root, "checkpoint", "multimodal_model", "fold_00", "multimodal_best.pt"),
+        default=os.path.join(project_root, "checkpoint", "multimodal_model", "fold_04", "multimodal_best.pt"),
         help="Path to PyTorch checkpoint (for AudioFrontend weights fallback)",
     )
     parser.add_argument(

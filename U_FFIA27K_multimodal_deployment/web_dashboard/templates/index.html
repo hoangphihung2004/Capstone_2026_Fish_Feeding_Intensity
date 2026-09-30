@@ -113,90 +113,104 @@
   <!-- ============================================================================== -->
   <!-- MAIN FULL-VIEWPORT CONTAINER (100% NO SCROLL)                                  -->
   <!-- ============================================================================== -->
-  <main class="flex-1 min-h-0 w-full max-w-[1600px] mx-auto p-3 sm:p-4 flex flex-col overflow-hidden">
+  <main class="flex-1 min-h-0 w-full max-w-[1600px] mx-auto p-2.5 sm:p-3 flex flex-col overflow-hidden">
 
     <!-- ============================================================================ -->
     <!-- TAB 1: SMART FARM LIVE MONITORING VIEW                                       -->
     <!-- ============================================================================ -->
     <div id="view-farm" class="h-full flex flex-col overflow-hidden">
       <!-- 2-COLUMN BALANCED GRID -->
-      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch overflow-hidden">
-        <!-- KHỐI TRÁI: CAMERA & HYDROPHONE (7 Cols) -->
-        <section class="lg:col-span-7 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
-          <!-- Card Header: Camera & Hydrophone -->
-          <div class="flex items-center justify-between pb-2 border-b border-surface-container-low mb-2 shrink-0 gap-2">
-            <div class="flex items-center gap-2">
-              <span class="material-symbols-outlined text-primary text-[20px]">sensors</span>
-              <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Camera & Hydrophone</h2>
-            </div>
-          </div>
-
-          <!-- Video Stream Frame (100% Full Uncropped View with object-contain & Zoom Toggle) -->
-          <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center mb-2 cursor-pointer" ondblclick="toggleVideoFit()" title="Nhấp đúp chuột để Phóng to lấp đầy (Zoom) hoặc Vừa khung (Fit)">
-            <video id="farm-video" class="w-full h-full object-contain transition-all duration-200" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
-              <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_25_PM_100_none_strong_medium_weak.mp4" type="video/mp4">
-            </video>
-            <img id="farm-live-img" class="hidden w-full h-full object-contain transition-all duration-200" src="/static/img/farm_screen.png" alt="Live Pond Camera">
-
-            <!-- Hover Zoom / Fit Toggle Button -->
-            <button id="farm-fit-toggle" onclick="toggleVideoFit()" title="Chuyển chế độ: Vừa khung (Fit) / Phóng to lấp đầy (Zoom)" class="absolute top-2.5 right-2.5 z-10 h-7 w-7 rounded-lg bg-black/60 hover:bg-black/85 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs border border-white/10 shadow-xs">
-              <span id="farm-fit-icon" class="material-symbols-outlined text-[16px]">zoom_out_map</span>
-            </button>
-          </div>
-
-          <!-- Underwater Hydrophone Acoustic Waveform (White Background with Numeric Ticks Only) -->
-          <div class="h-32 shrink-0 w-full rounded-xl bg-white px-2.5 py-1.5 border border-slate-300 shadow-xs flex flex-col justify-between overflow-hidden">
-            <!-- Plot Area: Y-Axis Numeric Ticks & Canvas -->
-            <div class="relative flex-1 w-full min-h-0 flex items-stretch gap-1">
-              <!-- Y-Axis Scale Values -->
-              <div class="flex flex-col justify-between text-[8px] font-mono text-slate-500 font-medium select-none py-0.5 leading-none text-right w-5 shrink-0">
-                <span>+1.0</span>
-                <span>+0.5</span>
-                <span class="font-bold text-slate-700">0.0</span>
-                <span>-0.5</span>
-                <span>-1.0</span>
-              </div>
-              <!-- Canvas Area with Left & Bottom Coordinate Axes -->
-              <div class="relative flex-1 h-full min-w-0 border-l border-b border-slate-400">
-                <canvas id="farm-audio-canvas" class="w-full h-full block bg-white"></canvas>
+      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch overflow-hidden">
+        <!-- KHỐI TRÁI: 2 CARDS TÁCH BIỆT - CAMERA VÀ HYDROPHONE (7 Cols) -->
+        <div class="lg:col-span-7 flex flex-col gap-3 h-full overflow-hidden">
+          <!-- CARD 1: CAMERA (EXPANDED TO MAXIMIZE VIDEO AREA) -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-2.5 sm:p-3 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <!-- Card Header: Camera (Balanced Uniform) -->
+            <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-surface-container-low shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[19px] leading-none">videocam</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider leading-none">Camera</h2>
               </div>
             </div>
 
-            <!-- X-Axis Numeric Labels -->
-            <div class="flex items-center justify-between text-[8px] font-mono text-slate-500 pl-6 pr-0.5 leading-none pt-0.5">
-              <span>0.0s</span>
-              <span>0.5s</span>
-              <span>1.0s</span>
-              <span>1.5s</span>
-              <span>2.0s</span>
+            <!-- Video Stream Frame (100% Full Uncropped View with object-contain & Zoom Toggle) -->
+            <div class="relative flex-1 min-h-0 w-full rounded-xl overflow-hidden bg-slate-950 shadow-inner group flex items-center justify-center cursor-pointer" ondblclick="toggleVideoFit()" title="Nhấp đúp chuột để Phóng to lấp đầy (Zoom) hoặc Vừa khung (Fit)">
+              <video id="farm-video" class="w-full h-full object-contain transition-all duration-200" src="/samples/continuous_simulation/U_FFIA_2022_6_19_AM_100_none_strong_medium_weak.mp4" autoplay loop muted playsinline poster="/static/img/farm_screen.png">
+                <source id="farm-video-src" src="/samples/continuous_simulation/U_FFIA_2022_6_19_AM_100_none_strong_medium_weak.mp4" type="video/mp4">
+              </video>
+              <img id="farm-live-img" class="hidden w-full h-full object-contain transition-all duration-200" src="/static/img/farm_screen.png" alt="Live Pond Camera">
+
+              <!-- Hover Zoom / Fit Toggle Button -->
+              <button id="farm-fit-toggle" onclick="toggleVideoFit()" title="Chuyển chế độ: Vừa khung (Fit) / Phóng to lấp đầy (Zoom)" class="absolute top-2.5 right-2.5 z-10 h-7 w-7 rounded-lg bg-black/60 hover:bg-black/85 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs border border-white/10 shadow-xs">
+                <span id="farm-fit-icon" class="material-symbols-outlined text-[16px]">zoom_out_map</span>
+              </button>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <!-- CARD 2: HYDROPHONE (COMFORTABLE BALANCED HEIGHT) -->
+          <section class="h-36 shrink-0 bg-surface-container-lowest rounded-2xl p-2.5 sm:p-3 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <!-- Card Header: Hydrophone (Balanced Uniform) -->
+            <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-surface-container-low shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary text-[19px] leading-none">graphic_eq</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider leading-none">Hydrophone</h2>
+              </div>
+            </div>
+
+            <!-- Underwater Hydrophone Acoustic Waveform (White Background with Numeric Ticks Only) -->
+            <div class="flex-1 min-h-0 w-full rounded-xl bg-white px-2.5 py-1 border border-slate-300 shadow-xs flex flex-col justify-between overflow-hidden">
+              <!-- Plot Area: Y-Axis Numeric Ticks & Canvas -->
+              <div class="relative flex-1 w-full min-h-0 flex items-stretch gap-1">
+                <!-- Y-Axis Scale Values -->
+                <div class="flex flex-col justify-between text-[8px] font-mono text-slate-500 font-medium select-none py-0.5 leading-none text-right w-5 shrink-0">
+                  <span>+1.0</span>
+                  <span>+0.5</span>
+                  <span class="font-bold text-slate-700">0.0</span>
+                  <span>-0.5</span>
+                  <span>-1.0</span>
+                </div>
+                <!-- Canvas Area with Left & Bottom Coordinate Axes -->
+                <div class="relative flex-1 h-full min-w-0 border-l border-b border-slate-400">
+                  <canvas id="farm-audio-canvas" class="w-full h-full block bg-white"></canvas>
+                </div>
+              </div>
+
+              <!-- X-Axis Numeric Labels -->
+              <div class="flex items-center justify-between text-[8px] font-mono text-slate-500 pl-6 pr-0.5 leading-none pt-0.5">
+                <span>0.0s</span>
+                <span>0.5s</span>
+                <span>1.0s</span>
+                <span>1.5s</span>
+                <span>2.0s</span>
+              </div>
+            </div>
+          </section>
+        </div>
 
         <!-- RIGHT COLUMN: 2 FOCUSED CARDS (5 Cols) -->
-        <div class="lg:col-span-5 flex flex-col gap-3.5 h-full overflow-hidden">
-          <!-- CARD 1: FEEDING STATUS -->
-          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
-            <div class="flex items-center justify-between pb-1.5 shrink-0">
+        <div class="lg:col-span-5 flex flex-col gap-3 h-full overflow-hidden">
+          <!-- CARD 1: FEEDING STATUS (Balanced Uniform Header) -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-2.5 sm:p-3 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-surface-container-low shrink-0">
               <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary text-[20px]">set_meal</span>
-                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Feeding Status</h2>
+                <span class="material-symbols-outlined text-primary text-[19px] leading-none">set_meal</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider leading-none">Feeding Status</h2>
               </div>
             </div>
 
             <!-- Hero: Current Feeding State -->
-            <div id="farm-detection-banner" class="flex-1 my-2 bg-gradient-to-b from-primary/5 via-primary/[0.02] to-transparent rounded-2xl p-4 sm:p-5 text-center border border-primary/15 flex flex-col items-center justify-center transition-all">
+            <div id="farm-detection-banner" class="flex-1 my-1.5 bg-gradient-to-b from-primary/5 via-primary/[0.02] to-transparent rounded-2xl p-3.5 sm:p-4 text-center border border-primary/15 flex flex-col items-center justify-center transition-all">
               <div id="farm-pred-title" class="text-3xl sm:text-4xl font-display font-black text-primary tracking-tight">
                 STRONG
               </div>
             </div>
 
             <!-- 4-Level Visual Intensity Scale -->
-            <div class="pt-2 border-t border-surface-container-low shrink-0">
-              <div class="text-[11px] font-semibold text-outline uppercase tracking-wider mb-1.5">
+            <div class="pt-1.5 border-t border-surface-container-low shrink-0">
+              <div class="text-[10px] font-semibold text-outline uppercase tracking-wider mb-1">
                 Feeding Intensity Scale
               </div>
-              <div class="grid grid-cols-4 gap-2 w-full" id="farm-gauge-grid">
+              <div class="grid grid-cols-4 gap-1.5 w-full" id="farm-gauge-grid">
                 <div class="flex flex-col gap-1 text-center bg-surface-container-low/50 p-1.5 rounded-lg border border-surface-container/60">
                   <div id="farm-gauge-0" class="h-2 rounded-full bg-emerald-500 transition-all"></div>
                   <span id="farm-gauge-lbl-0" class="text-[10px] font-label-sm text-outline font-medium">None</span>
@@ -217,12 +231,12 @@
             </div>
           </section>
 
-          <!-- CARD 2: DEVICE STATUS (Option 1: Hardware Health & AI Speed) -->
-          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-3.5 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
-            <div class="flex items-center justify-between pb-1.5 shrink-0">
+          <!-- CARD 2: DEVICE STATUS (Balanced Uniform Header) -->
+          <section class="flex-1 min-h-0 bg-surface-container-lowest rounded-2xl p-2.5 sm:p-3 border border-surface-container-high/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between overflow-hidden">
+            <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-surface-container-low shrink-0">
               <div class="flex items-center gap-2">
-                <span class="material-symbols-outlined text-primary text-[20px]">memory</span>
-                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider">Device Status</h2>
+                <span class="material-symbols-outlined text-primary text-[19px] leading-none">memory</span>
+                <h2 class="text-xs font-display font-bold text-on-surface uppercase tracking-wider leading-none">Device Status</h2>
               </div>
             </div>
 
@@ -390,7 +404,22 @@
       // 4. Video Stream Sync (Smooth 25 FPS Native Video + Fallback Frame)
       const farmVideo = document.getElementById('farm-video');
       const farmLiveImg = document.getElementById('farm-live-img');
+      if (farmLiveImg && data.frame_base64) {
+        farmLiveImg.src = 'data:image/jpeg;base64,' + data.frame_base64;
+      }
       if (farmVideo) {
+        if (!farmVideo._boundEvents) {
+          farmVideo._boundEvents = true;
+          farmVideo.addEventListener('playing', () => {
+            if (farmLiveImg) farmLiveImg.classList.add('hidden');
+            farmVideo.classList.remove('hidden');
+          });
+          farmVideo.addEventListener('error', () => {
+            console.warn('Video element error, fallback to real-time live frames');
+            if (farmLiveImg) farmLiveImg.classList.remove('hidden');
+            farmVideo.classList.add('hidden');
+          });
+        }
         if (sInfo && sInfo.time_sec !== undefined) {
           if (Math.abs(farmVideo.currentTime - sInfo.time_sec) > 3.0) {
             farmVideo.currentTime = sInfo.time_sec;
@@ -399,9 +428,6 @@
         if (farmVideo.paused && isLiveRunning) {
           farmVideo.play().catch(() => {});
         }
-      }
-      if (farmLiveImg && data.frame_base64) {
-        farmLiveImg.src = 'data:image/jpeg;base64,' + data.frame_base64;
       }
 
       // 5. Underwater Hydrophone Acoustic Waveform (Pure visual waveform)
