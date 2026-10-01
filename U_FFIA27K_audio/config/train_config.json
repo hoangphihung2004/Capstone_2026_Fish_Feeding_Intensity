@@ -8,7 +8,7 @@
   "delta": 0.0,
   "cache_audio": true,
   "model": {
-    "backbone": "Cnn14MobileV2",
+    "backbone": "AMARU",
     "pretrained": false
   },
   "dataset_splitter": {

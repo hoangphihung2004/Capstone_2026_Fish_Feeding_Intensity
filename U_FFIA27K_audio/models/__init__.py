@@ -1,4 +1,5 @@
 from .base_backbone import BaseBackbone
+from .amaru import AMARU
 from .cnn14_mobilev2 import Cnn14MobileV2
 from .cnn14_mobilev2_1p9m import Cnn14MobileV2_1P9M
 from .mobilenet_v1 import MobileNetV1
@@ -12,6 +13,7 @@ from .panns_cnn14 import PANNS_Cnn14
 
 __all__ = [
     "BaseBackbone",
+    "AMARU",
     "Cnn14MobileV2",
     "Cnn14MobileV2_1P9M",
     "MobileNetV1",

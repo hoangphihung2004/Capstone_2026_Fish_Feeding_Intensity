@@ -1,7 +1,7 @@
 {
   "train_config_path": "config/train_config.json",
   "model": {
-    "backbone": "Cnn14MobileV2",
+    "backbone": "AMARU",
     "pretrained": false,
     "classes_num": 4
   },

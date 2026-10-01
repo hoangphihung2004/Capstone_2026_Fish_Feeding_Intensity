@@ -21,6 +21,7 @@ from config import ArtifactUploadConfig, TrainConfig
 from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
 from models import (
+    AMARU,
     AudioModel,
     Cnn14MobileV2,
     Cnn14MobileV2_1P9M,
@@ -50,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 MODEL_REGISTRY = {
+    "AMARU": AMARU,
     "Cnn14MobileV2": Cnn14MobileV2,
     "Cnn14MobileV2_1P9M": Cnn14MobileV2_1P9M,
     "MobileNetV1": MobileNetV1,
