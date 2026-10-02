@@ -1,0 +1,19 @@
+{
+  "checkpoint_path": "checkpoint/mobilenet_v2/fold_00/video_best.pt",
+  "fold_index": 0,
+  "model": {
+    "backbone": "MobileNetV2",
+    "pretrained": true
+  },
+  "video_features": {
+    "image_size": 224,
+    "frame_policy": "1_49_channels"
+  },
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
+  "reference_test_csv": "",
+  "output_csv_path": "outputs/predictions_test_fold00.csv",
+  "split": "test",
+  "batch_size": 64,
+  "device": "auto"
+}
