@@ -1,0 +1,15 @@
+decord
+huggingface_hub
+matplotlib
+numpy
+opencv-python
+pydantic
+scikit-learn
+scipy>=1.9
+soundfile
+torch
+torchaudio
+torchlibrosa
+thop
+torchvision
+tqdm
