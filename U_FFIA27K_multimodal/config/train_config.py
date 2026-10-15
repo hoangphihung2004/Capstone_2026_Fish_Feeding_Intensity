@@ -58,6 +58,18 @@ class ReduceLROnPlateauConfig(BaseModel):
     min_lr: float = Field(default=1e-6, gt=0.0)
 
 
+class KDConfig(BaseModel):
+    """Offline Hinton knowledge distillation from the frozen multimodal teacher."""
+
+    teacher_checkpoint: str = Field(default="", description="Path to the teacher multimodal_best.pt of the selected fold.")
+    temperature: float = Field(default=4.0, gt=0.0, description="Softmax temperature applied to teacher and student logits.")
+    alpha: float = Field(default=0.5, ge=0.0, le=1.0, description="Weight of the KD term; the CE term uses 1 - alpha.")
+    verify_teacher_split: bool = Field(
+        default=True,
+        description="Require the teacher's saved splitter_config.json/splits to match the current split when present.",
+    )
+
+
 class MultimodalTrainConfig(BaseModel):
     epochs: int = Field(default=250, gt=0)
     batch_size: int = Field(default=128, gt=0)
@@ -73,6 +85,7 @@ class MultimodalTrainConfig(BaseModel):
     cache_video_mode: Literal["disk", "ram", "none"] = Field(default="ram")
 
     lr_scheduler: ReduceLROnPlateauConfig = Field(default_factory=ReduceLROnPlateauConfig)
+    kd: KDConfig = Field(default_factory=KDConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)

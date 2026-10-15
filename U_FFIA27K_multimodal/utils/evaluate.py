@@ -46,26 +46,31 @@ def classification_statistics(target, probabilities):
 
 
 class MultimodalEvaluator:
-    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None) -> None:
+    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None, head_keys: Dict[str, str] | None = None, use_video: bool = True) -> None:
         self.model = model
         self.device = next(model.parameters()).device
-        self.loss_fn = loss_fn or ClipCELoss()
+        self.head_keys = head_keys or HEAD_KEYS
+        self.loss_fn = loss_fn or ClipCELoss(head=next(iter(self.head_keys)))
+        self.use_video = use_video
 
     def _forward(self, data_loader: Any) -> Dict[str, np.ndarray]:
         output_dict: Dict[str, list] = {}
-        loss_sums = {head: 0.0 for head in HEAD_KEYS}
+        loss_sums = {head: 0.0 for head in self.head_keys}
         count = 0
         self.model.eval()
-        for batch in tqdm(data_loader, desc="Running multimodal evaluation..."):
-            waveform = batch["waveform"].to(self.device)
-            video_form = batch["video_form"].to(self.device)
+        for batch in tqdm(data_loader, desc="Running evaluation..."):
+            inputs = {"waveform": batch["waveform"].to(self.device)}
+            if self.use_video:
+                inputs["video_form"] = batch["video_form"].to(self.device)
             with torch.no_grad():
-                batch_output = self.model(waveform=waveform, video_form=video_form)
+                batch_output = self.model(**inputs)
                 losses = self.loss_fn.components(batch_output, {"target": batch["target"].to(self.device)})
-            count += waveform.shape[0]
-            for head, key in HEAD_KEYS.items():
-                loss_sums[head] += losses[head].item() * waveform.shape[0]
+            batch_size = inputs["waveform"].shape[0]
+            count += batch_size
+            for head, key in self.head_keys.items():
+                loss_sums[head] += losses[head].item() * batch_size
                 output_dict.setdefault(key, []).append(batch_output[key].softmax(1).cpu().numpy())
+                output_dict.setdefault(f"{head}_logits", []).append(batch_output[key].cpu().numpy())
             target = batch["target"].cpu().numpy()
             if target.ndim == 1:
                 target = np.eye(4)[target.astype(int)]
@@ -80,10 +85,13 @@ class MultimodalEvaluator:
     def evaluate(self, data_loader: Any, prediction_path=None) -> Dict[str, Any]:
         output_dict = self._forward(data_loader)
         target = output_dict["target"]
-        heads = {head: classification_statistics(target, output_dict[key]) for head, key in HEAD_KEYS.items()}
+        heads = {head: classification_statistics(target, output_dict[key]) for head, key in self.head_keys.items()}
         if prediction_path is not None:
             np.savez_compressed(prediction_path, **{
                 key: value.astype(str) if value.dtype == object else value
                 for key, value in output_dict.items()})
-        return {**heads["multimodal"], "heads": heads, "head_losses": self.last_losses,
-                "loss": sum(self.last_losses.values())}
+        primary_head = next(iter(self.head_keys))
+        return {**heads[primary_head], "heads": heads, "head_losses": self.last_losses,
+                "loss": sum(self.last_losses.values()),
+                "logits": output_dict[f"{primary_head}_logits"], "target": target,
+                "audio_name": output_dict["audio_name"]}

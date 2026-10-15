@@ -1,6 +1,7 @@
 from .train_config import (
     AudioFeaturesConfig,
     DEFAULT_IMAGE_CACHE_ROOT,
+    KDConfig,
     ModelConfig,
     MultimodalTrainConfig,
     ReduceLROnPlateauConfig,
@@ -19,6 +20,7 @@ __all__ = [
     "ArtifactUploadConfig",
     "AudioFeaturesConfig",
     "DEFAULT_IMAGE_CACHE_ROOT",
+    "KDConfig",
     "ModelConfig",
     "MultimodalTrainConfig",
     "ReduceLROnPlateauConfig",

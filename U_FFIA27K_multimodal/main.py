@@ -19,8 +19,9 @@ import torch.optim as optim
 
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishMultimodalDataLoader
-from models import MultimodalModel
-from tasks import MultimodalTrainer
+from models import AudioStudentModel
+from models.teacher import load_teacher, resolve_teacher_checkpoint, verify_teacher_config, verify_teacher_splits
+from tasks import MODEL_DIR_NAME, KDTrainer
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -45,12 +46,12 @@ def safe_filename_part(value: str) -> str:
 def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = ".zip") -> str:
     suffix = suffix if suffix.startswith(".") else f".{suffix}"
     filename_parts = [
-        "U_FFIA27K_multimodal",
+        "U_FFIA27K_KD",
+        "audio_student",
         config.model.audio_backbone,
-        config.model.video_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        "first_last",
+        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}",
     ]
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
@@ -156,16 +157,16 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info("Successfully uploaded artifact to Hugging Face.")
 
 
-def build_model(config: TrainConfig) -> MultimodalModel:
-    model = MultimodalModel(config.audio_features, pretrained_video=config.model.pretrained_video)
+def build_student(config: TrainConfig) -> AudioStudentModel:
+    model = AudioStudentModel(config.audio_features)
     num_params = model.architecture_num_params()
     if num_params >= 5_000_000:
         raise ValueError(f"Architecture exceeds parameter budget: {num_params:,}")
-    logger.info("Architecture parameters (frontend excluded): %s", f"{num_params:,}")
+    logger.info("Student architecture parameters (frontend excluded): %s", f"{num_params:,}")
     return model
 
 
-def log_model_complexity(model: MultimodalModel, config: TrainConfig, device: torch.device) -> None:
+def log_model_complexity(model: AudioStudentModel, config: TrainConfig, device: torch.device) -> None:
     """Log parameter counts and THOP MAC/FLOP estimates before training."""
     try:
         from thop import profile
@@ -177,17 +178,16 @@ def log_model_complexity(model: MultimodalModel, config: TrainConfig, device: to
     model.eval()
     try:
         audio_features = torch.zeros(1, 1, config.audio_features.mel_bins, config.audio_features.mel_bins, device=device)
-        video = torch.zeros(1, 6, config.video_features.image_size, config.video_features.image_size, device=device)
         waveform = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
         with torch.no_grad():
-            architecture_macs, _ = profile(model.architecture, inputs=(audio_features, video), verbose=False)
-            total_macs, _ = profile(model, inputs=(waveform, video), verbose=False)
+            architecture_macs, _ = profile(model.architecture, inputs=(audio_features,), verbose=False)
+            total_macs, _ = profile(model, inputs=(waveform,), verbose=False)
 
         architecture_params = sum(parameter.numel() for parameter in model.architecture.parameters())
         frontend_params = sum(parameter.numel() for parameter in model.frontend.parameters())
         total_params = sum(parameter.numel() for parameter in model.parameters())
         logger.info("==================================================")
-        logger.info("Model Complexity (single sample; FLOPs = 2 x MACs):")
+        logger.info("Student Model Complexity (single sample; FLOPs = 2 x MACs):")
         logger.info("  - Architecture parameters (frontend excluded): %s", f"{architecture_params:,}")
         logger.info("  - Frontend parameters:                         %s", f"{frontend_params:,}")
         logger.info("  - Total model parameters:                      %s", f"{total_params:,}")
@@ -270,18 +270,25 @@ def aggregate_cv_summaries_if_ready(model_dir: str, num_folds: int) -> None:
 
 
 def selected_cv_fold_indices(config: TrainConfig) -> list[int]:
+    # One teacher checkpoint belongs to exactly one fold, so KD runs a single fold per launch.
     if config.dataset_splitter.fold_index is None:
-        return list(range(config.dataset_splitter.num_folds))
+        raise ValueError(
+            "dataset_splitter.fold_index must be set for KD cross-validation; "
+            "it must match the fold of kd.teacher_checkpoint."
+        )
     fold_index = int(config.dataset_splitter.fold_index)
     if not 0 <= fold_index < config.dataset_splitter.num_folds:
         raise ValueError(f"Invalid fold_index={fold_index}")
     return [fold_index]
 
 
-def run_multimodal_training(config: TrainConfig, train_config_path: str, device: torch.device, fold_index: int = None) -> str:
+def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.device) -> None:
     # Keep dataset splitting reproducible through dataset_splitter.seed, while
     # allowing each training run to use a fresh random initialization/order.
-    model = build_model(config).to(device)
+    teacher_checkpoint = resolve_teacher_checkpoint(config.kd.teacher_checkpoint)
+    if config.kd.verify_teacher_split:
+        verify_teacher_config(teacher_checkpoint, config)
+    model = build_student(config).to(device)
     log_model_complexity(model, config, device)
     loader_manager = FishMultimodalDataLoader(
         sample_rate=config.audio_features.sample_rate,
@@ -293,6 +300,12 @@ def run_multimodal_training(config: TrainConfig, train_config_path: str, device:
         image_size=config.video_features.image_size,
         splitter_config=config.dataset_splitter,
     )
+    if config.kd.verify_teacher_split:
+        verify_teacher_splits(
+            teacher_checkpoint,
+            {"train": loader_manager.train_dict, "val": loader_manager.val_dict, "test": loader_manager.test_dict},
+        )
+    teacher = load_teacher(teacher_checkpoint, config, device)
     train_loader = loader_manager.get_dataloader("train", shuffle=True, drop_last=True)
     val_loader = loader_manager.get_dataloader("val", shuffle=False, drop_last=False)
     test_loader = loader_manager.get_dataloader("test", shuffle=False, drop_last=False)
@@ -310,8 +323,9 @@ def run_multimodal_training(config: TrainConfig, train_config_path: str, device:
             cooldown=config.lr_scheduler.cooldown,
             min_lr=config.lr_scheduler.min_lr,
         )
-    trainer = MultimodalTrainer(
-        model=model,
+    trainer = KDTrainer(
+        student=model,
+        teacher=teacher,
         optimizer=optimizer,
         device=device,
         config=config,
@@ -320,13 +334,10 @@ def run_multimodal_training(config: TrainConfig, train_config_path: str, device:
         split_saver=loader_manager,
     )
     trainer.train(train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, max_epoch=config.epochs)
-    if config.dataset_splitter.evaluation_mode == "cross_validation":
-        return config.ckpt_dir
-    return os.path.join(config.ckpt_dir if config.ckpt_dir else "checkpoint", "multimodal_model")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the first_last audio-video model.")
+    parser = argparse.ArgumentParser(description="Distill the frozen first_last audio-video teacher into an audio-only student.")
     parser.add_argument("--config", default=str(Path(project_root) / "config/train_config.json"))
     parser.add_argument("--upload-config", default=str(Path(project_root) / "config/artifact_upload_config.json"))
     args = parser.parse_args()
@@ -336,7 +347,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     logger.info("==================================================")
-    logger.info("Launching Multimodal Audio-Video Pipeline:")
+    logger.info("Launching Offline KD Pipeline (multimodal teacher -> audio-only student):")
     logger.info(f"  - Device:                  {device}")
     logger.info(f"  - Epochs:                  {config.epochs}")
     logger.info(f"  - Batch Size:              {config.batch_size}")
@@ -344,9 +355,11 @@ def main() -> None:
     logger.info(f"  - Early Stopping:          {config.early_stopping}")
     if config.early_stopping:
         logger.info(f"  - Early Stopping Patience: {config.patience} epochs")
-    logger.info(f"  - Audio Backbone:          {config.model.audio_backbone}")
-    logger.info(f"  - Video Backbone:          {config.model.video_backbone}")
-    logger.info("  - Video Input Policy:      first_last")
+    logger.info(f"  - Teacher Checkpoint:      {config.kd.teacher_checkpoint or '<not set>'}")
+    logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
+    logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
+    logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
+    logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")
     if config.lr_scheduler.enabled:
         logger.info(
             "  - LR Scheduler:            ReduceLROnPlateau on val_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
@@ -368,10 +381,10 @@ def main() -> None:
         for fold in fold_indices:
             fold_config = copy.deepcopy(config)
             fold_config.dataset_splitter.fold_index = fold
-            fold_dir = os.path.join(model_cv_dir(config.ckpt_dir, "multimodal_model"), f"fold_{fold:02d}")
+            fold_dir = os.path.join(model_cv_dir(config.ckpt_dir, MODEL_DIR_NAME), f"fold_{fold:02d}")
             fold_config.ckpt_dir = fold_dir
             runtime_config = write_runtime_config(fold_config, os.path.join(fold_dir, "fold_train_config.json"))
-            run_multimodal_training(fold_config, runtime_config, device, fold_index=fold)
+            run_kd_training(fold_config, runtime_config, device)
             model_dir = str(Path(fold_dir).parent)
         if model_dir:
             if len(fold_indices) == splitter.num_folds:
@@ -379,7 +392,7 @@ def main() -> None:
             else:
                 aggregate_cv_summaries_if_ready(model_dir, splitter.num_folds)
     else:
-        run_multimodal_training(config=config, train_config_path=train_config_path, device=device)
+        run_kd_training(config=config, train_config_path=train_config_path, device=device)
     artifact_upload_config = ArtifactUploadConfig.from_json(artifact_upload_config_path)
     upload_artifact_if_enabled(artifact_upload_config, config)
 

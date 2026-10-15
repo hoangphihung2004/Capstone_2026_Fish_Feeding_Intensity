@@ -19,6 +19,12 @@
     "cooldown": 2,
     "min_lr": 0.000001
   },
+  "kd": {
+    "teacher_checkpoint": "",
+    "temperature": 4.0,
+    "alpha": 0.5,
+    "verify_teacher_split": true
+  },
   "model": {
     "audio_backbone": "LightweightAudioEncoder",
     "video_backbone": "EfficientNetB0_S7",

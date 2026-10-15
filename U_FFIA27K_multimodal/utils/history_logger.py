@@ -18,9 +18,13 @@ class HistoryLogger:
                     "epoch",
                     "learning_rate",
                     "train_loss",
+                    "train_kd_loss",
+                    "train_kl_loss",
                     "train_accuracy",
                     "train_mAP",
                     "val_loss",
+                    "val_kd_loss",
+                    "val_kl_loss",
                     "val_accuracy",
                     "val_mAP",
                     "val_auc_class_none",
@@ -31,19 +35,31 @@ class HistoryLogger:
                     "val_ap_class_strong",
                     "val_ap_class_medium",
                     "val_ap_class_weak",
+                    "teacher_train_loss",
+                    "teacher_train_accuracy",
+                    "teacher_val_loss",
+                    "teacher_val_accuracy",
                 ]
             )
 
-    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_statistics: dict, is_best: bool = False) -> None:
+    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
+        """*_loss = CE on hard labels, *_kd_loss = (1 - alpha) * CE + alpha * T^2 * KL, *_kl_loss = T^2 * KL.
+
+        teacher_metrics holds the frozen teacher's train/val CE loss and accuracy for this epoch.
+        """
         val_auc = val_statistics["auc"]
         val_ap = val_statistics["average_precision"]
         row = [
             epoch,
             f"{learning_rate:.10f}",
             f"{train_loss:.6f}",
+            f"{train_kd_loss:.6f}",
+            f"{train_kl_loss:.6f}",
             f"{train_acc:.6f}",
             f"{train_mAP:.6f}",
             f"{val_loss:.6f}",
+            f"{val_kd_loss:.6f}",
+            f"{val_kl_loss:.6f}",
             f"{float(val_statistics['accuracy']):.6f}",
             f"{float(np.mean(val_ap)):.6f}",
             f"{val_auc[0]:.6f}",
@@ -54,6 +70,10 @@ class HistoryLogger:
             f"{val_ap[1]:.6f}",
             f"{val_ap[2]:.6f}",
             f"{val_ap[3]:.6f}",
+            f"{teacher_metrics['train_loss']:.6f}",
+            f"{teacher_metrics['train_accuracy']:.6f}",
+            f"{teacher_metrics['val_loss']:.6f}",
+            f"{teacher_metrics['val_accuracy']:.6f}",
         ]
         with open(self.history_csv_path, "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(row)
