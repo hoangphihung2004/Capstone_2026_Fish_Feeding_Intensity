@@ -3,7 +3,7 @@
   "batch_size": 256,
   "dataloader_workers": -1,
   "prefetch_factor": null,
-  "learning_rate": 0.0001,
+  "learning_rate": 0.001,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
   "early_stopping": true,
@@ -12,7 +12,7 @@
   "cache_audio": true,
   "cache_video_mode": "ram",
   "lr_scheduler": {
-    "enabled": true,
+    "enabled": false,
     "factor": 0.5,
     "patience": 10,
     "threshold": 0.001,
