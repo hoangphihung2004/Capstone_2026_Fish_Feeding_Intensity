@@ -20,11 +20,11 @@ from utils import ClipCELoss, EarlyStopping, HintonKDLoss, HistoryLogger, Infere
 
 logger = logging.getLogger(__name__)
 
-MODEL_DIR_NAME = "kd_audio_student"
+MODEL_DIR_NAME = "kd_video_student"
 
 
 class KDTrainer:
-    """Offline Hinton distillation: frozen multimodal teacher -> audio-only student."""
+    """Offline Hinton distillation: frozen multimodal teacher -> video-only student."""
 
     def __init__(self, student: nn.Module, teacher: nn.Module, optimizer: torch.optim.Optimizer, device: torch.device, config: TrainConfig, lr_scheduler: Any = None, train_config_path: str = "config/train_config.json", split_saver: Any = None) -> None:
         self.model = student
@@ -38,7 +38,8 @@ class KDTrainer:
             model=self.model,
             loss_fn=ClipCELoss(head="student"),
             head_keys=STUDENT_HEAD_KEYS,
-            use_video=False,
+            use_audio=False,
+            use_video=True,
         )
         self.teacher_evaluator = MultimodalEvaluator(
             model=self.teacher,
@@ -155,7 +156,7 @@ class KDTrainer:
                 target = batch["target"].to(self.device)
                 with torch.no_grad():
                     teacher_logits = self.teacher(waveform=waveform, video_form=video_form)["clipwise_output"]
-                student_logits = self.model(waveform=waveform)["clipwise_output"]
+                student_logits = self.model(video_form=video_form)["clipwise_output"]
                 terms = self.loss_fn.components(student_logits, teacher_logits, target)
                 # KD objective: CE + alpha * T^2 * KL.
                 loss = terms["ce"] + alpha * terms["kl"]
@@ -283,7 +284,8 @@ class KDTrainer:
         self.history_logger.save_classification_reports("val", best_val_statistics)
         self.history_logger.save_classification_reports("test", test_statistics)
         timer = InferenceTimer(self.model, self.device)
-        latency = timer.measure_latency_per_sample(waveform_shape=(1, self.config.audio_features.sample_rate * 2))
+        image_size = self.config.video_features.image_size
+        latency = timer.measure_latency_per_sample(video_shape=(1, 6, image_size, image_size))
         self.history_logger.save_summary(training_time, latency, best_val_statistics, test_statistics)
         for head, stats in test_statistics["heads"].items():
             logger.info("TEST %s -> Accuracy: %.4f | mAP: %.4f", head, stats["accuracy"], np.nanmean(stats["average_precision"]))

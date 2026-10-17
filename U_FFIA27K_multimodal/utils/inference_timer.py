@@ -10,8 +10,10 @@ class InferenceTimer:
         self.model = model
         self.device = device
 
-    def measure_latency_per_sample(self, waveform_shape: Tuple[int, ...], video_shape: Optional[Tuple[int, ...]] = None, warm_up_steps: int = 10, num_steps: int = 50) -> float:
-        inputs = {"waveform": torch.randn(*waveform_shape).to(self.device)}
+    def measure_latency_per_sample(self, waveform_shape: Optional[Tuple[int, ...]] = None, video_shape: Optional[Tuple[int, ...]] = None, warm_up_steps: int = 10, num_steps: int = 50) -> float:
+        inputs = {}
+        if waveform_shape is not None:
+            inputs["waveform"] = torch.randn(*waveform_shape).to(self.device)
         if video_shape is not None:
             inputs["video_form"] = torch.randn(*video_shape).to(self.device)
         self.model.eval()

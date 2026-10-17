@@ -19,7 +19,7 @@ import torch.optim as optim
 
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishMultimodalDataLoader
-from models import AudioStudentModel
+from models import VideoStudentModel
 from models.teacher import load_teacher, resolve_teacher_checkpoint, verify_teacher_config, verify_teacher_splits
 from tasks import MODEL_DIR_NAME, KDTrainer
 
@@ -47,8 +47,8 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
     suffix = suffix if suffix.startswith(".") else f".{suffix}"
     filename_parts = [
         "U_FFIA27K_KD",
-        "audio_student",
-        config.model.audio_backbone,
+        "video_student",
+        config.model.video_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
         f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}",
@@ -157,16 +157,16 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info("Successfully uploaded artifact to Hugging Face.")
 
 
-def build_student(config: TrainConfig) -> AudioStudentModel:
-    model = AudioStudentModel(config.audio_features)
+def build_student(config: TrainConfig) -> VideoStudentModel:
+    model = VideoStudentModel(pretrained_video=config.model.pretrained_video)
     num_params = model.architecture_num_params()
     if num_params >= 5_000_000:
         raise ValueError(f"Architecture exceeds parameter budget: {num_params:,}")
-    logger.info("Student architecture parameters (frontend excluded): %s", f"{num_params:,}")
+    logger.info("Student architecture parameters: %s", f"{num_params:,}")
     return model
 
 
-def log_model_complexity(model: AudioStudentModel, config: TrainConfig, device: torch.device) -> None:
+def log_model_complexity(model: VideoStudentModel, config: TrainConfig, device: torch.device) -> None:
     """Log parameter counts and THOP MAC/FLOP estimates before training."""
     try:
         from thop import profile
@@ -177,22 +177,15 @@ def log_model_complexity(model: AudioStudentModel, config: TrainConfig, device: 
     was_training = model.training
     model.eval()
     try:
-        audio_features = torch.zeros(1, 1, config.audio_features.mel_bins, config.audio_features.mel_bins, device=device)
-        waveform = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
+        image_size = config.video_features.image_size
+        video_form = torch.zeros(1, 6, image_size, image_size, device=device)
         with torch.no_grad():
-            architecture_macs, _ = profile(model.architecture, inputs=(audio_features,), verbose=False)
-            total_macs, _ = profile(model, inputs=(waveform,), verbose=False)
+            total_macs, _ = profile(model, inputs=(video_form,), verbose=False)
 
-        architecture_params = sum(parameter.numel() for parameter in model.architecture.parameters())
-        frontend_params = sum(parameter.numel() for parameter in model.frontend.parameters())
         total_params = sum(parameter.numel() for parameter in model.parameters())
         logger.info("==================================================")
         logger.info("Student Model Complexity (single sample; FLOPs = 2 x MACs):")
-        logger.info("  - Architecture parameters (frontend excluded): %s", f"{architecture_params:,}")
-        logger.info("  - Frontend parameters:                         %s", f"{frontend_params:,}")
         logger.info("  - Total model parameters:                      %s", f"{total_params:,}")
-        logger.info("  - Architecture MACs:                           %.3f G", architecture_macs / 1e9)
-        logger.info("  - Architecture FLOPs:                          %.3f G", 2.0 * architecture_macs / 1e9)
         logger.info("  - Total model MACs:                            %.3f G", total_macs / 1e9)
         logger.info("  - Total model FLOPs:                           %.3f G", 2.0 * total_macs / 1e9)
         logger.info("==================================================")
@@ -337,7 +330,7 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Distill the frozen first_last audio-video teacher into an audio-only student.")
+    parser = argparse.ArgumentParser(description="Distill the frozen first_last audio-video teacher into a video-only student.")
     parser.add_argument("--config", default=str(Path(project_root) / "config/train_config.json"))
     parser.add_argument("--upload-config", default=str(Path(project_root) / "config/artifact_upload_config.json"))
     args = parser.parse_args()
@@ -347,7 +340,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     logger.info("==================================================")
-    logger.info("Launching Offline KD Pipeline (multimodal teacher -> audio-only student):")
+    logger.info("Launching Offline KD Pipeline (multimodal teacher -> video-only student):")
     logger.info(f"  - Device:                  {device}")
     logger.info(f"  - Epochs:                  {config.epochs}")
     logger.info(f"  - Batch Size:              {config.batch_size}")
@@ -357,12 +350,12 @@ def main() -> None:
         logger.info(f"  - Early Stopping Patience: {config.patience} epochs")
     logger.info(f"  - Teacher Checkpoint:      {config.kd.teacher_checkpoint or '<not set>'}")
     logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
-    logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
+    logger.info(f"  - Student Backbone:        {config.model.video_backbone} (video only, pretrained={config.model.pretrained_video})")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")
     if config.lr_scheduler.enabled:
         logger.info(
-            "  - LR Scheduler:            ReduceLROnPlateau on val_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
+            "  - LR Scheduler:            ReduceLROnPlateau on val_kd_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
             config.lr_scheduler.factor,
             config.lr_scheduler.patience,
             config.lr_scheduler.min_lr,

@@ -46,11 +46,12 @@ def classification_statistics(target, probabilities):
 
 
 class MultimodalEvaluator:
-    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None, head_keys: Dict[str, str] | None = None, use_video: bool = True) -> None:
+    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None, head_keys: Dict[str, str] | None = None, use_audio: bool = True, use_video: bool = True) -> None:
         self.model = model
         self.device = next(model.parameters()).device
         self.head_keys = head_keys or HEAD_KEYS
         self.loss_fn = loss_fn or ClipCELoss(head=next(iter(self.head_keys)))
+        self.use_audio = use_audio
         self.use_video = use_video
 
     def _forward(self, data_loader: Any) -> Dict[str, np.ndarray]:
@@ -59,13 +60,15 @@ class MultimodalEvaluator:
         count = 0
         self.model.eval()
         for batch in tqdm(data_loader, desc="Running evaluation..."):
-            inputs = {"waveform": batch["waveform"].to(self.device)}
+            inputs = {}
+            if self.use_audio:
+                inputs["waveform"] = batch["waveform"].to(self.device)
             if self.use_video:
                 inputs["video_form"] = batch["video_form"].to(self.device)
             with torch.no_grad():
                 batch_output = self.model(**inputs)
                 losses = self.loss_fn.components(batch_output, {"target": batch["target"].to(self.device)})
-            batch_size = inputs["waveform"].shape[0]
+            batch_size = len(batch["target"])
             count += batch_size
             for head, key in self.head_keys.items():
                 loss_sums[head] += losses[head].item() * batch_size

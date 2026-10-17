@@ -1,37 +1,39 @@
-"""Audio-only student distilled from the frozen multimodal teacher."""
+"""Video-only student distilled from the frozen multimodal teacher."""
 
 from torch import nn
+from torchvision.models import EfficientNet_B0_Weights, efficientnet_b0
 
-from features.audio_frontend import AudioFrontend
-from .audio_backbone import LightweightAudioEncoder
+from .surgery import adapt_first_conv_to_multi_channels
 
 
 STUDENT_HEAD_KEYS = {"student": "clipwise_output"}
+VIDEO_FEATURE_CHANNELS = 320
 
 
-class AudioStudentArchitecture(nn.Module):
-    """LightweightAudioEncoder + the teacher's audio pooling + a linear classifier."""
+class VideoStudentArchitecture(nn.Module):
+    """The teacher's EfficientNet-B0 video branch (features[:8], 6-channel first_last input) + a linear classifier."""
 
-    def __init__(self, classes_num=4):
+    def __init__(self, pretrained_video=True, classes_num=4):
         super().__init__()
-        self.audio = LightweightAudioEncoder()
-        self.head = nn.Linear(LightweightAudioEncoder.channels[-1], classes_num)
+        weights = EfficientNet_B0_Weights.DEFAULT if pretrained_video else None
+        self.video = efficientnet_b0(weights=weights).features[:8]
+        adapt_first_conv_to_multi_channels(self.video, target_channels=6)
+        self.head = nn.Linear(VIDEO_FEATURE_CHANNELS, classes_num)
 
-    def forward(self, audio_features):
-        if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
-            raise ValueError("Audio features must have shape [B, 1, T>=32, F>=32].")
-        audio = self.audio.pool(self.audio(audio_features))
-        return {"clipwise_output": self.head(audio)}
+    def forward(self, video_form):
+        if video_form.ndim != 4 or video_form.shape[1] != 6:
+            raise ValueError("Video must have shape [B, 6, H, W] in first_last order.")
+        video = self.video(video_form).mean(dim=(2, 3))
+        return {"clipwise_output": self.head(video)}
 
 
-class AudioStudentModel(nn.Module):
-    def __init__(self, audio_config=None):
+class VideoStudentModel(nn.Module):
+    def __init__(self, pretrained_video=True):
         super().__init__()
-        self.frontend = AudioFrontend(audio_config)
-        self.architecture = AudioStudentArchitecture()
+        self.architecture = VideoStudentArchitecture(pretrained_video=pretrained_video)
 
-    def forward(self, waveform):
-        return self.architecture(self.frontend(waveform))
+    def forward(self, video_form):
+        return self.architecture(video_form)
 
     def architecture_num_params(self):
         return sum(p.numel() for p in self.architecture.parameters())
