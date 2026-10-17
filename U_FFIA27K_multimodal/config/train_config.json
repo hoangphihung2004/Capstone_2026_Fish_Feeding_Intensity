@@ -25,6 +25,8 @@
     "alpha": 0.5,
     "beta": 0.1,
     "feature_target": "video",
+    "feature_stages": [1, 2, 3, 4, 5],
+    "stage_weights": null,
     "verify_teacher_split": true
   },
   "model": {

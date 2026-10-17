@@ -21,12 +21,14 @@ class HistoryLogger:
                     "train_kd_loss",
                     "train_kl_loss",
                     "train_feat_loss",
+                    *[f"train_feat_s{stage}_loss" for stage in range(1, 6)],
                     "train_accuracy",
                     "train_mAP",
                     "val_loss",
                     "val_kd_loss",
                     "val_kl_loss",
                     "val_feat_loss",
+                    *[f"val_feat_s{stage}_loss" for stage in range(1, 6)],
                     "val_accuracy",
                     "val_mAP",
                     "val_auc_class_none",
@@ -44,8 +46,8 @@ class HistoryLogger:
                 ]
             )
 
-    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_feat_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_feat_loss: float, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
-        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL + beta * feat, *_kl_loss = T^2 * KL, *_feat_loss = feature MSE.
+    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_feat_loss: float, train_stage_losses: list, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_feat_loss: float, val_stage_losses: list, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
+        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL + beta * feat, *_kl_loss = T^2 * KL, *_feat_loss = L_feat (weighted stage MSE), *_feat_s{k}_loss = MSE of stage k (logged for all five stages).
 
         teacher_metrics holds the frozen teacher's train/val CE loss and accuracy for this epoch.
         """
@@ -58,12 +60,14 @@ class HistoryLogger:
             f"{train_kd_loss:.6f}",
             f"{train_kl_loss:.6f}",
             f"{train_feat_loss:.6f}",
+            *[f"{value:.6f}" for value in train_stage_losses],
             f"{train_acc:.6f}",
             f"{train_mAP:.6f}",
             f"{val_loss:.6f}",
             f"{val_kd_loss:.6f}",
             f"{val_kl_loss:.6f}",
             f"{val_feat_loss:.6f}",
+            *[f"{value:.6f}" for value in val_stage_losses],
             f"{float(val_statistics['accuracy']):.6f}",
             f"{float(np.mean(val_ap)):.6f}",
             f"{val_auc[0]:.6f}",

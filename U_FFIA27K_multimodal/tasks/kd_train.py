@@ -99,7 +99,7 @@ class KDTrainer:
                 # The teacher is frozen and val is unaugmented/unshuffled, so these values are reused every epoch.
                 self.teacher_val_logits = torch.from_numpy(statistics["logits"]).float()
                 self.teacher_val_features = {
-                    name: torch.from_numpy(statistics["features"][f"feature_{name}"]).float() for name in ("audio", "video")
+                    name: torch.from_numpy(statistics["features"][f"feature_stages_{name}"]).float() for name in ("audio", "video")
                 }
                 self.teacher_val_names = statistics["audio_name"]
                 self.teacher_val_loss = float(statistics["loss"])
@@ -122,20 +122,21 @@ class KDTrainer:
             json.dump(reference, file, indent=2)
         logger.info(f"Saved teacher reference scores to: '{path}'")
 
-    def _val_kd_losses(self, val_statistics: dict) -> tuple[float, float, float]:
-        """Return (val_kd_loss, val_kl_loss, val_feat_loss) with val_kd_loss = CE + alpha * T^2 * KL + beta * feat."""
+    def _val_kd_losses(self, val_statistics: dict) -> tuple[float, float, float, list]:
+        """Return (val_kd_loss, val_kl_loss, val_feat_loss, val_stage_losses) with val_kd_loss = CE + alpha * T^2 * KL + beta * L_feat."""
         if not np.array_equal(val_statistics["audio_name"], self.teacher_val_names):
             raise RuntimeError("Validation sample order changed between teacher and student evaluation.")
         student_logits = torch.from_numpy(val_statistics["logits"]).float()
         target = torch.from_numpy(val_statistics["target"])
         terms = self.loss_fn.components(student_logits, self.teacher_val_logits, target)
         alpha = self.loss_fn.alpha
-        student_feature = torch.from_numpy(val_statistics["features"]["feature"]).float().to(self.device)
+        student_feature = torch.from_numpy(val_statistics["features"]["feature_stages"]).float().to(self.device)
         teacher_features = {name: value.to(self.device) for name, value in self.teacher_val_features.items()}
         with torch.no_grad():
-            feat = self.feature_loss(student_feature, teacher_features).cpu()
+            feat, stage_losses = self.feature_loss(student_feature, teacher_features)
+        feat = feat.cpu()
         val_kd_loss = terms["ce"] + alpha * terms["kl"] + self.beta * feat
-        return float(val_kd_loss), float(terms["kl"]), float(feat)
+        return float(val_kd_loss), float(terms["kl"]), float(feat), stage_losses.cpu().tolist()
 
     def train(self, train_loader: Any, val_loader: Any, test_loader: Any, max_epoch: int) -> None:
         for name, loader in (("train", train_loader), ("val", val_loader), ("test", test_loader)):
@@ -157,6 +158,7 @@ class KDTrainer:
             alpha = self.loss_fn.alpha
             beta = self.beta
             total_kd = total_ce = total_kl = total_feat = teacher_total_ce = 0.0
+            total_stage_losses = torch.zeros(5, device=self.device)
             teacher_correct = teacher_seen = 0
             predictions = []
             targets = []
@@ -167,12 +169,12 @@ class KDTrainer:
                 with torch.no_grad():
                     teacher_output = self.teacher(waveform=waveform, video_form=video_form)
                 teacher_logits = teacher_output["clipwise_output"]
-                teacher_features = {"audio": teacher_output["feature_audio"], "video": teacher_output["feature_video"]}
+                teacher_features = {"audio": teacher_output["feature_stages_audio"], "video": teacher_output["feature_stages_video"]}
                 student_output = self.model(video_form=video_form)
                 student_logits = student_output["clipwise_output"]
                 terms = self.loss_fn.components(student_logits, teacher_logits, target)
-                feat = self.feature_loss(student_output["feature"], teacher_features)
-                # KD objective: CE + alpha * T^2 * KL + beta * MSE(student feature, teacher feature).
+                feat, stage_losses = self.feature_loss(student_output["feature_stages"], teacher_features)
+                # KD objective: CE + alpha * T^2 * KL + beta * L_feat (weighted MSE over the selected stages).
                 loss = terms["ce"] + alpha * terms["kl"] + beta * feat
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Non-finite training loss at epoch {epoch}.")
@@ -183,6 +185,7 @@ class KDTrainer:
                 total_ce += terms["ce"].item()
                 total_kl += terms["kl"].item()
                 total_feat += feat.item()
+                total_stage_losses += stage_losses.detach()
                 with torch.no_grad():
                     target_index = target.argmax(dim=1) if target.dim() > 1 else target.long()
                     teacher_total_ce += F.cross_entropy(teacher_logits, target_index).item()
@@ -196,6 +199,7 @@ class KDTrainer:
             train_kd_loss = total_kd / num_batches
             train_kl_loss = total_kl / num_batches
             train_feat_loss = total_feat / num_batches
+            train_stage_losses = (total_stage_losses / num_batches).cpu().tolist()
             teacher_metrics = {
                 "train_loss": teacher_total_ce / num_batches,
                 "train_accuracy": teacher_correct / max(teacher_seen, 1),
@@ -215,7 +219,7 @@ class KDTrainer:
             val_acc = float(val_statistics["accuracy"])
             val_mAP = float(np.mean(val_statistics["average_precision"]))
             val_loss = val_statistics["loss"]
-            val_kd_loss, val_kl_loss, val_feat_loss = self._val_kd_losses(val_statistics)
+            val_kd_loss, val_kl_loss, val_feat_loss, val_stage_losses = self._val_kd_losses(val_statistics)
             if not np.isfinite(val_loss) or not np.isfinite(val_kd_loss):
                 raise FloatingPointError(f"Non-finite validation loss at epoch {epoch}.")
             if self.lr_scheduler is not None:
@@ -236,8 +240,8 @@ class KDTrainer:
                 best_val_mAP = val_mAP
                 self._save_checkpoint(os.path.join(self.ckpt_dir, "student_best.pt"), epoch, best_metric)
             self.history_logger.log_epoch(
-                epoch, learning_rate, train_loss, train_kd_loss, train_kl_loss, train_feat_loss, train_acc, train_mAP,
-                val_loss, val_kd_loss, val_kl_loss, val_feat_loss, val_statistics, teacher_metrics, is_best,
+                epoch, learning_rate, train_loss, train_kd_loss, train_kl_loss, train_feat_loss, train_stage_losses, train_acc, train_mAP,
+                val_loss, val_kd_loss, val_kl_loss, val_feat_loss, val_stage_losses, val_statistics, teacher_metrics, is_best,
             )
             early_stop_score = val_acc if self.config.monitor == "accuracy" else -val_loss
             should_stop = False
@@ -259,6 +263,11 @@ class KDTrainer:
                 val_feat_loss,
                 train_acc,
                 val_acc,
+            )
+            logger.info(
+                "Feature MSE per stage (s1..s5) | Train: %s | Val: %s",
+                " ".join(f"{value:.5f}" for value in train_stage_losses),
+                " ".join(f"{value:.5f}" for value in val_stage_losses),
             )
             logger.info(
                 "Teacher (frozen) | Train CE Loss: %.5f | Train Accuracy: %.4f | Val CE Loss: %.5f | Val Accuracy: %.4f",
