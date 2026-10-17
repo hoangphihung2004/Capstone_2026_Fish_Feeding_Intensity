@@ -24,7 +24,8 @@ class VideoStudentArchitecture(nn.Module):
         if video_form.ndim != 4 or video_form.shape[1] != 6:
             raise ValueError("Video must have shape [B, 6, H, W] in first_last order.")
         video = self.video(video_form).mean(dim=(2, 3))
-        return {"clipwise_output": self.head(video)}
+        # "feature" is the 320-D spatially pooled vector, the same point the teacher's video feature is taken at.
+        return {"clipwise_output": self.head(video), "feature": video}
 
 
 class VideoStudentModel(nn.Module):
