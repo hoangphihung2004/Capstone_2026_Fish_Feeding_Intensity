@@ -16,7 +16,6 @@ if project_root not in sys.path:
 import torch
 import numpy as np
 import torch.optim as optim
-from itertools import chain
 
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishMultimodalDataLoader
@@ -312,11 +311,8 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
     val_loader = loader_manager.get_dataloader("val", shuffle=False, drop_last=False)
     test_loader = loader_manager.get_dataloader("test", shuffle=False, drop_last=False)
 
-    # The "both" target adds two train-only projectors; they are optimized with the student and dropped at inference.
-    feature_loss = FeatureMatchLoss(config.kd.feature_target).to(device)
-    optimizer = optim.Adam(
-        (p for p in chain(model.parameters(), feature_loss.parameters()) if p.requires_grad), lr=config.learning_rate
-    )
+    feature_loss = FeatureMatchLoss(config.kd.feature_target)
+    optimizer = optim.Adam((p for p in model.parameters() if p.requires_grad), lr=config.learning_rate)
     scheduler = None
     if config.lr_scheduler.enabled:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
