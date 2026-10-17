@@ -1,5 +1,6 @@
 """Audio-only student distilled from the frozen multimodal teacher."""
 
+import torch
 from torch import nn
 
 from features.audio_frontend import AudioFrontend
@@ -20,9 +21,13 @@ class AudioStudentArchitecture(nn.Module):
     def forward(self, audio_features):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
             raise ValueError("Audio features must have shape [B, 1, T>=32, F>=32].")
-        audio = self.audio.pool(self.audio(audio_features))
-        # "feature" is the 320-D pooled (max + mean) vector, the same point the teacher's audio feature is taken at.
-        return {"clipwise_output": self.head(audio), "feature": audio}
+        stages = []
+        x = audio_features
+        for block in self.audio.blocks:
+            x = block(x)
+            stages.append(self.audio.pool(x))
+        # "feature_stages" concatenates the five pooled stage features (16+24+40+112+320); the last one feeds the head.
+        return {"clipwise_output": self.head(stages[-1]), "feature_stages": torch.cat(stages, dim=1)}
 
 
 class AudioStudentModel(nn.Module):
