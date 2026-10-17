@@ -24,7 +24,7 @@ class ClipCELoss(nn.Module):
 
 
 class HintonKDLoss(nn.Module):
-    """loss = (1 - alpha) * CE(student, labels) + alpha * T^2 * KL(teacher_T || student_T)."""
+    """loss = CE(student, labels) + alpha * T^2 * KL(teacher_T || student_T)."""
 
     def __init__(self, temperature: float = 4.0, alpha: float = 0.5) -> None:
         super().__init__()
@@ -44,7 +44,7 @@ class HintonKDLoss(nn.Module):
         return {"ce": ce, "kl": kl}
 
     def combine(self, ce: torch.Tensor, kl: torch.Tensor) -> torch.Tensor:
-        return (1.0 - self.alpha) * ce + self.alpha * kl
+        return ce + self.alpha * kl
 
     def forward(self, student_logits: torch.Tensor, teacher_logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         terms = self.components(student_logits, teacher_logits, target)

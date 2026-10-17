@@ -63,7 +63,7 @@ class KDConfig(BaseModel):
 
     teacher_checkpoint: str = Field(default="", description="Path to the teacher multimodal_best.pt of the selected fold.")
     temperature: float = Field(default=4.0, gt=0.0, description="Softmax temperature applied to teacher and student logits.")
-    alpha: float = Field(default=0.5, ge=0.0, le=1.0, description="Weight of the KD term; the CE term uses 1 - alpha.")
+    alpha: float = Field(default=0.5, ge=0.0, description="Weight of the KD term: loss = CE + alpha * T^2 * KL.")
     verify_teacher_split: bool = Field(
         default=True,
         description="Require the teacher's saved splitter_config.json/splits to match the current split when present.",

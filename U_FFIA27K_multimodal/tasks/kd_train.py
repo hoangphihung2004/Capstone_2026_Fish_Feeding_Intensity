@@ -117,14 +117,14 @@ class KDTrainer:
         logger.info(f"Saved teacher reference scores to: '{path}'")
 
     def _val_kd_losses(self, val_statistics: dict) -> tuple[float, float]:
-        """Return (val_kd_loss, val_kl_loss) with val_kd_loss = (1 - alpha) * CE + alpha * T^2 * KL."""
+        """Return (val_kd_loss, val_kl_loss) with val_kd_loss = CE + alpha * T^2 * KL."""
         if not np.array_equal(val_statistics["audio_name"], self.teacher_val_names):
             raise RuntimeError("Validation sample order changed between teacher and student evaluation.")
         student_logits = torch.from_numpy(val_statistics["logits"]).float()
         target = torch.from_numpy(val_statistics["target"])
         terms = self.loss_fn.components(student_logits, self.teacher_val_logits, target)
         alpha = self.loss_fn.alpha
-        val_kd_loss = (1.0 - alpha) * terms["ce"] + alpha * terms["kl"]
+        val_kd_loss = terms["ce"] + alpha * terms["kl"]
         return float(val_kd_loss), float(terms["kl"])
 
     def train(self, train_loader: Any, val_loader: Any, test_loader: Any, max_epoch: int) -> None:
@@ -157,8 +157,8 @@ class KDTrainer:
                     teacher_logits = self.teacher(waveform=waveform, video_form=video_form)["clipwise_output"]
                 student_logits = self.model(waveform=waveform)["clipwise_output"]
                 terms = self.loss_fn.components(student_logits, teacher_logits, target)
-                # Hinton KD objective: (1 - alpha) * CE + alpha * T^2 * KL.
-                loss = (1.0 - alpha) * terms["ce"] + alpha * terms["kl"]
+                # KD objective: CE + alpha * T^2 * KL.
+                loss = terms["ce"] + alpha * terms["kl"]
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Non-finite training loss at epoch {epoch}.")
                 self.optimizer.zero_grad(set_to_none=True)
@@ -192,21 +192,21 @@ class KDTrainer:
             train_acc = float(np.mean(np.argmax(train_targets, axis=1) == np.argmax(train_preds, axis=1)))
             train_mAP = np.mean(sklearn_metrics.average_precision_score(train_targets, train_preds, average=None))
 
-            # val_loss is hard-label CE and drives the LR scheduler/model selection: the deployed
-            # student never sees the teacher. val_kd_loss is logged only to track the KD objective.
+            # The LR scheduler follows val_kd_loss, the objective being optimized: hard-label val CE
+            # stalls under KD while accuracy still improves. Model selection still uses config.monitor.
             val_statistics = self.evaluator.evaluate(val_loader)
             val_acc = float(val_statistics["accuracy"])
             val_mAP = float(np.mean(val_statistics["average_precision"]))
             val_loss = val_statistics["loss"]
             val_kd_loss, val_kl_loss = self._val_kd_losses(val_statistics)
-            if not np.isfinite(val_loss):
+            if not np.isfinite(val_loss) or not np.isfinite(val_kd_loss):
                 raise FloatingPointError(f"Non-finite validation loss at epoch {epoch}.")
             if self.lr_scheduler is not None:
-                self.lr_scheduler.step(val_loss)
+                self.lr_scheduler.step(val_kd_loss)
                 next_learning_rate = self.optimizer.param_groups[0]["lr"]
                 if next_learning_rate < learning_rate:
                     logger.info(
-                        "LR scheduler reduced learning rate after val_loss plateau: %.2e -> %.2e",
+                        "LR scheduler reduced learning rate after val_kd_loss plateau: %.2e -> %.2e",
                         learning_rate,
                         next_learning_rate,
                     )

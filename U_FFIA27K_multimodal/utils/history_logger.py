@@ -43,7 +43,7 @@ class HistoryLogger:
             )
 
     def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
-        """*_loss = CE on hard labels, *_kd_loss = (1 - alpha) * CE + alpha * T^2 * KL, *_kl_loss = T^2 * KL.
+        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL, *_kl_loss = T^2 * KL.
 
         teacher_metrics holds the frozen teacher's train/val CE loss and accuracy for this epoch.
         """
