@@ -20,11 +20,13 @@ class HistoryLogger:
                     "train_loss",
                     "train_kd_loss",
                     "train_kl_loss",
+                    "train_feat_loss",
                     "train_accuracy",
                     "train_mAP",
                     "val_loss",
                     "val_kd_loss",
                     "val_kl_loss",
+                    "val_feat_loss",
                     "val_accuracy",
                     "val_mAP",
                     "val_auc_class_none",
@@ -42,8 +44,8 @@ class HistoryLogger:
                 ]
             )
 
-    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
-        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL, *_kl_loss = T^2 * KL.
+    def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_feat_loss: float, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_feat_loss: float, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
+        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL + beta * feat, *_kl_loss = T^2 * KL, *_feat_loss = feature MSE.
 
         teacher_metrics holds the frozen teacher's train/val CE loss and accuracy for this epoch.
         """
@@ -55,11 +57,13 @@ class HistoryLogger:
             f"{train_loss:.6f}",
             f"{train_kd_loss:.6f}",
             f"{train_kl_loss:.6f}",
+            f"{train_feat_loss:.6f}",
             f"{train_acc:.6f}",
             f"{train_mAP:.6f}",
             f"{val_loss:.6f}",
             f"{val_kd_loss:.6f}",
             f"{val_kl_loss:.6f}",
+            f"{val_feat_loss:.6f}",
             f"{float(val_statistics['accuracy']):.6f}",
             f"{float(np.mean(val_ap)):.6f}",
             f"{val_auc[0]:.6f}",

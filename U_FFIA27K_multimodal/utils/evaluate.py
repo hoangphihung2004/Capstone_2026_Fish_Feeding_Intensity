@@ -71,6 +71,9 @@ class MultimodalEvaluator:
                 loss_sums[head] += losses[head].item() * batch_size
                 output_dict.setdefault(key, []).append(batch_output[key].softmax(1).cpu().numpy())
                 output_dict.setdefault(f"{head}_logits", []).append(batch_output[key].cpu().numpy())
+            for key, value in batch_output.items():
+                if key.startswith("feature"):
+                    output_dict.setdefault(key, []).append(value.cpu().numpy())
             target = batch["target"].cpu().numpy()
             if target.ndim == 1:
                 target = np.eye(4)[target.astype(int)]
@@ -94,4 +97,5 @@ class MultimodalEvaluator:
         return {**heads[primary_head], "heads": heads, "head_losses": self.last_losses,
                 "loss": sum(self.last_losses.values()),
                 "logits": output_dict[f"{primary_head}_logits"], "target": target,
-                "audio_name": output_dict["audio_name"]}
+                "audio_name": output_dict["audio_name"],
+                "features": {key: value for key, value in output_dict.items() if key.startswith("feature")}}

@@ -21,7 +21,8 @@ class AudioStudentArchitecture(nn.Module):
         if audio_features.ndim != 4 or audio_features.shape[1] != 1 or min(audio_features.shape[2:]) < 32:
             raise ValueError("Audio features must have shape [B, 1, T>=32, F>=32].")
         audio = self.audio.pool(self.audio(audio_features))
-        return {"clipwise_output": self.head(audio)}
+        # "feature" is the 320-D pooled (max + mean) vector, the same point the teacher's audio feature is taken at.
+        return {"clipwise_output": self.head(audio), "feature": audio}
 
 
 class AudioStudentModel(nn.Module):

@@ -23,6 +23,8 @@
     "teacher_checkpoint": "",
     "temperature": 4.0,
     "alpha": 0.5,
+    "beta": 0.1,
+    "feature_target": "audio",
     "verify_teacher_split": true
   },
   "model": {

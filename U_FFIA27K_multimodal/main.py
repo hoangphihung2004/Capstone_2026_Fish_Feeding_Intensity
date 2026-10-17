@@ -16,12 +16,14 @@ if project_root not in sys.path:
 import torch
 import numpy as np
 import torch.optim as optim
+from itertools import chain
 
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishMultimodalDataLoader
 from models import AudioStudentModel
 from models.teacher import load_teacher, resolve_teacher_checkpoint, verify_teacher_config, verify_teacher_splits
 from tasks import MODEL_DIR_NAME, KDTrainer
+from utils import FeatureMatchLoss
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -51,7 +53,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.audio_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}",
+        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}",
     ]
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
@@ -310,7 +312,11 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
     val_loader = loader_manager.get_dataloader("val", shuffle=False, drop_last=False)
     test_loader = loader_manager.get_dataloader("test", shuffle=False, drop_last=False)
 
-    optimizer = optim.Adam((p for p in model.parameters() if p.requires_grad), lr=config.learning_rate)
+    # The "both" target adds two train-only projectors; they are optimized with the student and dropped at inference.
+    feature_loss = FeatureMatchLoss(config.kd.feature_target).to(device)
+    optimizer = optim.Adam(
+        (p for p in chain(model.parameters(), feature_loss.parameters()) if p.requires_grad), lr=config.learning_rate
+    )
     scheduler = None
     if config.lr_scheduler.enabled:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -329,6 +335,7 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
         optimizer=optimizer,
         device=device,
         config=config,
+        feature_loss=feature_loss,
         lr_scheduler=scheduler,
         train_config_path=train_config_path,
         split_saver=loader_manager,
@@ -359,6 +366,7 @@ def main() -> None:
     logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
     logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
+    logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target}")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")
     if config.lr_scheduler.enabled:
         logger.info(

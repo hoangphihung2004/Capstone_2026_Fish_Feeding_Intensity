@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 
 import torch
+import torch.nn as nn
 
 from dataset.data_split import _sample_identity_key
 from .multimodal_model import MultimodalModel
@@ -16,6 +17,35 @@ logger = logging.getLogger(__name__)
 SPLIT_FIELDS = ("seed", "test_sample_per_class", "split_strategy", "evaluation_mode", "num_folds", "fold_index", "cv_val_ratio")
 AUDIO_FIELDS = ("sample_rate", "window_size", "hop_size", "mel_bins", "fmin", "fmax")
 THOP_BUFFER_SUFFIXES = ("total_ops", "total_params")
+FEATURE_DIM = 320
+
+
+class FeatureTeacher(nn.Module):
+    """Frozen teacher that also returns the two pooled 320-D vectors feeding its multimodal head.
+
+    multimodal_head receives concat(audio_320, video_320, fusion_128): audio_320 is the audio branch after
+    the last fusion and the max + mean pooling, video_320 the video branch after the last fusion and the
+    spatial mean. A forward-pre-hook slices them out, so the teacher architecture and checkpoint are untouched.
+    """
+
+    def __init__(self, teacher: MultimodalModel) -> None:
+        super().__init__()
+        head = teacher.architecture.multimodal_head
+        if head.in_features < 2 * FEATURE_DIM:
+            raise ValueError(f"Unexpected multimodal_head input size: {head.in_features}")
+        self.teacher = teacher
+        self._audio = None
+        self._video = None
+        head.register_forward_pre_hook(self._capture)
+
+    def _capture(self, module, inputs) -> None:
+        fused = inputs[0].detach()
+        self._audio = fused[:, :FEATURE_DIM]
+        self._video = fused[:, FEATURE_DIM:2 * FEATURE_DIM]
+
+    def forward(self, waveform, video_form) -> dict:
+        output = self.teacher(waveform=waveform, video_form=video_form)
+        return {**output, "feature_audio": self._audio, "feature_video": self._video}
 
 
 def resolve_teacher_checkpoint(path: str) -> Path:
@@ -100,8 +130,8 @@ def verify_teacher_splits(checkpoint: Path, splits: dict) -> None:
     logger.info("Teacher saved splits match the current train/val/test splits sample by sample.")
 
 
-def load_teacher(checkpoint: Path, config, device: torch.device) -> MultimodalModel:
-    """Build the multimodal teacher, load its weights and freeze it in eval mode."""
+def load_teacher(checkpoint: Path, config, device: torch.device) -> FeatureTeacher:
+    """Build the multimodal teacher, load its weights, freeze it in eval mode and expose its 320-D features."""
     teacher = MultimodalModel(config.audio_features, pretrained_video=False)
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     state_dict = state.get("model_state_dict", state)
@@ -116,4 +146,4 @@ def load_teacher(checkpoint: Path, config, device: torch.device) -> MultimodalMo
         state.get("epoch"),
         state.get("ave_precision"),
     )
-    return teacher
+    return FeatureTeacher(teacher).to(device).eval()
