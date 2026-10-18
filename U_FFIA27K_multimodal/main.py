@@ -52,7 +52,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.audio_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}_s{''.join(str(stage) for stage in sorted(config.kd.feature_stages))}",
+        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}_{config.kd.feature_source}_s{''.join(str(stage) for stage in sorted(config.kd.feature_stages))}",
     ]
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
@@ -311,7 +311,7 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
     val_loader = loader_manager.get_dataloader("val", shuffle=False, drop_last=False)
     test_loader = loader_manager.get_dataloader("test", shuffle=False, drop_last=False)
 
-    feature_loss = FeatureMatchLoss(config.kd.feature_target, config.kd.feature_stages, config.kd.stage_weights)
+    feature_loss = FeatureMatchLoss(config.kd.feature_target, config.kd.feature_stages, config.kd.stage_weights, config.kd.feature_source)
     optimizer = optim.Adam((p for p in model.parameters() if p.requires_grad), lr=config.learning_rate)
     scheduler = None
     if config.lr_scheduler.enabled:
@@ -362,7 +362,7 @@ def main() -> None:
     logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
     logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
-    logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target}")
+    logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target} ({config.kd.feature_source})")
     logger.info(f"  - Feature KD Stages:       {config.kd.feature_stages} (weights: {config.kd.stage_weights or 'equal'})")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")
     if config.lr_scheduler.enabled:

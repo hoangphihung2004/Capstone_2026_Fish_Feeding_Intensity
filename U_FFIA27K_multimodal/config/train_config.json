@@ -25,7 +25,8 @@
     "alpha": 0.5,
     "beta": 0.1,
     "feature_target": "audio",
-    "feature_stages": [1, 2, 3, 4, 5],
+    "feature_source": "delta",
+    "feature_stages": [2, 3, 4, 5],
     "stage_weights": null,
     "verify_teacher_split": true
   },

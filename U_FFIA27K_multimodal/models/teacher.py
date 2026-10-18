@@ -22,25 +22,38 @@ STAGES = (1, 2, 3, 4, 5)
 
 
 class FeatureTeacher(nn.Module):
-    """Frozen teacher that also returns the pooled feature of every stage, for the audio and the video branch.
+    """Frozen teacher that also returns one pooled vector per stage, for the audio and the video branch.
 
-    Stage 1 is the output of audio block 0 / video stage features[1] (the teacher fuses nothing there).
-    Stages 2-5 are the audio / video outputs of fusion[0..3], i.e. after fusion. Each map is pooled right in the
-    hook, exactly like the teacher pools its final features (audio: mean over frequency, then max + mean over time;
-    video: spatial mean), so stage 5 equals the audio_320 / video_320 vectors feeding multimodal_head.
-    The teacher architecture and checkpoint are untouched.
+    source "fused": pooled feature after fusion. Stage 1 is the output of audio block 0 / video features[1] (no fusion
+        there); stages 2-5 are the audio / video outputs of fusion[0..3]. Each map is pooled right in the hook, like the
+        teacher pools its final features (audio: mean over frequency, then max + mean over time; video: spatial mean),
+        so stage 5 equals the audio_320 / video_320 vectors feeding multimodal_head.
+    source "delta": tanh(audio_scale) * audio_update(audio_context) (video analogue), the [B, C] vector that fusion
+        broadcasts-and-adds to the stage feature map. Stage 1 has no fusion, so its slot is zero.
+    source "update": audio_update(audio_context) (video analogue) without the scale gate; stage 1 slot is zero.
+    The returned tensors are [B, 512] (stage channels 16+24+40+112+320). The teacher architecture and checkpoint are untouched.
     """
 
-    def __init__(self, teacher: MultimodalModel) -> None:
+    def __init__(self, teacher: MultimodalModel, source: str = "fused") -> None:
         super().__init__()
+        if source not in ("fused", "delta", "update"):
+            raise ValueError(f"Unknown feature source: {source}")
         self.teacher = teacher
+        self.source = source
         architecture = teacher.architecture
         self._audio = {}
         self._video = {}
+        self._update = {"audio": {}, "video": {}}
         architecture.audio.blocks[0].register_forward_hook(lambda module, inputs, output: self._store_audio(1, output))
         architecture.video[1].register_forward_hook(lambda module, inputs, output: self._store_video(1, output))
         for index, fusion in enumerate(architecture.fusion):
-            fusion.register_forward_hook(lambda module, inputs, output, stage=index + 2: self._store_fused(stage, output))
+            stage = index + 2
+            fusion.register_forward_hook(lambda module, inputs, output, stage=stage: self._store_fused(stage, output))
+            for name in ("audio", "video"):
+                getattr(fusion, f"{name}_update").register_forward_hook(
+                    lambda module, inputs, output, name=name, stage=stage, scale=getattr(fusion, f"{name}_scale"):
+                        self._store_update(name, stage, output, scale)
+                )
 
     def _store_audio(self, stage, audio) -> None:
         self._audio[stage] = LightweightAudioEncoder.pool(audio.detach())
@@ -52,13 +65,21 @@ class FeatureTeacher(nn.Module):
         self._store_audio(stage, output[0])
         self._store_video(stage, output[1])
 
+    def _store_update(self, name, stage, output, scale) -> None:
+        update = output.detach()
+        self._update[name][stage] = torch.tanh(scale.detach()) * update if self.source == "delta" else update
+
+    def _stack(self, name) -> torch.Tensor:
+        if self.source == "fused":
+            pooled = self._audio if name == "audio" else self._video
+            return torch.cat([pooled[stage] for stage in STAGES], dim=1)
+        updates = self._update[name]
+        first = updates[STAGES[1]]
+        return torch.cat([first.new_zeros(first.shape[0], 16)] + [updates[stage] for stage in STAGES[1:]], dim=1)
+
     def forward(self, waveform, video_form) -> dict:
         output = self.teacher(waveform=waveform, video_form=video_form)
-        return {
-            **output,
-            "feature_stages_audio": torch.cat([self._audio[stage] for stage in STAGES], dim=1),
-            "feature_stages_video": torch.cat([self._video[stage] for stage in STAGES], dim=1),
-        }
+        return {**output, "feature_stages_audio": self._stack("audio"), "feature_stages_video": self._stack("video")}
 
 
 def resolve_teacher_checkpoint(path: str) -> Path:
@@ -159,4 +180,4 @@ def load_teacher(checkpoint: Path, config, device: torch.device) -> FeatureTeach
         state.get("epoch"),
         state.get("ave_precision"),
     )
-    return FeatureTeacher(teacher).to(device).eval()
+    return FeatureTeacher(teacher, config.kd.feature_source).to(device).eval()

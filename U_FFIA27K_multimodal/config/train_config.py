@@ -69,6 +69,14 @@ class KDConfig(BaseModel):
         default="audio",
         description="Teacher branch(es) whose pooled stage features the student's pooled stage features are regressed onto with MSE.",
     )
+    feature_source: Literal["fused", "delta", "update"] = Field(
+        default="fused",
+        description=(
+            "What the student's pooled stage features are regressed onto. fused: the teacher's pooled stage feature after fusion "
+            "(stages 1-5). delta: tanh(scale) * update(context), the vector fusion adds to the modality (stages 2-5). "
+            "update: update(context) without the scale gate (stages 2-5)."
+        ),
+    )
     feature_stages: List[int] = Field(
         default_factory=lambda: [5],
         description="Stages (1-5, channels 16/24/40/112/320) used in L_feat. [5] is the final pooled 320-D feature.",
@@ -88,6 +96,8 @@ class KDConfig(BaseModel):
             raise ValueError("kd.feature_stages must not be empty unless kd.feature_target is 'none'.")
         if any(stage not in (1, 2, 3, 4, 5) for stage in self.feature_stages) or len(set(self.feature_stages)) != len(self.feature_stages):
             raise ValueError(f"kd.feature_stages must be unique values in 1..5, got {self.feature_stages}.")
+        if self.feature_source != "fused" and 1 in self.feature_stages:
+            raise ValueError(f"kd.feature_source='{self.feature_source}' exists only for stages 2-5 (stage 1 has no fusion).")
         if self.stage_weights is not None:
             if len(self.stage_weights) != len(self.feature_stages):
                 raise ValueError("kd.stage_weights must have the same length as kd.feature_stages.")

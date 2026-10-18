@@ -37,13 +37,16 @@ class FeatureMatchLoss(nn.Module):
     L_feat = sum_k w_k * MSE_k / sum_k w_k over the selected stages (w_k = 1 when weights is None).
     Stage 5 is the final pooled 320-D feature. No projectors: shapes already match.
     forward returns (L_feat, per-stage MSE of all five stages) so unselected stages can still be logged.
+    With source "delta" / "update" the teacher vector exists only for stages 2-5 (stage 1 has no fusion), so the
+    stage-1 MSE is reported as 0.
     """
 
-    def __init__(self, target: str = "audio", stages=(5,), weights=None) -> None:
+    def __init__(self, target: str = "audio", stages=(5,), weights=None, source: str = "fused") -> None:
         super().__init__()
         if target not in ("none", "audio", "video", "both"):
             raise ValueError(f"Unknown feature target: {target}")
         self.target = target
+        self.stage_mask = [1.0] * len(STAGE_CHANNELS) if source == "fused" else [0.0] + [1.0] * (len(STAGE_CHANNELS) - 1)
         weights = [1.0] * len(stages) if weights is None else list(weights)
         self.stage_weights = [0.0] * len(STAGE_CHANNELS)
         for stage, weight in zip(stages, weights):
@@ -56,6 +59,7 @@ class FeatureMatchLoss(nn.Module):
         for name in names:
             teacher_stages = torch.split(teacher_features[name], STAGE_CHANNELS, dim=1)
             per_stage = per_stage + torch.stack([F.mse_loss(s, t) for s, t in zip(student_stages, teacher_stages)])
+        per_stage = per_stage * per_stage.new_tensor(self.stage_mask)
         weights = per_stage.new_tensor(self.stage_weights)
         total = (weights * per_stage).sum() / weights.sum() if names else per_stage.sum()
         return total, per_stage
