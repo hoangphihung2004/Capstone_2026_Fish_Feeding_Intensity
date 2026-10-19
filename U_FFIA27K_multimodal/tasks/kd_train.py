@@ -36,6 +36,7 @@ class KDTrainer:
         self.loss_fn = HintonKDLoss(temperature=config.kd.temperature, alpha=config.kd.alpha)
         self.feature_loss = feature_loss
         self.beta = config.kd.beta
+        self.ce_weight = config.kd.ce_weight
         self.evaluator = MultimodalEvaluator(
             model=self.model,
             loss_fn=ClipCELoss(head="student"),
@@ -123,7 +124,7 @@ class KDTrainer:
         logger.info(f"Saved teacher reference scores to: '{path}'")
 
     def _val_kd_losses(self, val_statistics: dict) -> tuple[float, float, float, list]:
-        """Return (val_kd_loss, val_kl_loss, val_feat_loss, val_stage_losses) with val_kd_loss = CE + alpha * T^2 * KL + beta * L_feat."""
+        """Return (val_kd_loss, val_kl_loss, val_feat_loss, val_stage_losses) with val_kd_loss = ce_weight * CE + alpha * T^2 * KL + beta * L_feat."""
         if not np.array_equal(val_statistics["audio_name"], self.teacher_val_names):
             raise RuntimeError("Validation sample order changed between teacher and student evaluation.")
         student_logits = torch.from_numpy(val_statistics["logits"]).float()
@@ -135,7 +136,7 @@ class KDTrainer:
         with torch.no_grad():
             feat, stage_losses = self.feature_loss(student_feature, teacher_features)
         feat = feat.cpu()
-        val_kd_loss = terms["ce"] + alpha * terms["kl"] + self.beta * feat
+        val_kd_loss = self.ce_weight * terms["ce"] + alpha * terms["kl"] + self.beta * feat
         return float(val_kd_loss), float(terms["kl"]), float(feat), stage_losses.cpu().tolist()
 
     def train(self, train_loader: Any, val_loader: Any, test_loader: Any, max_epoch: int) -> None:
@@ -157,6 +158,7 @@ class KDTrainer:
             learning_rate = self.optimizer.param_groups[0]["lr"]
             alpha = self.loss_fn.alpha
             beta = self.beta
+            ce_weight = self.ce_weight
             total_kd = total_ce = total_kl = total_feat = teacher_total_ce = 0.0
             total_stage_losses = torch.zeros(5, device=self.device)
             teacher_correct = teacher_seen = 0
@@ -174,8 +176,8 @@ class KDTrainer:
                 student_logits = student_output["clipwise_output"]
                 terms = self.loss_fn.components(student_logits, teacher_logits, target)
                 feat, stage_losses = self.feature_loss(student_output["feature_stages"], teacher_features)
-                # KD objective: CE + alpha * T^2 * KL + beta * L_feat (weighted MSE over the selected stages).
-                loss = terms["ce"] + alpha * terms["kl"] + beta * feat
+                # KD objective: ce_weight * CE + alpha * T^2 * KL + beta * L_feat (weighted MSE over the selected stages).
+                loss = ce_weight * terms["ce"] + alpha * terms["kl"] + beta * feat
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Non-finite training loss at epoch {epoch}.")
                 self.optimizer.zero_grad(set_to_none=True)
