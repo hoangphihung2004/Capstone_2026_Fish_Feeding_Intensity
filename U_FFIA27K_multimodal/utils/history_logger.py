@@ -47,7 +47,7 @@ class HistoryLogger:
             )
 
     def log_epoch(self, epoch: int, learning_rate: float, train_loss: float, train_kd_loss: float, train_kl_loss: float, train_feat_loss: float, train_stage_losses: list, train_acc: float, train_mAP: float, val_loss: float, val_kd_loss: float, val_kl_loss: float, val_feat_loss: float, val_stage_losses: list, val_statistics: dict, teacher_metrics: dict, is_best: bool = False) -> None:
-        """*_loss = CE on hard labels, *_kd_loss = CE + alpha * T^2 * KL + beta * feat, *_kl_loss = T^2 * KL, *_feat_loss = L_feat (weighted stage MSE), *_feat_s{k}_loss = MSE of stage k (logged for all five stages).
+        """*_loss = CE on hard labels, *_kd_loss = ce_weight * CE + alpha * T^2 * KL + beta * feat, *_kl_loss = T^2 * KL, *_feat_loss = L_feat (weighted stage MSE), *_feat_s{k}_loss = MSE of stage k (logged for all five stages).
 
         teacher_metrics holds the frozen teacher's train/val CE loss and accuracy for this epoch.
         """

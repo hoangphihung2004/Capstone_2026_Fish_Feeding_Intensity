@@ -52,7 +52,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.audio_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        f"T{config.kd.temperature:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}_{config.kd.feature_source}_s{''.join(str(stage) for stage in sorted(config.kd.feature_stages))}",
+        f"T{config.kd.temperature:g}_ce{config.kd.ce_weight:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}_{config.kd.feature_source}_s{''.join(str(stage) for stage in sorted(config.kd.feature_stages))}",
     ]
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
@@ -362,6 +362,7 @@ def main() -> None:
     logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
     logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
+    logger.info(f"  - CE Weight:               {config.kd.ce_weight}" + (" (CE off: KD terms only)" if config.kd.ce_weight == 0 else ""))
     logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target} ({config.kd.feature_source})")
     logger.info(f"  - Feature KD Stages:       {config.kd.feature_stages} (weights: {config.kd.stage_weights or 'equal'})")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")

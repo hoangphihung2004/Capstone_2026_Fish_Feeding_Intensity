@@ -63,8 +63,13 @@ class KDConfig(BaseModel):
 
     teacher_checkpoint: str = Field(default="", description="Path to the teacher multimodal_best.pt of the selected fold.")
     temperature: float = Field(default=4.0, gt=0.0, description="Softmax temperature applied to teacher and student logits.")
-    alpha: float = Field(default=0.5, ge=0.0, description="Weight of the KD term: loss = CE + alpha * T^2 * KL.")
-    beta: float = Field(default=0.1, ge=0.0, description="Weight of the feature KD term: loss = CE + alpha * T^2 * KL + beta * L_feat.")
+    ce_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Weight of the hard-label CE term. 0 turns CE off so only the KD terms train the student.",
+    )
+    alpha: float = Field(default=0.5, ge=0.0, description="Weight of the logit KD term: loss = ce_weight * CE + alpha * T^2 * KL + beta * L_feat.")
+    beta: float = Field(default=0.1, ge=0.0, description="Weight of the feature KD term: loss = ce_weight * CE + alpha * T^2 * KL + beta * L_feat.")
     feature_target: Literal["none", "audio", "video", "both"] = Field(
         default="audio",
         description="Teacher branch(es) whose pooled stage features the student's pooled stage features are regressed onto with MSE.",
@@ -92,6 +97,8 @@ class KDConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_feature_stages(self) -> "KDConfig":
+        if self.ce_weight == 0 and self.alpha == 0:
+            raise ValueError("kd.ce_weight and kd.alpha cannot both be 0: nothing would train the classifier head.")
         if self.feature_target != "none" and not self.feature_stages:
             raise ValueError("kd.feature_stages must not be empty unless kd.feature_target is 'none'.")
         if any(stage not in (1, 2, 3, 4, 5) for stage in self.feature_stages) or len(set(self.feature_stages)) != len(self.feature_stages):
