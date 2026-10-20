@@ -76,7 +76,7 @@ def validate_backbone_config(config: TrainConfig) -> None:
 def build_backbone(config: TrainConfig):
     validate_backbone_config(config)
     backbone_cls = MODEL_REGISTRY[config.model.backbone]
-    return backbone_cls(classes_num=4, pretrained=config.model.pretrained)
+    return backbone_cls(pretrained=config.model.pretrained)
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
@@ -176,7 +176,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
-        config.video_features.frame_policy,
+        "first_last_sum",
         timestamp,
     ]
     safe_stem = "_".join(safe_filename_part(part) for part in filename_parts)
@@ -287,7 +287,6 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
         prefetch_factor=config.prefetch_factor,
         cache_mode=config.cache_mode,
         image_size=config.video_features.image_size,
-        frame_policy=config.video_features.frame_policy,
         splitter_config=config.dataset_splitter
     )
 
@@ -298,7 +297,7 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
     backbone = build_backbone(config)
-    model = VideoModel(backbone=backbone)
+    model = VideoModel(backbone=backbone, classes_num=4)
     model = model.to(device)
 
     model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
@@ -340,7 +339,7 @@ def main():
     validate_backbone_config(config)
 
     logger.info("==================================================")
-    logger.info("Launching Single-Frame Image Classification Training:")
+    logger.info("Launching First+Last Frame Fusion Training:")
     logger.info(f"  - Device Name:              {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     logger.info(f"  - Max Epochs:               {config.epochs}")
     logger.info(f"  - Batch Size:               {config.batch_size}")

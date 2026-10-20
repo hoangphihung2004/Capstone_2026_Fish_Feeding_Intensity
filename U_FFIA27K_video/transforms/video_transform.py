@@ -1,50 +1,36 @@
 import numpy as np
 import torch
 import torchvision.transforms as transforms
-import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 
 
-class ImageToPIL:
-    """Convert one RGB image in [C, H, W] or [H, W, C] format to PIL."""
-    def __call__(self, image):
-        if isinstance(image, np.ndarray):
-            if image.ndim != 3:
-                raise ValueError(f"Expected image with 3 dimensions, got shape {tuple(image.shape)}")
+class FramesToTensor:
+    """Convert uint8 frames [T, C, H, W] (np.ndarray or tensor) to float32 in [0, 1]."""
+    def __call__(self, frames):
+        if isinstance(frames, np.ndarray):
+            frames = torch.from_numpy(np.ascontiguousarray(frames))
 
-            if image.shape[0] == 3:
-                image = image.transpose(1, 2, 0)
-            elif image.shape[-1] != 3:
-                raise ValueError(f"Expected RGB channel dimension with size 3, got shape {tuple(image.shape)}")
+        if frames.ndim != 4 or frames.shape[1] != 3:
+            raise ValueError(f"Expected frames with shape [T, 3, H, W], got {tuple(frames.shape)}")
 
-            return TF.to_pil_image(image)
-
-        if isinstance(image, torch.Tensor):
-            if image.ndim != 3:
-                raise ValueError(f"Expected image with 3 dimensions, got shape {tuple(image.shape)}")
-
-            if image.shape[0] != 3 and image.shape[-1] == 3:
-                image = image.permute(2, 0, 1)
-            elif image.shape[0] != 3:
-                raise ValueError(f"Expected RGB channel dimension with size 3, got shape {tuple(image.shape)}")
-
-            return TF.to_pil_image(image)
-
-        return image
+        return frames.float().div(255.0)
 
 
 class VideoTransform:
     """
-    Backward-compatible name for the single-frame image transform pipeline.
+    First+last frame transform pipeline.
 
-    Input:  np.ndarray [H, W, C] or [C, H, W] uint8
-    Output: torch.Tensor [C, H, W] float32 normalized with ImageNet statistics.
+    Every random augmentation samples its parameters once per call and applies them to
+    all frames of the clip, so the first and last frames get identical flips/rotations/shifts.
+
+    Input:  np.ndarray [T, C, H, W] uint8
+    Output: torch.Tensor [T, C, H, W] float32 normalized with ImageNet statistics.
     """
     def __init__(self, transform: transforms.Compose) -> None:
         self.transform = transform
 
-    def __call__(self, image: np.ndarray) -> torch.Tensor:
-        return self.transform(image)
+    def __call__(self, frames: np.ndarray) -> torch.Tensor:
+        return self.transform(frames)
 
     @staticmethod
     def get_transforms(image_size: int = 224):
@@ -52,20 +38,18 @@ class VideoTransform:
         std = (0.229, 0.224, 0.225)
 
         train_transform = [
-            ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
+            FramesToTensor(),
+            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR, antialias=True),
             transforms.ColorJitter(brightness=0.15),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(20),
             transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)),
-            transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ]
 
         eval_transform = [
-            ImageToPIL(),
-            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR),
-            transforms.ToTensor(),
+            FramesToTensor(),
+            transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BILINEAR, antialias=True),
             transforms.Normalize(mean, std),
         ]
 

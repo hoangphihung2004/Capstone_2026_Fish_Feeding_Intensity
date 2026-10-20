@@ -9,9 +9,9 @@ except ImportError:
 
 class ResNet50(nn.Module):
     """
-    ResNet50 image classifier with optional ImageNet pretrained weights.
+    ResNet50 feature extractor (classification head removed) with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
 
         if ResNet50_Weights is None:
@@ -20,7 +20,8 @@ class ResNet50(nn.Module):
             weights = ResNet50_Weights.DEFAULT if pretrained else None
             self.model = resnet50(weights=weights)
 
-        self.model.fc = nn.Linear(self.model.fc.in_features, classes_num)
+        self.embed_dim = self.model.fc.in_features
+        self.model.fc = nn.Identity()
         self.model_name = "resnet50"
 
     def get_name(self) -> str:

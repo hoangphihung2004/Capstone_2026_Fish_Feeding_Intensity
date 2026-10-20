@@ -22,25 +22,35 @@ logger = logging.getLogger(__name__)
 
 class VideoModel(nn.Module):
     """
-    Thin wrapper around an image classification backbone.
-    Accepts image tensors [Batch, Channels (3), Height, Width] and returns
-    classification logits under the existing 'clipwise_output' key.
+    First+last frame fusion classifier.
+
+    Both frames go through the same (weight-shared) image backbone, their pooled
+    embeddings are summed, and a single fully connected layer produces the logits:
+
+        [B, T, 3, H, W] -> backbone -> [B, T, D] -> sum over T -> [B, D] -> FC -> [B, Num_Classes]
     """
-    def __init__(self, backbone: nn.Module) -> None:
+    def __init__(self, backbone: nn.Module, classes_num: int = 4) -> None:
         """
-        Initialize VideoModel wrapper.
+        Initialize VideoModel.
 
         Args:
-            backbone (nn.Module): Torch image classification model.
+            backbone (nn.Module): Torch image backbone returning pooled embeddings [N, D]
+                and exposing their size as `embed_dim`.
+            classes_num (int): Number of output classes. Default: 4.
         """
         super(VideoModel, self).__init__()
 
         self.backbone = backbone
+        self.embed_dim = backbone.embed_dim
+        self.fc = nn.Linear(self.embed_dim, classes_num)
         self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())
 
         logger.info("==================================================")
-        logger.info("Initialized unified VideoModel wrapper:")
-        logger.info(f"  - Backbone: {self.model_name}")
+        logger.info("Initialized first+last frame fusion VideoModel:")
+        logger.info(f"  - Backbone:      {self.model_name} (shared across frames)")
+        logger.info(f"  - Embedding Dim: {self.embed_dim}")
+        logger.info("  - Fusion:        sum of frame embeddings")
+        logger.info(f"  - Classifier:    Linear({self.embed_dim} -> {classes_num})")
         logger.info("==================================================")
 
     def get_name(self) -> str:
@@ -48,27 +58,23 @@ class VideoModel(nn.Module):
 
     def forward(self, input_tensor: torch.Tensor) -> Dict[str, torch.Tensor]:
         """
-        Forward Pass of the unified VideoModel.
+        Forward Pass of the first+last frame fusion model.
 
         Args:
-            input_tensor (torch.Tensor): Image tensor [Batch, Channels (3), Height, Width].
+            input_tensor (torch.Tensor): Frame tensor [Batch, Frames (2), Channels (3), Height, Width].
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary containing classification logits 'clipwise_output' [Batch, Num_Classes].
         """
-        output = self.backbone(input_tensor)
+        batch_size, num_frames = input_tensor.shape[:2]
 
-        # Handle models that return a dict or tuple
-        if isinstance(output, dict):
-            logits = output.get('clipwise_output', output)
-        elif isinstance(output, (tuple, list)):
-            logits = output[0]
-        else:
-            logits = output
+        # Run all frames through the backbone in one pass: [B*T, 3, H, W] -> [B*T, D]
+        frames = input_tensor.flatten(0, 1)
+        embeddings = self.backbone(frames)
+        embeddings = embeddings.view(batch_size, num_frames, -1)
 
-        # Squeeze temporal dimension if shape is [B, Num_Classes, 1]
-        if logits.dim() == 3 and logits.size(2) == 1:
-            logits = logits.squeeze(2)
+        fused = embeddings.sum(dim=1)  # [B, D]
+        logits = self.fc(fused)
 
         return {
             "clipwise_output": logits

@@ -9,9 +9,9 @@ except ImportError:
 
 class MobileNetV2(nn.Module):
     """
-    MobileNetV2 image classifier with optional ImageNet pretrained weights.
+    MobileNetV2 feature extractor (classification head removed) with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
 
         if MobileNet_V2_Weights is None:
@@ -20,7 +20,8 @@ class MobileNetV2(nn.Module):
             weights = MobileNet_V2_Weights.DEFAULT if pretrained else None
             self.model = mobilenet_v2(weights=weights)
 
-        self.model.classifier[1] = nn.Linear(self.model.classifier[1].in_features, classes_num)
+        self.embed_dim = self.model.classifier[1].in_features
+        self.model.classifier[1] = nn.Identity()
         self.model_name = "mobilenet_v2"
 
     def get_name(self) -> str:

@@ -25,7 +25,6 @@
     "cv_val_ratio": 0.2
   },
   "video_features": {
-    "image_size": 224,
-    "frame_policy": "end"
+    "image_size": 224
   }
 }

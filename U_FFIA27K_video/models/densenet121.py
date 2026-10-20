@@ -9,9 +9,9 @@ except ImportError:
 
 class DenseNet121(nn.Module):
     """
-    DenseNet121 image classifier with optional ImageNet pretrained weights.
+    DenseNet121 feature extractor (classification head removed) with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
 
         if DenseNet121_Weights is None:
@@ -20,7 +20,8 @@ class DenseNet121(nn.Module):
             weights = DenseNet121_Weights.DEFAULT if pretrained else None
             self.model = densenet121(weights=weights)
 
-        self.model.classifier = nn.Linear(self.model.classifier.in_features, classes_num)
+        self.embed_dim = self.model.classifier.in_features
+        self.model.classifier = nn.Identity()
         self.model_name = "densenet121"
 
     def get_name(self) -> str:

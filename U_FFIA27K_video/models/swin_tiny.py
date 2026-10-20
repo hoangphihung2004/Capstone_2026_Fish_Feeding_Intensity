@@ -9,9 +9,9 @@ except ImportError:
 
 class SwinTiny(nn.Module):
     """
-    Swin-Tiny image classifier with optional ImageNet pretrained weights.
+    Swin-Tiny feature extractor (classification head removed) with optional ImageNet pretrained weights.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
 
         if Swin_T_Weights is None:
@@ -20,7 +20,8 @@ class SwinTiny(nn.Module):
             weights = Swin_T_Weights.DEFAULT if pretrained else None
             self.model = swin_t(weights=weights)
 
-        self.model.head = nn.Linear(self.model.head.in_features, classes_num)
+        self.embed_dim = self.model.head.in_features
+        self.model.head = nn.Identity()
         self.model_name = "swin_tiny"
 
     def get_name(self) -> str:

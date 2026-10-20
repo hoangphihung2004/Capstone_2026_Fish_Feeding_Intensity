@@ -3,12 +3,13 @@ import timm
 
 class MobileViTv2_075(nn.Module):
     """
-    MobileViTv2-0.75 image classifier using timm.
+    MobileViTv2-0.75 feature extractor (classification head removed) using timm.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
         
-        self.model = timm.create_model("mobilevitv2_075", pretrained=pretrained, num_classes=classes_num)
+        self.model = timm.create_model("mobilevitv2_075", pretrained=pretrained, num_classes=0)
+        self.embed_dim = self.model.num_features
         self.model_name = "mobilevitv2_075"
 
     def get_name(self) -> str:

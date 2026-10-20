@@ -3,12 +3,13 @@ import timm
 
 class MobileViTXS(nn.Module):
     """
-    MobileViT-XS image classifier using timm.
+    MobileViT-XS feature extractor (classification head removed) using timm.
     """
-    def __init__(self, classes_num: int = 4, pretrained: bool = True) -> None:
+    def __init__(self, pretrained: bool = True) -> None:
         super().__init__()
         
-        self.model = timm.create_model("mobilevit_xs", pretrained=pretrained, num_classes=classes_num)
+        self.model = timm.create_model("mobilevit_xs", pretrained=pretrained, num_classes=0)
+        self.embed_dim = self.model.num_features
         self.model_name = "mobilevit_xs"
 
     def get_name(self) -> str:
