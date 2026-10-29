@@ -25,11 +25,11 @@ class VideoModel(nn.Module):
     First+last frame fusion classifier.
 
     Both frames go through the same (weight-shared) image backbone, their pooled
-    embeddings are summed, and a single fully connected layer produces the logits:
+    embeddings are summed, an optional dropout is applied, and a single fully connected layer produces the logits:
 
-        [B, T, 3, H, W] -> backbone -> [B, T, D] -> sum over T -> [B, D] -> FC -> [B, Num_Classes]
+        [B, T, 3, H, W] -> backbone -> [B, T, D] -> sum over T -> [B, D] -> Dropout -> FC -> [B, Num_Classes]
     """
-    def __init__(self, backbone: nn.Module, classes_num: int = 4) -> None:
+    def __init__(self, backbone: nn.Module, classes_num: int = 4, dropout: float = 0.0) -> None:
         """
         Initialize VideoModel.
 
@@ -37,11 +37,14 @@ class VideoModel(nn.Module):
             backbone (nn.Module): Torch image backbone returning pooled embeddings [N, D]
                 and exposing their size as `embed_dim`.
             classes_num (int): Number of output classes. Default: 4.
+            dropout (float): Dropout probability applied to the fused embedding. Default: 0.0.
         """
         super(VideoModel, self).__init__()
 
         self.backbone = backbone
         self.embed_dim = backbone.embed_dim
+        self.dropout_rate = float(dropout)
+        self.dropout = nn.Dropout(p=self.dropout_rate) if self.dropout_rate > 0.0 else nn.Identity()
         self.fc = nn.Linear(self.embed_dim, classes_num)
         self.model_name = getattr(backbone, "model_name", backbone.__class__.__name__.lower())
 
@@ -50,6 +53,7 @@ class VideoModel(nn.Module):
         logger.info(f"  - Backbone:      {self.model_name} (shared across frames)")
         logger.info(f"  - Embedding Dim: {self.embed_dim}")
         logger.info("  - Fusion:        sum of frame embeddings")
+        logger.info(f"  - Dropout:       {self.dropout_rate}")
         logger.info(f"  - Classifier:    Linear({self.embed_dim} -> {classes_num})")
         logger.info("==================================================")
 
@@ -74,6 +78,7 @@ class VideoModel(nn.Module):
         embeddings = embeddings.view(batch_size, num_frames, -1)
 
         fused = embeddings.sum(dim=1)  # [B, D]
+        fused = self.dropout(fused)
         logits = self.fc(fused)
 
         return {

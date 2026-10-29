@@ -182,6 +182,10 @@ def _decode_image_cv2(video_path: str, label: Any, image_size: int) -> Dict[str,
     }
 
 
+_decode_center_image = _decode_image
+_decode_center_image_cv2 = _decode_image_cv2
+
+
 def _load_or_create_image_sample(
     index: int,
     video_path: str,

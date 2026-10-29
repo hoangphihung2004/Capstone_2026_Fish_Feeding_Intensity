@@ -297,7 +297,7 @@ def run_video_training(config: TrainConfig, train_config_path: str, device: torc
     # 4. Construct unified VideoModel
     logger.info("Assembling neural network model layers...")
     backbone = build_backbone(config)
-    model = VideoModel(backbone=backbone, classes_num=4)
+    model = VideoModel(backbone=backbone, classes_num=4, dropout=config.effective_dropout)
     model = model.to(device)
 
     model_name = backbone.get_name() if hasattr(backbone, "get_name") else backbone.__class__.__name__
@@ -348,6 +348,7 @@ def main():
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
     logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
     logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
+    logger.info(f"  - Classifier Dropout:       {config.effective_dropout}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     logger.info("==================================================")

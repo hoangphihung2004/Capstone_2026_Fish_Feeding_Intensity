@@ -32,7 +32,7 @@ class VideoFeaturesConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """
-    Configuration for selecting the video backbone without editing main.py.
+    Configuration for selecting the video backbone and classifier settings without editing main.py.
     """
     backbone: str = Field(
         default="MobileNetV2",
@@ -41,6 +41,12 @@ class ModelConfig(BaseModel):
     pretrained: bool = Field(
         default=True,
         description="Whether to request pretrained weights for supported torchvision backbones."
+    )
+    dropout: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Dropout rate applied to fused embeddings before classifier FC layer."
     )
 
 
@@ -111,11 +117,18 @@ class VideoTrainConfig(BaseModel):
     patience: int = Field(default=30, description="Early stopping patience epochs.")
     delta: float = Field(default=0.0, description="Minimum change in monitored metric to qualify as improvement.")
     cache_mode: Literal["disk", "ram", "none"] = Field(default="disk", description="Image cache mode: 'disk' uses .pkl cache, 'ram' preloads decoded images into system RAM, 'none' decodes from MP4 on demand.")
-    
+    dropout: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Optional top-level classifier dropout rate override. If set, overrides model.dropout.")
+
     # Nested configurations
     model: ModelConfig = Field(default_factory=ModelConfig, description="Video backbone model configuration.")
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig, description="Dataset splitter configurations.")
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig, description="Image feature extraction configuration.")
+
+    @property
+    def effective_dropout(self) -> float:
+        if self.dropout is not None:
+            return float(self.dropout)
+        return float(self.model.dropout)
 
     @classmethod
     def from_json(cls, path: str = 'config/train_config.json') -> 'VideoTrainConfig':

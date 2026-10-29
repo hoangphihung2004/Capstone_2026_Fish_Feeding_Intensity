@@ -345,7 +345,8 @@ class ClassifierInputHook:
 
 def build_model(config: TrainConfig, device: torch.device) -> VideoModel:
     backbone = build_backbone(config)
-    return VideoModel(backbone=backbone).to(device)
+    dropout_p = getattr(config, "effective_dropout", getattr(config.model, "dropout", 0.0))
+    return VideoModel(backbone=backbone, dropout=dropout_p).to(device)
 
 
 def classifier_module_for_backbone(backbone: torch.nn.Module) -> Tuple[torch.nn.Module, str]:

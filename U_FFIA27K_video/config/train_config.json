@@ -1,6 +1,6 @@
 {
-  "epochs": 250,
-  "batch_size": 256,
+  "epochs": 200,
+  "batch_size": 32,
   "learning_rate": 1e-4,
   "ckpt_dir": "checkpoint/",
   "monitor": "loss",
@@ -9,8 +9,9 @@
   "delta": 0.0,
   "cache_mode": "ram",
   "model": {
-    "backbone": "MobileNetV2",
-    "pretrained": true
+    "backbone": "ConvNeXtTiny",
+    "pretrained": false,
+    "dropout": 0.2
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",
