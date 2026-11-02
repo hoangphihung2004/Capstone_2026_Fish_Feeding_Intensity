@@ -1,0 +1,7 @@
+{
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "",
+  "checkpoint_template": "checkpoint/efficientnet_b0/fold_{fold:02d}/video_best.pt",
+  "checkpoints": {},
+  "output_dir": "outputs/robustness"
+}
