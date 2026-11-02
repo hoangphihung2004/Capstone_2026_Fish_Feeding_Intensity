@@ -17,7 +17,7 @@
     "patience": 10,
     "threshold": 0.001,
     "cooldown": 2,
-    "min_lr": 0.000001
+    "min_lr": 1e-06
   },
   "kd": {
     "teacher_checkpoint": "",
@@ -25,11 +25,27 @@
     "ce_weight": 1.0,
     "alpha": 0.5,
     "beta": 0.1,
-    "feature_target": "audio",
+    "feature_target": "none",
     "feature_source": "delta",
-    "feature_stages": [2, 3, 4, 5],
+    "feature_stages": [
+      2,
+      3,
+      4,
+      5
+    ],
     "stage_weights": null,
     "verify_teacher_split": true
+  },
+  "student": {
+    "type": "stft_tkeo_mlp",
+    "mlp": {
+      "hidden_dims": [
+        768,
+        512
+      ],
+      "embed_dim": 384,
+      "dropout": 0.1
+    }
   },
   "model": {
     "audio_backbone": "LightweightAudioEncoder",
@@ -57,6 +73,18 @@
     "time_stripes_num": 2,
     "freq_drop_width": 8,
     "freq_stripes_num": 2
+  },
+  "stft_features": {
+    "sample_rate": 256000,
+    "window_size": 4096,
+    "hop_size": 2048,
+    "use_tkeo": true,
+    "alpha_max": 0.99,
+    "beta": 0.8,
+    "use_spectral_aug": true,
+    "cutout_width": 24,
+    "cutout_prob": 0.5,
+    "noise_std": 0.02
   },
   "video_features": {
     "image_size": 224

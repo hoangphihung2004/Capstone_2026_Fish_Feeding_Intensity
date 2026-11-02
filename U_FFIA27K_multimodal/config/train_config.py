@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -22,6 +22,42 @@ class AudioFeaturesConfig(BaseModel):
     time_stripes_num: int = Field(default=2, description="SpecAugment time masks.")
     freq_drop_width: int = Field(default=8, description="SpecAugment frequency mask width.")
     freq_stripes_num: int = Field(default=2, description="SpecAugment frequency masks.")
+
+
+class StftFeaturesConfig(BaseModel):
+    """High-resolution TKEO-STFT frontend (256 kHz, 2049 linear bins) used by the stft_tkeo_mlp student."""
+
+    sample_rate: int = Field(default=256000, description="Sample rate the student's STFT audio is loaded at.")
+    window_size: int = Field(default=4096, description="STFT window size in samples.")
+    hop_size: int = Field(default=2048, description="STFT hop size in samples.")
+    use_tkeo: bool = Field(default=True, description="Teager-Kaiser Energy Operator adaptive pre-emphasis.")
+    alpha_max: float = Field(default=0.99, ge=0.0, le=1.0, description="Max pre-emphasis coefficient.")
+    beta: float = Field(default=0.8, ge=0.0, le=1.0, description="Temporal smoothing factor of the pre-emphasis coefficient.")
+    use_spectral_aug: bool = Field(default=True, description="1D spectral augmentation (frequency cutout + Gaussian jitter), train only.")
+    cutout_width: int = Field(default=24, ge=0, description="Width of the contiguous frequency cutout in bins.")
+    cutout_prob: float = Field(default=0.5, ge=0.0, le=1.0, description="Probability of applying the cutout per sample.")
+    noise_std: float = Field(default=0.02, ge=0.0, description="Std of the Gaussian spectral jitter.")
+
+    @property
+    def stft_bins(self) -> int:
+        return self.window_size // 2 + 1
+
+
+class StudentMLPConfig(BaseModel):
+    hidden_dims: Tuple[int, ...] = Field(default=(768, 512), description="Hidden widths; each is Linear + LayerNorm + GELU + Dropout.")
+    embed_dim: int = Field(default=384, gt=0, description="Width of the last Linear + LayerNorm before the classifier.")
+    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
+
+
+class StudentConfig(BaseModel):
+    type: Literal["conv", "stft_tkeo_mlp"] = Field(
+        default="conv",
+        description=(
+            "conv: LightweightAudioEncoder on log-mel (supports feature KD). "
+            "stft_tkeo_mlp: MLP on the 2049-D TKEO-STFT vector of 256 kHz audio (distilled from logits only)."
+        ),
+    )
+    mlp: StudentMLPConfig = Field(default_factory=StudentMLPConfig)
 
 
 class VideoFeaturesConfig(BaseModel):
@@ -131,8 +167,19 @@ class MultimodalTrainConfig(BaseModel):
     kd: KDConfig = Field(default_factory=KDConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
+    student: StudentConfig = Field(default_factory=StudentConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)
+    stft_features: StftFeaturesConfig = Field(default_factory=StftFeaturesConfig)
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig)
+
+    @model_validator(mode="after")
+    def _check_student(self) -> "MultimodalTrainConfig":
+        if self.student.type != "conv" and self.kd.feature_target != "none":
+            raise ValueError(
+                f"student.type='{self.student.type}' has no stage feature maps: set kd.feature_target to 'none' "
+                "(MLP students are distilled from logits only)."
+            )
+        return self
 
     @classmethod
     def from_json(cls, path: str = "config/train_config.json") -> "MultimodalTrainConfig":

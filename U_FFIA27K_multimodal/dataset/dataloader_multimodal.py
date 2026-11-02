@@ -15,8 +15,9 @@ project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from config import DEFAULT_IMAGE_CACHE_ROOT, VALID_CACHE_MODES, SplitterConfig
+from config import DEFAULT_IMAGE_CACHE_ROOT, VALID_CACHE_MODES, SplitterConfig, StftFeaturesConfig
 from dataset import FishDataSplitter
+from features.stft_tkeo_frontend import TkeoStftExtractor
 from transforms import VideoTransform
 
 logger = logging.getLogger(__name__)
@@ -190,8 +191,13 @@ class FishMultimodalDataLoader:
         cache_video_mode: str = "ram",
         image_size: int = 224,
         splitter_config: Optional[SplitterConfig] = None,
+        stft_config: Optional[StftFeaturesConfig] = None,
     ) -> None:
         self.sample_rate = sample_rate
+        # With stft_config set, each batch also carries "stft_vector" [B, 2049]: the TKEO-STFT vector of the same clip loaded
+        # at stft_config.sample_rate (256 kHz). It is computed once per clip (CPU) and cached, never the 256 kHz waveform.
+        self.stft_config = stft_config
+        self.stft_extractor = TkeoStftExtractor(stft_config) if stft_config is not None else None
         self.batch_size = batch_size
         self.dataloader_workers = _resolve_workers(dataloader_workers)
         self.prefetch_factor = prefetch_factor
@@ -210,6 +216,8 @@ class FishMultimodalDataLoader:
         logger.info("==================================================")
         logger.info("Initializing FishMultimodalDataLoader:")
         logger.info(f"  - Sample Rate:              {self.sample_rate} Hz")
+        if self.stft_config is not None:
+            logger.info(f"  - STFT student audio:       {self.stft_config.sample_rate} Hz -> {self.stft_config.stft_bins}-D TKEO-STFT vector (cached)")
         logger.info(f"  - Batch Size:               {self.batch_size}")
         logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
         logger.info(f"  - Cache audio in RAM:       {self.cache_audio}")
@@ -222,9 +230,16 @@ class FishMultimodalDataLoader:
         """Save the active deterministic split with the current experiment artifacts."""
         self.splitter.save_splits(self.train_dict, self.test_dict, self.val_dict, Path(output_dir))
 
+    def stft_vector(self, audio_path: str) -> np.ndarray:
+        """Load a clip at the STFT sample rate and reduce it to its [bins] TKEO-STFT vector (float32)."""
+        waveform = load_audio(audio_path, sr=self.stft_config.sample_rate)
+        return self.stft_extractor(waveform.unsqueeze(0))[0].numpy().astype(np.float32)
+
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+        stft = {"stft_vector": torch.tensor(np.stack([item["stft_vector"] for item in batch]), dtype=torch.float32)} if "stft_vector" in batch[0] else {}
         return {
+            **stft,
             "audio_name": [item["audio_name"] for item in batch],
             "video_name": [item["video_name"] for item in batch],
             "waveform": torch.tensor(np.stack([item["waveform"] for item in batch]), dtype=torch.float32),
@@ -245,6 +260,7 @@ class FishMultimodalDataLoader:
                 raise ValueError(f"Invalid split value '{split}'. Must be one of ['train', 'test', 'val'].")
             self.transform = VideoTransform.get_transforms(parent.image_size)[split]
             self.waveform_cache: List[np.ndarray] | None = None
+            self.stft_cache: List[np.ndarray] | None = None
             self.video_cache: List[Dict[str, Any]] | None = None
             if parent.cache_audio:
                 self._preload_audio()
@@ -255,11 +271,13 @@ class FishMultimodalDataLoader:
             logger.info(f"Preloading audio split '{self.split}' to RAM ({len(self.data_dict)} samples)...")
             workers = max(self.parent.dataloader_workers, 1)
 
-            def load_one(index: int) -> tuple[int, np.ndarray]:
+            def load_one(index: int) -> tuple[int, np.ndarray, np.ndarray | None]:
                 audio_path = self.data_dict[index][0]
-                return index, load_audio(audio_path, sr=self.parent.sample_rate).numpy()
+                stft = self.parent.stft_vector(audio_path) if self.parent.stft_extractor is not None else None
+                return index, load_audio(audio_path, sr=self.parent.sample_rate).numpy(), stft
 
             cache: List[np.ndarray | None] = [None] * len(self.data_dict)
+            stft_cache: List[np.ndarray | None] = [None] * len(self.data_dict)
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(load_one, index): index for index in range(len(self.data_dict))}
                 completed = concurrent.futures.as_completed(futures)
@@ -269,11 +287,14 @@ class FishMultimodalDataLoader:
                     desc=f"Preloading {self.split} audio to RAM",
                     unit="file",
                 ):
-                    index, waveform = future.result()
+                    index, waveform, stft = future.result()
                     cache[index] = waveform
+                    stft_cache[index] = stft
             if any(item is None for item in cache):
                 raise RuntimeError(f"Audio RAM preload failed for split '{self.split}'.")
             self.waveform_cache = [item for item in cache if item is not None]
+            if self.parent.stft_extractor is not None:
+                self.stft_cache = [item for item in stft_cache if item is not None]
 
         def _decode_video_row(self, index: int) -> Dict[str, Any]:
             _, video_path, label = self.data_dict[index]
@@ -322,13 +343,16 @@ class FishMultimodalDataLoader:
             else:
                 video_sample = self._decode_video_row(index)
 
-            return {
+            sample = {
                 "audio_name": audio_path,
                 "video_name": video_path,
                 "waveform": waveform,
                 "video_form": self.transform(video_sample["video_form"]),
                 "target": np.eye(4)[int(label)],
             }
+            if self.parent.stft_extractor is not None:
+                sample["stft_vector"] = self.stft_cache[index] if self.stft_cache is not None else self.parent.stft_vector(audio_path)
+            return sample
 
     def get_dataloader(self, split: str, shuffle: bool = False, drop_last: bool = False) -> DataLoader:
         dataset = self._InnerDataset(parent=self, split=split)

@@ -19,7 +19,7 @@ import torch.optim as optim
 
 from config import ArtifactUploadConfig, TrainConfig
 from dataset import FishMultimodalDataLoader
-from models import AudioStudentModel
+from models import AudioStudentModel, StftMlpStudentModel
 from models.teacher import load_teacher, resolve_teacher_checkpoint, verify_teacher_config, verify_teacher_splits
 from tasks import MODEL_DIR_NAME, KDTrainer
 from utils import FeatureMatchLoss
@@ -48,7 +48,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
     suffix = suffix if suffix.startswith(".") else f".{suffix}"
     filename_parts = [
         "U_FFIA27K_KD",
-        "audio_student",
+        f"audio_student_{config.student.type}",
         config.model.audio_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
@@ -158,8 +158,11 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info("Successfully uploaded artifact to Hugging Face.")
 
 
-def build_student(config: TrainConfig) -> AudioStudentModel:
-    model = AudioStudentModel(config.audio_features)
+def build_student(config: TrainConfig):
+    if config.student.type == "stft_tkeo_mlp":
+        model = StftMlpStudentModel(config.stft_features, config.student.mlp)
+    else:
+        model = AudioStudentModel(config.audio_features)
     num_params = model.architecture_num_params()
     if num_params >= 5_000_000:
         raise ValueError(f"Architecture exceeds parameter budget: {num_params:,}")
@@ -167,7 +170,7 @@ def build_student(config: TrainConfig) -> AudioStudentModel:
     return model
 
 
-def log_model_complexity(model: AudioStudentModel, config: TrainConfig, device: torch.device) -> None:
+def log_model_complexity(model, config: TrainConfig, device: torch.device) -> None:
     """Log parameter counts and THOP MAC/FLOP estimates before training."""
     try:
         from thop import profile
@@ -178,11 +181,16 @@ def log_model_complexity(model: AudioStudentModel, config: TrainConfig, device: 
     was_training = model.training
     model.eval()
     try:
-        audio_features = torch.zeros(1, 1, config.audio_features.mel_bins, config.audio_features.mel_bins, device=device)
-        waveform = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
+        if config.student.type == "stft_tkeo_mlp":
+            # Profile the MLP on the cached vector; the TKEO-STFT extraction is functional ops THOP does not count.
+            architecture_input = torch.zeros(1, config.stft_features.stft_bins, device=device)
+            model_input = torch.zeros(1, config.stft_features.stft_bins, device=device)
+        else:
+            architecture_input = torch.zeros(1, 1, config.audio_features.mel_bins, config.audio_features.mel_bins, device=device)
+            model_input = torch.zeros(1, config.audio_features.sample_rate * 2, device=device)
         with torch.no_grad():
-            architecture_macs, _ = profile(model.architecture, inputs=(audio_features,), verbose=False)
-            total_macs, _ = profile(model, inputs=(waveform,), verbose=False)
+            architecture_macs, _ = profile(model.architecture, inputs=(architecture_input,), verbose=False)
+            total_macs, _ = profile(model, inputs=(model_input,), verbose=False)
 
         architecture_params = sum(parameter.numel() for parameter in model.architecture.parameters())
         frontend_params = sum(parameter.numel() for parameter in model.frontend.parameters())
@@ -300,6 +308,7 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
         cache_video_mode=config.cache_video_mode,
         image_size=config.video_features.image_size,
         splitter_config=config.dataset_splitter,
+        stft_config=config.stft_features if config.student.type == "stft_tkeo_mlp" else None,
     )
     if config.kd.verify_teacher_split:
         verify_teacher_splits(
@@ -360,7 +369,11 @@ def main() -> None:
         logger.info(f"  - Early Stopping Patience: {config.patience} epochs")
     logger.info(f"  - Teacher Checkpoint:      {config.kd.teacher_checkpoint or '<not set>'}")
     logger.info(f"  - Teacher Backbones:       {config.model.audio_backbone} + {config.model.video_backbone} (first_last)")
-    logger.info(f"  - Student Backbone:        {config.model.audio_backbone} (audio only)")
+    logger.info(f"  - Student:                 {config.student.type} (audio only)")
+    if config.student.type != "conv":
+        logger.info(f"  - Student MLP:             hidden={config.student.mlp.hidden_dims}, embed={config.student.mlp.embed_dim}, dropout={config.student.mlp.dropout}")
+    if config.student.type == "stft_tkeo_mlp":
+        logger.info(f"  - STFT Frontend:           {config.stft_features.sample_rate} Hz, n_fft={config.stft_features.window_size}, hop={config.stft_features.hop_size}, tkeo={config.stft_features.use_tkeo}")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
     logger.info(f"  - CE Weight:               {config.kd.ce_weight}" + (" (CE off: KD terms only)" if config.kd.ce_weight == 0 else ""))
     logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target} ({config.kd.feature_source})")

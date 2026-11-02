@@ -46,12 +46,14 @@ def classification_statistics(target, probabilities):
 
 
 class MultimodalEvaluator:
-    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None, head_keys: Dict[str, str] | None = None, use_video: bool = True) -> None:
+    def __init__(self, model: nn.Module, loss_fn: ClipCELoss | None = None, head_keys: Dict[str, str] | None = None, use_video: bool = True, input_keys: tuple | None = None) -> None:
         self.model = model
         self.device = next(model.parameters()).device
         self.head_keys = head_keys or HEAD_KEYS
         self.loss_fn = loss_fn or ClipCELoss(head=next(iter(self.head_keys)))
         self.use_video = use_video
+        # Batch entries passed to model(**inputs); None keeps the default (waveform [+ video_form]).
+        self.input_keys = tuple(input_keys) if input_keys is not None else None
 
     def _forward(self, data_loader: Any) -> Dict[str, np.ndarray]:
         output_dict: Dict[str, list] = {}
@@ -59,13 +61,16 @@ class MultimodalEvaluator:
         count = 0
         self.model.eval()
         for batch in tqdm(data_loader, desc="Running evaluation..."):
-            inputs = {"waveform": batch["waveform"].to(self.device)}
-            if self.use_video:
-                inputs["video_form"] = batch["video_form"].to(self.device)
+            if self.input_keys is not None:
+                inputs = {key: batch[key].to(self.device) for key in self.input_keys}
+            else:
+                inputs = {"waveform": batch["waveform"].to(self.device)}
+                if self.use_video:
+                    inputs["video_form"] = batch["video_form"].to(self.device)
             with torch.no_grad():
                 batch_output = self.model(**inputs)
                 losses = self.loss_fn.components(batch_output, {"target": batch["target"].to(self.device)})
-            batch_size = inputs["waveform"].shape[0]
+            batch_size = batch["target"].shape[0]
             count += batch_size
             for head, key in self.head_keys.items():
                 loss_sums[head] += losses[head].item() * batch_size

@@ -37,11 +37,15 @@ class KDTrainer:
         self.feature_loss = feature_loss
         self.beta = config.kd.beta
         self.ce_weight = config.kd.ce_weight
+        # Only the conv student exposes stage features; MLP students are distilled from logits (CE + KL) only.
+        self.use_feature_kd = config.student.type == "conv"
+        self.student_input_keys = tuple(getattr(student, "input_keys", ("waveform",)))
         self.evaluator = MultimodalEvaluator(
             model=self.model,
             loss_fn=ClipCELoss(head="student"),
             head_keys=STUDENT_HEAD_KEYS,
             use_video=False,
+            input_keys=self.student_input_keys,
         )
         self.teacher_evaluator = MultimodalEvaluator(
             model=self.teacher,
@@ -130,6 +134,9 @@ class KDTrainer:
         target = torch.from_numpy(val_statistics["target"])
         terms = self.loss_fn.components(student_logits, self.teacher_val_logits, target)
         alpha = self.loss_fn.alpha
+        if not self.use_feature_kd:
+            val_kd_loss = self.ce_weight * terms["ce"] + alpha * terms["kl"]
+            return float(val_kd_loss), float(terms["kl"]), 0.0, [0.0] * 5
         student_feature = torch.from_numpy(val_statistics["features"]["feature_stages"]).float().to(self.device)
         teacher_features = {name: value.to(self.device) for name, value in self.teacher_val_features.items()}
         with torch.no_grad():
@@ -171,10 +178,13 @@ class KDTrainer:
                     teacher_output = self.teacher(waveform=waveform, video_form=video_form)
                 teacher_logits = teacher_output["clipwise_output"]
                 teacher_features = {"audio": teacher_output["feature_stages_audio"], "video": teacher_output["feature_stages_video"]}
-                student_output = self.model(waveform=waveform)
+                student_output = self.model(**{key: batch[key].to(self.device) for key in self.student_input_keys})
                 student_logits = student_output["clipwise_output"]
                 terms = self.loss_fn.components(student_logits, teacher_logits, target)
-                feat, stage_losses = self.feature_loss(student_output["feature_stages"], teacher_features)
+                if self.use_feature_kd:
+                    feat, stage_losses = self.feature_loss(student_output["feature_stages"], teacher_features)
+                else:
+                    feat, stage_losses = terms["ce"].new_zeros(()), terms["ce"].new_zeros(5)
                 # KD objective: ce_weight * CE + alpha * T^2 * KL + beta * L_feat (weighted MSE over the selected stages).
                 loss = ce_weight * terms["ce"] + alpha * terms["kl"] + beta * feat
                 if not torch.isfinite(loss):
@@ -312,7 +322,9 @@ class KDTrainer:
         self.history_logger.save_classification_reports("val", best_val_statistics)
         self.history_logger.save_classification_reports("test", test_statistics)
         timer = InferenceTimer(self.model, self.device)
-        latency = timer.measure_latency_per_sample(waveform_shape=(1, self.config.audio_features.sample_rate * 2))
+        # The STFT student is timed end to end from the 256 kHz waveform (TKEO-STFT extraction included).
+        latency_rate = self.config.stft_features.sample_rate if self.config.student.type == "stft_tkeo_mlp" else self.config.audio_features.sample_rate
+        latency = timer.measure_latency_per_sample(waveform_shape=(1, latency_rate * 2))
         self.history_logger.save_summary(training_time, latency, best_val_statistics, test_statistics)
         for head, stats in test_statistics["heads"].items():
             logger.info("TEST %s -> Accuracy: %.4f | mAP: %.4f", head, stats["accuracy"], np.nanmean(stats["average_precision"]))

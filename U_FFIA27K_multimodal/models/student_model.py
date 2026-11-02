@@ -4,7 +4,9 @@ import torch
 from torch import nn
 
 from features.audio_frontend import AudioFrontend
+from features.stft_tkeo_frontend import TkeoStftFrontend
 from .audio_backbone import LightweightAudioEncoder
+from .audio_mlp import AudioMLPBackbone
 
 
 STUDENT_HEAD_KEYS = {"student": "clipwise_output"}
@@ -31,6 +33,8 @@ class AudioStudentArchitecture(nn.Module):
 
 
 class AudioStudentModel(nn.Module):
+    input_keys = ("waveform",)  # batch entries fed to forward (64 kHz waveform)
+
     def __init__(self, audio_config=None):
         super().__init__()
         self.frontend = AudioFrontend(audio_config)
@@ -38,6 +42,39 @@ class AudioStudentModel(nn.Module):
 
     def forward(self, waveform):
         return self.architecture(self.frontend(waveform))
+
+    def architecture_num_params(self):
+        return sum(p.numel() for p in self.architecture.parameters())
+
+
+class MLPStudentArchitecture(nn.Module):
+    """AudioMLPBackbone + a linear classifier. Input is a single feature vector per clip, [B, in_features]."""
+
+    def __init__(self, in_features, mlp_config, classes_num=4):
+        super().__init__()
+        self.backbone = AudioMLPBackbone(in_features, tuple(mlp_config.hidden_dims), mlp_config.embed_dim, mlp_config.dropout)
+        self.head = nn.Linear(mlp_config.embed_dim, classes_num)
+
+    def forward(self, features):
+        return {"clipwise_output": self.head(self.backbone(features))}
+
+
+class StftMlpStudentModel(nn.Module):
+    """TKEO-STFT vector (256 kHz audio, 2049 bins) -> spectral aug + LayerNorm -> MLP -> classifier.
+
+    The dataloader caches the 2049-D vector per clip (batch["stft_vector"]); forward can also take the raw 256 kHz
+    waveform and extract it on the fly, which is what the latency measurement uses (end to end).
+    """
+
+    input_keys = ("stft_vector",)
+
+    def __init__(self, stft_config, mlp_config):
+        super().__init__()
+        self.frontend = TkeoStftFrontend(stft_config)
+        self.architecture = MLPStudentArchitecture(stft_config.stft_bins, mlp_config)
+
+    def forward(self, stft_vector=None, waveform=None):
+        return self.architecture(self.frontend(stft_vector=stft_vector, waveform=waveform))
 
     def architecture_num_params(self):
         return sum(p.numel() for p in self.architecture.parameters())
