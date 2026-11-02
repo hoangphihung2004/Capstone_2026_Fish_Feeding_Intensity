@@ -161,7 +161,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
 
 def build_student(config: TrainConfig):
     if config.student.type == "stft_tkeo_mlp":
-        feature_dim = {"none": None, "pre_head_768": 768, "video_320": 320}[config.kd.mlp_feature]
+        feature_dim = {"none": None, "pre_head_768": 768, "audio_320": 320, "video_320": 320}[config.kd.mlp_feature]
         model = StftMlpStudentModel(config.stft_features, config.student.mlp, feature_dim=feature_dim)
     else:
         model = AudioStudentModel(config.audio_features)

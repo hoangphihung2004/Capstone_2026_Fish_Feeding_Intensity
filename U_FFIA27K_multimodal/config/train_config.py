@@ -126,11 +126,12 @@ class KDConfig(BaseModel):
         default=None,
         description="Weight per entry of feature_stages (same order); null means equal weights. L_feat is the weighted mean of the stage MSEs.",
     )
-    mlp_feature: Literal["none", "pre_head_768", "video_320"] = Field(
+    mlp_feature: Literal["none", "pre_head_768", "audio_320", "video_320"] = Field(
         default="none",
         description=(
             "Feature KD for the MLP student at ONE teacher position, weighted by beta: MSE(Linear(student embedding), teacher vector). "
             "pre_head_768: the 768-D vector feeding the teacher head (audio 320 + video 320 + fusion 128). "
+            "audio_320: the pooled 320-D vector at the end of the teacher's audio branch (after fusion). "
             "video_320: the pooled 320-D vector at the end of the teacher's video branch. none: logits only."
         ),
     )

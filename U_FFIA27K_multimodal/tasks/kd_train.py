@@ -41,7 +41,7 @@ class KDTrainer:
         self.use_feature_kd = config.student.type == "conv"
         # MLP student: MSE between its projected embedding and ONE teacher vector (kd.mlp_feature), weighted by beta.
         self.mlp_feature = config.kd.mlp_feature
-        self.mlp_feature_slice = {"pre_head_768": slice(0, 768), "video_320": slice(320, 640)}.get(self.mlp_feature)
+        self.mlp_feature_slice = {"pre_head_768": slice(0, 768), "audio_320": slice(0, 320), "video_320": slice(320, 640)}.get(self.mlp_feature)
         self.student_input_keys = tuple(getattr(student, "input_keys", ("waveform",)))
         self.evaluator = MultimodalEvaluator(
             model=self.model,
