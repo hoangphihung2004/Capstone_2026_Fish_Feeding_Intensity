@@ -1,12 +1,12 @@
 {
-  "epochs": 300,
+  "epochs": 400,
   "batch_size": 256,
   "dataloader_workers": -1,
   "prefetch_factor": null,
   "learning_rate": 0.001,
   "ckpt_dir": "checkpoint/",
   "monitor": "accuracy",
-  "early_stopping": true,
+  "early_stopping": false,
   "patience": 50,
   "delta": 0.0,
   "cache_audio": true,
@@ -20,7 +20,7 @@
     "min_lr": 1e-06
   },
   "kd": {
-    "teacher_checkpoint": "",
+    "teacher_checkpoint": "/marimo/Results/Fold0/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_00/multimodal_best.pt",
     "temperature": 4.0,
     "ce_weight": 1.0,
     "alpha": 0.5,
@@ -61,7 +61,7 @@
     "split_strategy": "random_sample",
     "evaluation_mode": "cross_validation",
     "num_folds": 5,
-    "fold_index": 1,
+    "fold_index": 0,
     "cv_val_ratio": 0.2
   },
   "audio_features": {
