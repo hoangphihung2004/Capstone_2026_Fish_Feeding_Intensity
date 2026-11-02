@@ -34,12 +34,19 @@ class FeatureTeacher(nn.Module):
     The returned tensors are [B, 512] (stage channels 16+24+40+112+320). The teacher architecture and checkpoint are untouched.
     """
 
-    def __init__(self, teacher: MultimodalModel, source: str = "fused") -> None:
+    def __init__(self, teacher: MultimodalModel, source: str = "fused", capture_pre_head: bool = False) -> None:
         super().__init__()
         if source not in ("fused", "delta", "update"):
             raise ValueError(f"Unknown feature source: {source}")
         self.teacher = teacher
         self.source = source
+        self.capture_pre_head = capture_pre_head
+        self._pre_head = None
+        if capture_pre_head:
+            # Input of the classifier: cat(audio 320, video 320, fusion_state 128) = 768-D.
+            teacher.architecture.multimodal_head.register_forward_hook(
+                lambda module, inputs, output: setattr(self, "_pre_head", inputs[0].detach())
+            )
         architecture = teacher.architecture
         self._audio = {}
         self._video = {}
@@ -79,7 +86,10 @@ class FeatureTeacher(nn.Module):
 
     def forward(self, waveform, video_form) -> dict:
         output = self.teacher(waveform=waveform, video_form=video_form)
-        return {**output, "feature_stages_audio": self._stack("audio"), "feature_stages_video": self._stack("video")}
+        features = {"feature_stages_audio": self._stack("audio"), "feature_stages_video": self._stack("video")}
+        if self.capture_pre_head:
+            features["feature_pre_head"] = self._pre_head
+        return {**output, **features}
 
 
 def resolve_teacher_checkpoint(path: str) -> Path:
@@ -180,4 +190,4 @@ def load_teacher(checkpoint: Path, config, device: torch.device) -> FeatureTeach
         state.get("epoch"),
         state.get("ave_precision"),
     )
-    return FeatureTeacher(teacher, config.kd.feature_source).to(device).eval()
+    return FeatureTeacher(teacher, config.kd.feature_source, config.kd.mlp_feature != "none").to(device).eval()

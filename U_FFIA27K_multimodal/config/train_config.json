@@ -26,6 +26,7 @@
     "alpha": 0.5,
     "beta": 0.1,
     "feature_target": "none",
+    "mlp_feature": "pre_head_768",
     "feature_source": "delta",
     "feature_stages": [
       2,

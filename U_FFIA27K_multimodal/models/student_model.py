@@ -50,13 +50,19 @@ class AudioStudentModel(nn.Module):
 class MLPStudentArchitecture(nn.Module):
     """AudioMLPBackbone + a linear classifier. Input is a single feature vector per clip, [B, in_features]."""
 
-    def __init__(self, in_features, mlp_config, classes_num=4):
+    def __init__(self, in_features, mlp_config, classes_num=4, feature_dim=None):
         super().__init__()
         self.backbone = AudioMLPBackbone(in_features, tuple(mlp_config.hidden_dims), mlp_config.embed_dim, mlp_config.dropout)
         self.head = nn.Linear(mlp_config.embed_dim, classes_num)
+        # Train-time regressor for feature KD: embedding -> teacher feature size. Unused at inference.
+        self.projector = nn.Linear(mlp_config.embed_dim, feature_dim) if feature_dim else None
 
     def forward(self, features):
-        return {"clipwise_output": self.head(self.backbone(features))}
+        embedding = self.backbone(features)
+        output = {"clipwise_output": self.head(embedding)}
+        if self.projector is not None:
+            output["feature_projected"] = self.projector(embedding)
+        return output
 
 
 class StftMlpStudentModel(nn.Module):
@@ -68,10 +74,10 @@ class StftMlpStudentModel(nn.Module):
 
     input_keys = ("stft_vector",)
 
-    def __init__(self, stft_config, mlp_config):
+    def __init__(self, stft_config, mlp_config, feature_dim=None):
         super().__init__()
         self.frontend = TkeoStftFrontend(stft_config)
-        self.architecture = MLPStudentArchitecture(stft_config.stft_bins, mlp_config)
+        self.architecture = MLPStudentArchitecture(stft_config.stft_bins, mlp_config, feature_dim=feature_dim)
 
     def forward(self, stft_vector=None, waveform=None):
         return self.architecture(self.frontend(stft_vector=stft_vector, waveform=waveform))

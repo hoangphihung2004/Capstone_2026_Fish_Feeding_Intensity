@@ -126,6 +126,14 @@ class KDConfig(BaseModel):
         default=None,
         description="Weight per entry of feature_stages (same order); null means equal weights. L_feat is the weighted mean of the stage MSEs.",
     )
+    mlp_feature: Literal["none", "pre_head_768", "video_320"] = Field(
+        default="none",
+        description=(
+            "Feature KD for the MLP student at ONE teacher position, weighted by beta: MSE(Linear(student embedding), teacher vector). "
+            "pre_head_768: the 768-D vector feeding the teacher head (audio 320 + video 320 + fusion 128). "
+            "video_320: the pooled 320-D vector at the end of the teacher's video branch. none: logits only."
+        ),
+    )
     verify_teacher_split: bool = Field(
         default=True,
         description="Require the teacher's saved splitter_config.json/splits to match the current split when present.",
@@ -177,8 +185,10 @@ class MultimodalTrainConfig(BaseModel):
         if self.student.type != "conv" and self.kd.feature_target != "none":
             raise ValueError(
                 f"student.type='{self.student.type}' has no stage feature maps: set kd.feature_target to 'none' "
-                "(MLP students are distilled from logits only)."
+                "(use kd.mlp_feature for feature KD on the MLP student)."
             )
+        if self.student.type == "conv" and self.kd.mlp_feature != "none":
+            raise ValueError("kd.mlp_feature applies to the MLP student only; use kd.feature_target with the conv student.")
         return self
 
     @classmethod

@@ -52,6 +52,7 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.model.audio_backbone,
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
+        f"mlpfeat{config.kd.mlp_feature}",
         f"T{config.kd.temperature:g}_ce{config.kd.ce_weight:g}_alpha{config.kd.alpha:g}_beta{config.kd.beta:g}_feat{config.kd.feature_target}_{config.kd.feature_source}_s{''.join(str(stage) for stage in sorted(config.kd.feature_stages))}",
     ]
     if (
@@ -160,7 +161,8 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
 
 def build_student(config: TrainConfig):
     if config.student.type == "stft_tkeo_mlp":
-        model = StftMlpStudentModel(config.stft_features, config.student.mlp)
+        feature_dim = {"none": None, "pre_head_768": 768, "video_320": 320}[config.kd.mlp_feature]
+        model = StftMlpStudentModel(config.stft_features, config.student.mlp, feature_dim=feature_dim)
     else:
         model = AudioStudentModel(config.audio_features)
     num_params = model.architecture_num_params()
@@ -376,6 +378,7 @@ def main() -> None:
         logger.info(f"  - STFT Frontend:           {config.stft_features.sample_rate} Hz, n_fft={config.stft_features.window_size}, hop={config.stft_features.hop_size}, tkeo={config.stft_features.use_tkeo}")
     logger.info(f"  - KD Temperature / Alpha:  {config.kd.temperature} / {config.kd.alpha}")
     logger.info(f"  - CE Weight:               {config.kd.ce_weight}" + (" (CE off: KD terms only)" if config.kd.ce_weight == 0 else ""))
+    logger.info(f"  - MLP Feature KD:          {config.kd.mlp_feature} (beta={config.kd.beta})")
     logger.info(f"  - Feature KD Beta / Target: {config.kd.beta} / {config.kd.feature_target} ({config.kd.feature_source})")
     logger.info(f"  - Feature KD Stages:       {config.kd.feature_stages} (weights: {config.kd.stage_weights or 'equal'})")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")

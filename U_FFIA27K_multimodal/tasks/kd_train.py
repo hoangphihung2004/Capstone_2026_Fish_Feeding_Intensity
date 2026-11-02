@@ -39,6 +39,9 @@ class KDTrainer:
         self.ce_weight = config.kd.ce_weight
         # Only the conv student exposes stage features; MLP students are distilled from logits (CE + KL) only.
         self.use_feature_kd = config.student.type == "conv"
+        # MLP student: MSE between its projected embedding and ONE teacher vector (kd.mlp_feature), weighted by beta.
+        self.mlp_feature = config.kd.mlp_feature
+        self.mlp_feature_slice = {"pre_head_768": slice(0, 768), "video_320": slice(320, 640)}.get(self.mlp_feature)
         self.student_input_keys = tuple(getattr(student, "input_keys", ("waveform",)))
         self.evaluator = MultimodalEvaluator(
             model=self.model,
@@ -105,6 +108,8 @@ class KDTrainer:
                 self.teacher_val_features = {
                     name: torch.from_numpy(statistics["features"][f"feature_stages_{name}"]).float() for name in ("audio", "video")
                 }
+                if self.mlp_feature_slice is not None:
+                    self.teacher_val_pre_head = torch.from_numpy(statistics["features"]["feature_pre_head"]).float()
                 self.teacher_val_names = statistics["audio_name"]
                 self.teacher_val_loss = float(statistics["loss"])
                 self.teacher_val_acc = float(statistics["accuracy"])
@@ -135,8 +140,12 @@ class KDTrainer:
         terms = self.loss_fn.components(student_logits, self.teacher_val_logits, target)
         alpha = self.loss_fn.alpha
         if not self.use_feature_kd:
-            val_kd_loss = self.ce_weight * terms["ce"] + alpha * terms["kl"]
-            return float(val_kd_loss), float(terms["kl"]), 0.0, [0.0] * 5
+            feat = terms["ce"].new_zeros(())
+            if self.mlp_feature_slice is not None:
+                student_projected = torch.from_numpy(val_statistics["features"]["feature_projected"]).float()
+                feat = F.mse_loss(student_projected, self.teacher_val_pre_head[:, self.mlp_feature_slice])
+            val_kd_loss = self.ce_weight * terms["ce"] + alpha * terms["kl"] + self.beta * feat
+            return float(val_kd_loss), float(terms["kl"]), float(feat), [0.0] * 5
         student_feature = torch.from_numpy(val_statistics["features"]["feature_stages"]).float().to(self.device)
         teacher_features = {name: value.to(self.device) for name, value in self.teacher_val_features.items()}
         with torch.no_grad():
@@ -185,6 +194,8 @@ class KDTrainer:
                     feat, stage_losses = self.feature_loss(student_output["feature_stages"], teacher_features)
                 else:
                     feat, stage_losses = terms["ce"].new_zeros(()), terms["ce"].new_zeros(5)
+                    if self.mlp_feature_slice is not None:
+                        feat = F.mse_loss(student_output["feature_projected"], teacher_output["feature_pre_head"][:, self.mlp_feature_slice])
                 # KD objective: ce_weight * CE + alpha * T^2 * KL + beta * L_feat (weighted MSE over the selected stages).
                 loss = ce_weight * terms["ce"] + alpha * terms["kl"] + beta * feat
                 if not torch.isfinite(loss):
