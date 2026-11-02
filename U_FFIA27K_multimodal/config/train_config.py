@@ -85,13 +85,27 @@ class SplitterConfig(BaseModel):
     cv_val_ratio: float = Field(default=0.2, gt=0.0, lt=1.0)
 
 
-class ReduceLROnPlateauConfig(BaseModel):
+class LRSchedulerConfig(BaseModel):
     enabled: bool = Field(default=True)
+    type: Literal["cosine", "plateau"] = Field(
+        default="cosine",
+        description="LR scheduler type: 'cosine' (CosineAnnealingLR) or 'plateau' (ReduceLROnPlateau).",
+    )
+    # Common / Cosine parameters
+    min_lr: float = Field(default=4e-8, gt=0.0, description="Minimum learning rate.")
+    t_max: Optional[int] = Field(
+        default=None,
+        description="Maximum number of epochs for cosine annealing. If None, defaults to config.epochs.",
+    )
+    # Plateau parameters
     factor: float = Field(default=0.5, gt=0.0, lt=1.0)
     patience: int = Field(default=10, ge=0)
     threshold: float = Field(default=0.001, ge=0.0)
     cooldown: int = Field(default=2, ge=0)
-    min_lr: float = Field(default=1e-6, gt=0.0)
+
+
+# Backward-compatibility alias
+ReduceLROnPlateauConfig = LRSchedulerConfig
 
 
 class KDConfig(BaseModel):
@@ -172,7 +186,7 @@ class MultimodalTrainConfig(BaseModel):
     cache_audio: bool = Field(default=True)
     cache_video_mode: Literal["disk", "ram", "none"] = Field(default="ram")
 
-    lr_scheduler: ReduceLROnPlateauConfig = Field(default_factory=ReduceLROnPlateauConfig)
+    lr_scheduler: LRSchedulerConfig = Field(default_factory=LRSchedulerConfig)
     kd: KDConfig = Field(default_factory=KDConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)

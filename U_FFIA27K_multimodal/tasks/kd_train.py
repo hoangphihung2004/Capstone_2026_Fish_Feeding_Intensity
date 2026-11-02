@@ -245,14 +245,18 @@ class KDTrainer:
             if not np.isfinite(val_loss) or not np.isfinite(val_kd_loss):
                 raise FloatingPointError(f"Non-finite validation loss at epoch {epoch}.")
             if self.lr_scheduler is not None:
-                self.lr_scheduler.step(val_kd_loss)
-                next_learning_rate = self.optimizer.param_groups[0]["lr"]
-                if next_learning_rate < learning_rate:
-                    logger.info(
-                        "LR scheduler reduced learning rate after val_kd_loss plateau: %.2e -> %.2e",
-                        learning_rate,
-                        next_learning_rate,
-                    )
+                if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.lr_scheduler.step(val_kd_loss)
+                    next_learning_rate = self.optimizer.param_groups[0]["lr"]
+                    if next_learning_rate < learning_rate:
+                        logger.info(
+                            "LR scheduler reduced learning rate after val_kd_loss plateau: %.2e -> %.2e",
+                            learning_rate,
+                            next_learning_rate,
+                        )
+                else:
+                    self.lr_scheduler.step()
+                    next_learning_rate = self.optimizer.param_groups[0]["lr"]
             is_best = (val_acc > best_metric) if self.config.monitor == "accuracy" else (val_loss < best_metric)
             if is_best:
                 best_metric = val_acc if self.config.monitor == "accuracy" else val_loss

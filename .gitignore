@@ -58,3 +58,4 @@ outputs/
 models/*.pth
 models/*.pt
 *.ckpt
+graphify-out/

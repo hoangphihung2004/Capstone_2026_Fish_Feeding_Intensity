@@ -12,12 +12,14 @@
   "cache_audio": true,
   "cache_video_mode": "ram",
   "lr_scheduler": {
-    "enabled": false,
+    "enabled": true,
+    "type": "cosine",
+    "min_lr": 4e-08,
+    "t_max": null,
     "factor": 0.5,
     "patience": 10,
     "threshold": 0.001,
-    "cooldown": 2,
-    "min_lr": 1e-06
+    "cooldown": 2
   },
   "kd": {
     "teacher_checkpoint": "/marimo/Results/Fold0/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_00/multimodal_best.pt",

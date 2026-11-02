@@ -326,16 +326,26 @@ def run_kd_training(config: TrainConfig, train_config_path: str, device: torch.d
     optimizer = optim.Adam((p for p in model.parameters() if p.requires_grad), lr=config.learning_rate)
     scheduler = None
     if config.lr_scheduler.enabled:
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=config.lr_scheduler.factor,
-            patience=config.lr_scheduler.patience,
-            threshold=config.lr_scheduler.threshold,
-            threshold_mode="abs",
-            cooldown=config.lr_scheduler.cooldown,
-            min_lr=config.lr_scheduler.min_lr,
-        )
+        if config.lr_scheduler.type == "cosine":
+            t_max = config.lr_scheduler.t_max if config.lr_scheduler.t_max is not None else config.epochs
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=t_max,
+                eta_min=config.lr_scheduler.min_lr,
+            )
+        elif config.lr_scheduler.type == "plateau":
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                factor=config.lr_scheduler.factor,
+                patience=config.lr_scheduler.patience,
+                threshold=config.lr_scheduler.threshold,
+                threshold_mode="abs",
+                cooldown=config.lr_scheduler.cooldown,
+                min_lr=config.lr_scheduler.min_lr,
+            )
+        else:
+            raise ValueError(f"Unknown lr_scheduler type: '{config.lr_scheduler.type}'. Expected 'cosine' or 'plateau'.")
     trainer = KDTrainer(
         student=model,
         teacher=teacher,
@@ -383,12 +393,20 @@ def main() -> None:
     logger.info(f"  - Feature KD Stages:       {config.kd.feature_stages} (weights: {config.kd.stage_weights or 'equal'})")
     logger.info(f"  - Verify Teacher Split:    {config.kd.verify_teacher_split}")
     if config.lr_scheduler.enabled:
-        logger.info(
-            "  - LR Scheduler:            ReduceLROnPlateau on val_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
-            config.lr_scheduler.factor,
-            config.lr_scheduler.patience,
-            config.lr_scheduler.min_lr,
-        )
+        if config.lr_scheduler.type == "cosine":
+            t_max = config.lr_scheduler.t_max if config.lr_scheduler.t_max is not None else config.epochs
+            logger.info(
+                "  - LR Scheduler:            CosineAnnealingLR (T_max=%d, min_lr=%.1e)",
+                t_max,
+                config.lr_scheduler.min_lr,
+            )
+        elif config.lr_scheduler.type == "plateau":
+            logger.info(
+                "  - LR Scheduler:            ReduceLROnPlateau on val_loss (factor=%.2f, patience=%d, min_lr=%.1e)",
+                config.lr_scheduler.factor,
+                config.lr_scheduler.patience,
+                config.lr_scheduler.min_lr,
+            )
     else:
         logger.info("  - LR Scheduler:            disabled")
     logger.info(f"  - Image Size:              {config.video_features.image_size}")
