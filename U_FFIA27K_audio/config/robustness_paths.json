@@ -1,0 +1,7 @@
+{
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "",
+  "checkpoint_template": "checkpoint/amaru/fold_{fold:02d}/audio_best.pt",
+  "checkpoints": {},
+  "output_dir": "outputs/robustness"
+}
