@@ -148,21 +148,61 @@ def decode_first_last_video_cv2(video_path: str, label: int, image_size: int) ->
     return {"video_name": video_path, "video_form": video_uint8, "target": int(label)}
 
 
+_TORCHAUDIO = None
+_TORCHAUDIO_TRIED = False
+
+
+def _import_torchaudio():
+    """Return torchaudio, or None when it is missing or its binary does not match the installed torch (OSError).
+
+    The result is cached: a failed import would otherwise be retried for every audio file.
+    """
+    global _TORCHAUDIO, _TORCHAUDIO_TRIED
+    if not _TORCHAUDIO_TRIED:
+        _TORCHAUDIO_TRIED = True
+        try:
+            import torchaudio
+
+            _TORCHAUDIO = torchaudio
+        except (ImportError, OSError) as exc:
+            logger.warning(
+                "torchaudio is unusable (%s). Falling back to SoundFile (+ scipy resampling if needed). "
+                "Reinstall torch/torchvision/torchaudio with matching versions to restore the original loader.",
+                exc,
+            )
+    return _TORCHAUDIO
+
+
+def _load_with_soundfile(path: str):
+    import soundfile as sf
+
+    samples, original_sr = sf.read(path, dtype="float32", always_2d=True)
+    return torch.from_numpy(samples.T.copy()), original_sr
+
+
 def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
-    import torchaudio
-
-    try:
-        waveform, original_sr = torchaudio.load(path)
-    except ImportError:
-        # New torchaudio releases require TorchCodec; PCM WAV can use SoundFile.
-        import soundfile as sf
-
-        samples, original_sr = sf.read(path, dtype="float32", always_2d=True)
-        waveform = torch.from_numpy(samples.T.copy())
+    torchaudio = _import_torchaudio()
+    if torchaudio is None:
+        waveform, original_sr = _load_with_soundfile(path)
+    else:
+        try:
+            waveform, original_sr = torchaudio.load(path)
+        except ImportError:
+            # New torchaudio releases require TorchCodec; PCM WAV can use SoundFile.
+            waveform, original_sr = _load_with_soundfile(path)
     if waveform.ndim == 2 and waveform.size(0) > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if original_sr != sr:
-        waveform = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sr)(waveform)
+        if torchaudio is not None:
+            waveform = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sr)(waveform)
+        else:
+            from math import gcd
+
+            from scipy.signal import resample_poly
+
+            divisor = gcd(int(original_sr), int(sr))
+            resampled = resample_poly(waveform.numpy(), int(sr) // divisor, int(original_sr) // divisor, axis=-1)
+            waveform = torch.from_numpy(resampled.astype("float32"))
 
     y = waveform.squeeze(0).to(torch.float32)
     target_length = sr * 2
