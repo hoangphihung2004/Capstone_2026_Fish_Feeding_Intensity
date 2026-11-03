@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pydantic import BaseModel, Field, model_validator
-from sklearn.metrics import accuracy_score, average_precision_score, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, average_precision_score, confusion_matrix, precision_recall_fscore_support
 
 from .hub import MODALITY, check_ready, load_upload_config, upload_fold
 
@@ -26,9 +26,16 @@ logger = logging.getLogger(__name__)
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 NUM_CLASSES = 4
+CLASS_NAMES = ("none", "strong", "medium", "weak")
+METRIC_FIELDS = [
+    "accuracy",
+    "precision_macro", "recall_macro", "f1_macro",
+    "precision_weighted", "recall_weighted", "f1_weighted",
+    "mAP",
+]
 RESULT_FIELDS = [
-    "model", "fold", "scenario", "level_unit", "level", "n_samples", "accuracy", "f1_macro",
-    "f1_weighted", "mAP", "confusion_matrix", "partial", "seconds", "config_hash", "checkpoint",
+    "model", "fold", "scenario", "level_unit", "level", "n_samples", *METRIC_FIELDS, "per_class",
+    "confusion_matrix", "partial", "seconds", "config_hash", "checkpoint",
 ]
 TRACE_FIELDS = ["epsilon", "step", "mean_loss", "max_perturbation"]
 RESULT_ARCHIVE_ITEMS = ("robustness.csv", "pgd_traces.csv", "predictions", "run_info.json", "run.log")
@@ -202,18 +209,30 @@ def compute_metrics(labels: np.ndarray, probabilities: np.ndarray) -> Dict[str, 
     """Compute metrics on softmax outputs on every branch."""
     predictions = probabilities.argmax(axis=1)
     classes = list(range(NUM_CLASSES))
-    average_precisions = [
-        average_precision_score(labels == cls, probabilities[:, cls])
+    average_precisions = {
+        cls: float(average_precision_score(labels == cls, probabilities[:, cls]))
         for cls in classes
         if (labels == cls).any()
-    ]
-    return {
-        "accuracy": float(accuracy_score(labels, predictions)),
-        "f1_macro": float(f1_score(labels, predictions, labels=classes, average="macro", zero_division=0)),
-        "f1_weighted": float(f1_score(labels, predictions, labels=classes, average="weighted", zero_division=0)),
-        "mAP": float(np.mean(average_precisions)),
-        "confusion_matrix": confusion_matrix(labels, predictions, labels=classes).tolist(),
     }
+    metrics: Dict[str, Any] = {"accuracy": float(accuracy_score(labels, predictions))}
+    for average in ("macro", "weighted"):
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            labels, predictions, labels=classes, average=average, zero_division=0
+        )
+        metrics.update({f"precision_{average}": float(precision), f"recall_{average}": float(recall), f"f1_{average}": float(f1)})
+    metrics["mAP"] = float(np.mean(list(average_precisions.values())))
+    precision, recall, f1, support = precision_recall_fscore_support(
+        labels, predictions, labels=classes, average=None, zero_division=0
+    )
+    metrics["per_class"] = {
+        CLASS_NAMES[cls]: {
+            "precision": float(precision[cls]), "recall": float(recall[cls]), "f1": float(f1[cls]),
+            "AP": average_precisions.get(cls), "support": int(support[cls]),
+        }
+        for cls in classes
+    }
+    metrics["confusion_matrix"] = confusion_matrix(labels, predictions, labels=classes).tolist()
+    return metrics
 
 
 @dataclass
@@ -400,7 +419,8 @@ def evaluate_fold(
     if resume:
         for row in _read_csv(results_path):
             finished = (fold_dir / "predictions" / f"{row['scenario']}_{row['level']}.npz").is_file()
-            if finished and row["config_hash"] == current_hash and row["partial"] == str(partial):
+            complete = all(row.get(name) not in (None, "") for name in RESULT_FIELDS)
+            if finished and complete and row["config_hash"] == current_hash and row["partial"] == str(partial):
                 kept_rows.append(row)
         finished_levels = {row["level"] for row in kept_rows}
         kept_traces = [row for row in _read_csv(traces_path) if row["epsilon"] in finished_levels]
@@ -452,7 +472,8 @@ def evaluate_fold(
                 writer.writerow({
                     "model": adapter.name, "fold": fold, "scenario": scenario, "level_unit": level_unit,
                     "level": level, "n_samples": len(keys),
-                    **{name: metrics[name] for name in ("accuracy", "f1_macro", "f1_weighted", "mAP")},
+                    **{name: metrics[name] for name in METRIC_FIELDS},
+                    "per_class": json.dumps(metrics["per_class"]),
                     "confusion_matrix": json.dumps(metrics["confusion_matrix"]), "partial": partial,
                     "seconds": round(time.perf_counter() - started, 3), "config_hash": current_hash,
                     "checkpoint": str(checkpoint_path),

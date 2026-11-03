@@ -36,7 +36,12 @@ COMPARISONS = {
         "title": "Video PGD with clean audio",
     },
 }
-METRICS = ("accuracy", "f1_macro", "f1_weighted", "mAP")
+METRICS = (
+    "accuracy",
+    "precision_macro", "recall_macro", "f1_macro",
+    "precision_weighted", "recall_weighted", "f1_weighted",
+    "mAP",
+)
 
 
 def read_results(root: Path) -> List[Dict[str, str]]:
