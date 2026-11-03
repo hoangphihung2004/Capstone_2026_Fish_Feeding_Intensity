@@ -97,7 +97,14 @@ class FishVoiceDataLoader:
         """
         import torchaudio
 
-        waveform, original_sr = torchaudio.load(path)
+        try:
+            waveform, original_sr = torchaudio.load(path)
+        except ImportError:
+            # New torchaudio releases require TorchCodec; PCM WAV can use SoundFile.
+            import soundfile as sf
+
+            samples, original_sr = sf.read(path, dtype="float32", always_2d=True)
+            waveform = torch.from_numpy(samples.T.copy())
 
         # Convert multi-channel audio to mono while keeping shape [1, num_samples].
         if waveform.ndim == 2 and waveform.size(0) > 1:

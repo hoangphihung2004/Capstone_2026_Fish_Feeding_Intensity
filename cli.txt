@@ -41,6 +41,10 @@ git pull
 cd U_FFIA27K_audio
 pip install --upgrade pip
 pip install -r requirements.txt
+# Cài lại torchaudio cho khớp đúng phiên bản torch đang có (tránh lỗi libtorchaudio.so: undefined symbol)
+TV=$(python -c "import torch;print(torch.__version__)"); V=${TV%%+*}; if [[ $TV == *+* ]]; then pip install --no-deps --force-reinstall "torchaudio==$V" --index-url https://download.pytorch.org/whl/${TV#*+}; else pip install --no-deps --force-reinstall "torchaudio==$V"; fi
+# Kiểm tra: 2 phiên bản phải trùng số chính (vd 2.8.0+cu128 và 2.8.0+cu128)
+python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
 # ------------------------------------------------------------------------------
 # 4. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
