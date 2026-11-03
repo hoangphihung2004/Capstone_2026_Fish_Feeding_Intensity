@@ -1,71 +1,81 @@
-"""Lightweight multi-axis residual backbone for log-mel audio features."""
-
 import torch
-from torch import nn
-from torch.nn import functional as F
+import torch.nn as nn
+from typing import Tuple, Optional
 
 
-def conv_norm(in_channels, out_channels, kernel, groups=1, dilation=(1, 1), activation=True):
-    padding = ((kernel[0] - 1) * dilation[0] // 2, (kernel[1] - 1) * dilation[1] // 2)
-    return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel, padding=padding, dilation=dilation, groups=groups, bias=False),
-        nn.BatchNorm2d(out_channels),
-        nn.LeakyReLU(0.01, inplace=True) if activation else nn.Identity(),
-    )
+def init_layer(layer: nn.Module) -> None:
+    """Initialize a Linear or Convolutional layer."""
+    if hasattr(layer, 'weight') and layer.weight is not None:
+        nn.init.xavier_uniform_(layer.weight)
+    if hasattr(layer, 'bias') and layer.bias is not None:
+        nn.init.zeros_(layer.bias)
 
 
-class MultiAxisResidualUnit(nn.Module):
-    """Mix temporal, frequency and local contexts with sample-adaptive weights."""
-
-    def __init__(self, in_channels, out_channels, hidden_channels):
+class AudioMLPBackbone(nn.Module):
+    """
+    High-Resolution STFT Audio MLP Backbone (AudioMLP_L2_compact_768_512, ~2.168M params).
+    Processes 2049-dimensional TKEO-STFT spectral vectors [B, 2049]:
+      - Layer 1: Linear(2049 -> 768) + LayerNorm(768) + GELU + Dropout(0.1)
+      - Layer 2: Linear(768 -> 512) + LayerNorm(512) + GELU + Dropout(0.1)
+      - Layer 3: Linear(512 -> 384) + LayerNorm(384) -> f_audio [B, 384]
+    """
+    def __init__(
+        self,
+        in_features: int = 2049,
+        hidden_dims: Tuple[int, ...] = (768, 512),
+        embed_dim: int = 384,
+        dropout: float = 0.1,
+        hidden_dim: Optional[int] = None,
+        **kwargs
+    ) -> None:
         super().__init__()
-        self.expand = conv_norm(in_channels, hidden_channels, (1, 1))
-        self.temporal = nn.Sequential(
-            conv_norm(hidden_channels, hidden_channels, (5, 1), groups=hidden_channels),
-            conv_norm(hidden_channels, hidden_channels, (3, 1), groups=hidden_channels, dilation=(2, 1)),
-        )
-        self.frequency = nn.Sequential(
-            conv_norm(hidden_channels, hidden_channels, (1, 5), groups=hidden_channels),
-            conv_norm(hidden_channels, hidden_channels, (1, 3), groups=hidden_channels, dilation=(1, 2)),
-        )
-        self.local = conv_norm(hidden_channels, hidden_channels, (3, 3), groups=hidden_channels)
-        self.branch_selector = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(hidden_channels, 3, kernel_size=1))
-        self.project = conv_norm(hidden_channels, out_channels, (1, 1), activation=False)
-        self.shortcut = nn.Identity() if in_channels == out_channels else conv_norm(in_channels, out_channels, (1, 1), activation=False)
+        self.in_features = in_features
 
-    def forward(self, x):
-        residual = self.shortcut(x)
-        base = self.expand(x)
-        branches = torch.stack([self.temporal(base), self.frequency(base), self.local(base)], dim=1)
-        weights = F.softmax(self.branch_selector(base).flatten(1), dim=1)
-        mixed = (branches * weights[:, :, None, None, None]).sum(dim=1)
-        return F.leaky_relu(self.project(mixed) + residual, negative_slope=0.01)
+        # Handle backward-compatible scalar hidden_dim if provided
+        if hidden_dim is not None and (hidden_dims == (768, 512) or not hidden_dims):
+            hidden_dims = (hidden_dim,)
+        self.hidden_dims = tuple(hidden_dims)
+        self.embed_dim = embed_dim
 
+        # Layer 1: in_features -> hidden_dims[0]
+        h1 = self.hidden_dims[0] if len(self.hidden_dims) > 0 else 768
+        self.fc1 = nn.Linear(in_features, h1)
+        self.ln1 = nn.LayerNorm(h1)
+        self.act1 = nn.GELU()
+        self.drop1 = nn.Dropout(dropout)
 
-class AudioBlock(nn.Sequential):
-    def __init__(self, in_channels, out_channels, hidden_channels):
-        super().__init__(
-            MultiAxisResidualUnit(in_channels, out_channels, hidden_channels),
-            MultiAxisResidualUnit(out_channels, out_channels, hidden_channels),
-            nn.AvgPool2d(2),
-        )
+        # Layer 2: hidden_dims[0] -> hidden_dims[1]
+        h2 = self.hidden_dims[1] if len(self.hidden_dims) > 1 else 512
+        self.fc2 = nn.Linear(h1, h2)
+        self.ln2 = nn.LayerNorm(h2)
+        self.act2 = nn.GELU()
+        self.drop2 = nn.Dropout(dropout)
 
+        # Layer 3: hidden_dims[-1] -> embed_dim
+        self.fc3 = nn.Linear(h2, embed_dim)
+        self.ln3 = nn.LayerNorm(embed_dim)
 
-class LightweightAudioEncoder(nn.Module):
-    channels = (16, 24, 40, 112, 320)
-    hidden_channels = (16, 24, 40, 64, 128)
+        self._init_weights()
 
-    def __init__(self):
-        super().__init__()
-        inputs = (1,) + self.channels[:-1]
-        self.blocks = nn.ModuleList(AudioBlock(ci, co, hidden) for ci, co, hidden in zip(inputs, self.channels, self.hidden_channels))
+    def _init_weights(self) -> None:
+        init_layer(self.fc1)
+        init_layer(self.fc2)
+        init_layer(self.fc3)
 
-    def forward(self, x):
-        for block in self.blocks:
-            x = block(x)
-        return x
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: STFT spectral feature vector [B, 2049]
 
-    @staticmethod
-    def pool(x):
-        x = x.mean(dim=3)
-        return x.amax(dim=2) + x.mean(dim=2)
+        Returns:
+            f_audio: Joint acoustic embedding [B, embed_dim]
+        """
+        if x.ndim > 2:
+            x = x.flatten(start_dim=1)
+            if x.size(-1) != self.in_features:
+                x = x[:, :self.in_features]
+
+        h1 = self.drop1(self.act1(self.ln1(self.fc1(x))))
+        h2 = self.drop2(self.act2(self.ln2(self.fc2(h1))))
+        f_audio = self.ln3(self.fc3(h2))
+        return f_audio

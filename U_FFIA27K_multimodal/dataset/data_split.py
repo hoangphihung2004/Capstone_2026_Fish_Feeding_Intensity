@@ -31,7 +31,7 @@ from config import SplitterConfig
 
 LABEL_TO_CLASS = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
 LABEL_ORDER = [0, 1, 2, 3]
-VALID_SPLIT_STRATEGIES = {"random_sample", "time_series", "group_random"}
+VALID_SPLIT_STRATEGIES = {"random_sample", "time_series", "group_random", "stratified"}
 VALID_EVALUATION_MODES = {"holdout", "cross_validation"}
 
 
@@ -41,7 +41,7 @@ def _stable_path_key(path: str) -> str:
 
 
 def _sample_identity_key(path: str) -> str:
-    """Sort by sample identity so audio-only and multimodal scans split identically."""
+    """Sort by sample identity so video-only and multimodal scans split identically."""
     normalized = str(path).replace('\\', '/').lower()
     stem = Path(normalized).stem.replace("_audio_", "_sample_").replace("_video_", "_sample_")
     parts = list(Path(normalized).parts)
@@ -58,11 +58,12 @@ class BaseDataSplitter(ABC):
     def __init__(self, config: SplitterConfig) -> None:
         self.config = config
         self.dataset_path = config.dataset_path
-        self.seed = config.seed
-        self.test_sample_per_class = config.test_sample_per_class
-        self.save_results = config.save_results
-        self.include_video = config.include_video
-        self.split_strategy = getattr(config, "split_strategy", "random_sample")
+        self.seed = getattr(config, "seed", getattr(config, "random_seed", 42))
+        self.test_sample_per_class = getattr(config, "test_sample_per_class", 700)
+        self.save_results = getattr(config, "save_results", True)
+        self.include_video = getattr(config, "include_video", True)
+        raw_strategy = getattr(config, "split_strategy", "random_sample")
+        self.split_strategy = "random_sample" if raw_strategy == "stratified" else raw_strategy
         self.evaluation_mode = getattr(config, "evaluation_mode", "holdout")
         self.num_folds = int(getattr(config, "num_folds", 5))
         self.fold_index = getattr(config, "fold_index", None)
@@ -83,21 +84,29 @@ class BaseDataSplitter(ABC):
             if not 0 <= int(self.fold_index) < self.num_folds:
                 raise ValueError(f"fold_index={self.fold_index} is outside [0, {self.num_folds}).")
 
-        # Automatically resolve the audio directory path (used as the root for sample splitting)
+        # Automatically resolve the optional audio directory path.
         audio_dir = os.path.join(self.dataset_path, 'audio')
         if os.path.isdir(audio_dir):
             self.audio_path = audio_dir
-        else:
+        elif Path(self.dataset_path).name.lower() == 'audio':
             self.audio_path = self.dataset_path
+        else:
+            self.audio_path = None
 
-        # Automatically resolve the video directory path
+        # Automatically resolve the video directory path (used as the root for sample splitting).
         video_dir = os.path.join(self.dataset_path, 'video')
         if os.path.isdir(video_dir):
             self.video_path = video_dir
             self.video_exists = True
+        elif Path(self.dataset_path).name.lower() == 'video':
+            self.video_path = self.dataset_path
+            self.video_exists = True
         else:
             self.video_path = None
             self.video_exists = False
+            raise FileNotFoundError(
+                f"Multimodal dataset splitting requires a 'video' directory inside dataset_path or dataset_path pointing to a video root: '{self.dataset_path}'"
+            )
 
     @abstractmethod
     def get_file_list(self, split_name: str) -> List[str]:
@@ -162,7 +171,7 @@ class BaseDataSplitter(ABC):
     def _primary_path_from_entry(item: List[Any]) -> str:
         """Return the path used for temporal sorting and sample identity."""
         if len(item) >= 3:
-            return str(item[0] or item[1])
+            return str(item[1] or item[0])
         return str(item[0])
 
     @staticmethod
@@ -615,10 +624,6 @@ class BaseDataSplitter(ABC):
             json.dump(summary, f, indent=2, ensure_ascii=False)
         logger.info(f"Successfully saved split summary file to {output_path}")
 
-    def save_splits(self, train_dict: List[List], test_dict: List[List], val_dict: List[List], output_dir: Path) -> None:
-        """Write an already-generated split to an experiment artifact directory."""
-        self._save_splits(train_dict, test_dict, val_dict, output_dir)
-
 
 class FishDataSplitter(BaseDataSplitter):
     """
@@ -628,9 +633,8 @@ class FishDataSplitter(BaseDataSplitter):
     """
     # noinspection DuplicatedCode
     def get_file_list(self, split_name: str) -> List[str]:
-        # Preserve the original get_wav_name logic from U-FFIA source code for raw data scanning
-        path = self.audio_path
-        audio: List[str] = []
+        path = self.video_path
+        video: List[str] = []
         l1 = sorted(os.listdir(path), key=_stable_path_key)
         for folder_name in l1:
             folder_path = os.path.join(path, folder_name)
@@ -641,9 +645,34 @@ class FishDataSplitter(BaseDataSplitter):
                 session_path = os.path.join(folder_path, session_folder)
                 if not os.path.isdir(session_path):
                     continue
-                wav_dir = os.path.join(session_path, split_name, '*.wav')
-                audio.extend(sorted(glob.glob(wav_dir), key=_sample_identity_key))
-        return audio
+                video_dir = os.path.join(session_path, split_name, '*.mp4')
+                video.extend(sorted(glob.glob(video_dir), key=_sample_identity_key))
+        return video
+
+    def _resolve_audio_path(self, video_path: str) -> str:
+        """Automatically resolve the corresponding audio path from a video path when available."""
+        normalized_video = str(video_path).replace('\\', '/')
+        parts = Path(normalized_video).parts
+        parts_list = list(parts)
+        if "video" in parts_list:
+            idx = parts_list.index("video")
+            parts_list[idx] = "audio"
+
+        filename = parts_list[-1]
+        if filename.endswith(".mp4"):
+            filename = filename[:-4] + ".wav"
+        if "_video_" in filename:
+            filename = filename.replace("_video_", "_audio_")
+        parts_list[-1] = filename
+
+        if parts_list[0].endswith('\\') or parts_list[0].endswith('/'):
+            reconstructed_audio = parts_list[0] + os.path.join(*parts_list[1:])
+        else:
+            reconstructed_audio = os.path.join(*parts_list)
+
+        if os.path.exists(reconstructed_audio):
+            return reconstructed_audio
+        return ""
 
     def _resolve_video_path(self, audio_path: str) -> str:
         """Automatically resolve the corresponding video path from an audio path."""
@@ -671,40 +700,36 @@ class FishDataSplitter(BaseDataSplitter):
             return reconstructed_video
         return ""
 
-    def _require_video_path(self, audio_path: str) -> str:
-        """Resolve the paired video file when available; audio is the required modality."""
-        return self._resolve_video_path(audio_path)
-
-    def _make_multimodal_entry(self, audio_path: str, label: int) -> List[Any]:
-        """Create one [audio_path, video_path, label] entry with optional video_path."""
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"Missing audio file while creating split: '{audio_path}'")
-        return [audio_path, self._require_video_path(audio_path), label]
+    def _make_multimodal_entry(self, video_path: str, label: int) -> List[Any]:
+        """Create one [audio_path, video_path, label] entry with optional audio_path."""
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Missing video file while creating split: '{video_path}'")
+        return [self._resolve_audio_path(video_path), video_path, label]
 
     def _validate_multimodal_entries(self, split_name: str, data_list: List[List]) -> None:
-        """Validate that every split entry has matching audio and video files."""
+        """Validate that every split entry has a video file and optional matching audio file."""
+
         for idx, item in enumerate(data_list):
-            if len(item) not in [2, 3]:
+            if len(item) != 3:
                 raise ValueError(
-                    f"{split_name} split entry #{idx} must be [audio_path, label] or [audio_path, video_path, label], got: {item}"
+                    f"{split_name} split entry #{idx} must be [audio_path, video_path, label], got: {item}"
                 )
-            audio_path = item[0]
-            video_path = item[1] if len(item) == 3 else ""
-            if not os.path.exists(audio_path):
-                raise FileNotFoundError(
-                    f"{split_name} split entry #{idx} has missing audio_path: '{audio_path}'"
-                )
-            expected_video = self._require_video_path(audio_path)
-            if video_path and not os.path.exists(video_path):
+            audio_path, video_path, _ = item
+            if not video_path or not os.path.exists(video_path):
                 raise FileNotFoundError(
                     f"{split_name} split entry #{idx} has missing video_path: '{video_path}'"
                 )
-            if video_path and expected_video and os.path.normpath(video_path) != os.path.normpath(expected_video):
+            expected_audio = self._resolve_audio_path(video_path)
+            if audio_path and not os.path.exists(audio_path):
+                raise FileNotFoundError(
+                    f"{split_name} split entry #{idx} has missing audio_path: '{audio_path}'"
+                )
+            if audio_path and expected_audio and os.path.normpath(audio_path) != os.path.normpath(expected_audio):
                 raise ValueError(
-                    f"{split_name} split entry #{idx} has mismatched video_path.\n"
-                    f"  audio_path:     {audio_path}\n"
+                    f"{split_name} split entry #{idx} has mismatched audio_path.\n"
                     f"  video_path:     {video_path}\n"
-                    f"  expected_video: {expected_video}"
+                    f"  audio_path:     {audio_path}\n"
+                    f"  expected_audio: {expected_audio}"
                 )
 
     def _clear_existing_splits(self, splits_root: Path) -> None:
@@ -727,30 +752,31 @@ class FishDataSplitter(BaseDataSplitter):
         # audio root remains self-contained on marimo.
         dataset_path = Path(self.dataset_path)
         local_splits_dir = dataset_path / 'splits'
-        legacy_splits_dir = dataset_path.parent / 'splits'
+        parent_splits_dir = dataset_path.parent / 'splits'
 
-        if dataset_path.name in ['audio', 'video'] and legacy_splits_dir.exists() and not local_splits_dir.exists():
-            base_splits_dir = legacy_splits_dir
+        if dataset_path.name in ['audio', 'video'] and parent_splits_dir.exists() and not local_splits_dir.exists():
+            base_splits_dir = parent_splits_dir
         else:
             base_splits_dir = local_splits_dir
 
         if self.evaluation_mode == "cross_validation":
             splits_dir = base_splits_dir / "cv" / f"fold_{int(self.fold_index):02d}"
+            if int(self.fold_index) == 0:
+                self._clear_existing_splits(base_splits_dir)
         else:
             splits_dir = base_splits_dir
-
-        if self.save_results:
             self._clear_existing_splits(base_splits_dir)
+
 
         train_csv = splits_dir / 'train.csv'
         test_csv = splits_dir / 'test.csv'
         val_csv = splits_dir / 'val.csv'
 
-        if self.save_results and splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
+        if splits_dir.exists() and train_csv.exists() and test_csv.exists() and val_csv.exists():
             logger.info("==================================================")
             logger.info(f"Fallback mode enabled: found existing split files at '{splits_dir}'.")
             logger.info("Loading existing dataset splits instead of recomputing them...")
-            logger.info(f"Base audio search path: '{self.audio_path}'")
+            logger.info(f"Base video search path: '{self.video_path}'")
             logger.info("==================================================")
 
             train_dict = []
@@ -765,32 +791,35 @@ class FishDataSplitter(BaseDataSplitter):
                     loaded_data = []
                     fixed_count = 0
                     missing_count = 0
-                    video_updated_count = 0
+                    audio_updated_count = 0
                     
                     # Variables for logging a few example path corrections
-                    audio_fix_example = None
                     video_fix_example = None
+                    audio_fix_example = None
                     
                     with csv_path.open("r", encoding="utf-8") as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            raw_audio_path = row["audio_path"]
+                            original_audio_path = row.get("audio_path", "")
+                            raw_video_path = row.get("video_path", "")
+                            if not raw_video_path and original_audio_path:
+                                raw_video_path = self._resolve_video_path(original_audio_path)
                             label = int(row["label"])
                             
-                            # If the audio path does not exist, attempt automatic path correction
-                            if not os.path.exists(raw_audio_path):
+                            # If the video path does not exist, attempt automatic path correction
+                            if not os.path.exists(raw_video_path):
                                 # Replace backslashes with forward slashes to ensure cross-platform compatibility
-                                normalized_audio = raw_audio_path.replace('\\', '/')
-                                parts = Path(normalized_audio).parts
+                                normalized_video = raw_video_path.replace('\\', '/') if raw_video_path else original_audio_path.replace('\\', '/')
+                                parts = Path(normalized_video).parts
                                 if len(parts) >= 4:
                                     # Generate multiple possible paths due to different server layouts
                                     candidates = [
-                                        os.path.join(self.audio_path, parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(self.dataset_path, 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.video_path, parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.dataset_path, 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
                                         os.path.join(self.dataset_path, parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(self.dataset_path, 'U_FFIA', 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
-                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'audio', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(self.dataset_path, 'U_FFIA', 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
+                                        os.path.join(str(Path(self.dataset_path).parent), 'U_FFIA', 'video', parts[-4], parts[-3], parts[-2], parts[-1]),
                                     ]
                                     
                                     fixed_path = None
@@ -800,9 +829,9 @@ class FishDataSplitter(BaseDataSplitter):
                                             break
                                             
                                     if fixed_path is not None:
-                                        if audio_fix_example is None:
-                                            audio_fix_example = (raw_audio_path, fixed_path)
-                                        raw_audio_path = fixed_path
+                                        if video_fix_example is None:
+                                            video_fix_example = (raw_video_path, fixed_path)
+                                        raw_video_path = fixed_path
                                         fixed_count += 1
                                         need_rewrite_files = True
                                     else:
@@ -812,33 +841,28 @@ class FishDataSplitter(BaseDataSplitter):
                                             logger.warning(f"{split_name} split: Tried path correction candidates, for example '{primary_checked}', but the file still does not exist on this server.")
                                         missing_count += 1
 
-                            if not os.path.exists(raw_audio_path):
+                            if not os.path.exists(raw_video_path):
                                 raise FileNotFoundError(
-                                    f"{split_name} split has a missing audio file that could not be corrected: '{raw_audio_path}'"
+                                    f"{split_name} split has a missing video file that could not be corrected: '{raw_video_path}'"
                                 )
                             
-                            # Return format depends on the include_video configuration
-                            if self.include_video:
-                                original_video_path = row.get("video_path", "")
-                                video_path_str = self._require_video_path(raw_audio_path)
-                                if os.path.normpath(original_video_path) != os.path.normpath(video_path_str):
-                                    if video_fix_example is None:
-                                        video_fix_example = (original_video_path, video_path_str)
-                                    video_updated_count += 1
-                                    need_rewrite_files = True
-                                loaded_data.append([raw_audio_path, video_path_str, label])
-                            else:
-                                loaded_data.append([raw_audio_path, label])
+                            audio_path_str = self._resolve_audio_path(raw_video_path)
+                            if os.path.normpath(original_audio_path) != os.path.normpath(audio_path_str):
+                                if audio_fix_example is None:
+                                    audio_fix_example = (original_audio_path, audio_path_str)
+                                audio_updated_count += 1
+                                need_rewrite_files = True
+                            loaded_data.append([audio_path_str, raw_video_path, label])
                     
                     # Print detailed logs
                     if fixed_count > 0:
-                        logger.info(f"{split_name} split: Successfully auto-corrected {fixed_count} invalid audio paths.")
-                        if audio_fix_example:
-                            logger.info(f"   * Audio path correction example:\n     - Old: {audio_fix_example[0]}\n     - New: {audio_fix_example[1]}")
-                    if video_updated_count > 0:
-                        logger.info(f"{split_name} split: Successfully auto-filled {video_updated_count} newly detected video paths.")
                         if video_fix_example:
-                            logger.info(f"   * Video path example: {video_fix_example[1]}")
+                            logger.info(f"{split_name} split: Successfully auto-corrected {fixed_count} invalid video paths.")
+                            logger.info(f"   * Video path correction example:\n     - Old: {video_fix_example[0]}\n     - New: {video_fix_example[1]}")
+                    if audio_updated_count > 0:
+                        logger.info(f"{split_name} split: Successfully auto-filled {audio_updated_count} newly detected audio paths.")
+                        if audio_fix_example:
+                            logger.info(f"   * Audio path example: {audio_fix_example[1]}")
                     if missing_count > 0:
                         logger.warning(f"{split_name} split: {missing_count} files do not exist on this machine. Please check the dataset.")
                         
@@ -878,7 +902,7 @@ class FishDataSplitter(BaseDataSplitter):
                 logger.warning(f"Failed to load or auto-correct existing splits: {e}. Falling back to standard splitting.")
 
         logger.info("==================================================")
-        logger.info("Starting audio dataset splitting...")
+        logger.info("Starting multimodal dataset splitting...")
         logger.info(f"Dataset root directory: '{self.dataset_path}'")
         logger.info(f"Random seed: {self.seed}")
         logger.info(f"Test/Val samples per class: {self.test_sample_per_class}")
@@ -887,11 +911,11 @@ class FishDataSplitter(BaseDataSplitter):
         if self.evaluation_mode == "cross_validation":
             logger.info(f"CV folds: {self.num_folds} | Fold index: {self.fold_index} | CV val ratio: {self.cv_val_ratio}")
         logger.info(f"Save split results: {self.save_results}")
-        logger.info("Audio paths are required; video paths are filled only when available.")
+        logger.info("Video paths are required; audio paths are filled only when available.")
         logger.info("==================================================")
 
         # Scan files and log the counts
-        logger.info("Scanning audio files for each class...")
+        logger.info("Scanning video files for each class...")
         strong_list = self.get_file_list(split_name='strong')
         logger.info(f"Class 'strong': Found {len(strong_list)} files.")
         
@@ -905,18 +929,11 @@ class FishDataSplitter(BaseDataSplitter):
         logger.info(f"Class 'none': Found {len(none_list)} files.")
 
         def build_entries() -> List[List]:
-            if self.include_video:
-                return (
-                    [self._make_multimodal_entry(wav, 1) for wav in strong_list] +
-                    [self._make_multimodal_entry(wav, 2) for wav in medium_list] +
-                    [self._make_multimodal_entry(wav, 3) for wav in weak_list] +
-                    [self._make_multimodal_entry(wav, 0) for wav in none_list]
-                )
             return (
-                [[wav, 1] for wav in strong_list] +
-                [[wav, 2] for wav in medium_list] +
-                [[wav, 3] for wav in weak_list] +
-                [[wav, 0] for wav in none_list]
+                [self._make_multimodal_entry(video, 1) for video in strong_list] +
+                [self._make_multimodal_entry(video, 2) for video in medium_list] +
+                [self._make_multimodal_entry(video, 3) for video in weak_list] +
+                [self._make_multimodal_entry(video, 0) for video in none_list]
             )
 
         if self.evaluation_mode == "cross_validation":
@@ -1026,44 +1043,24 @@ class FishDataSplitter(BaseDataSplitter):
 
         # Map integer labels and merge lists using list comprehension
         logger.info("Mapping integer labels and building dataset lists...")
-        if self.include_video:
-            train_dict = (
-                [self._make_multimodal_entry(wav, 1) for wav in strong_train] +
-                [self._make_multimodal_entry(wav, 2) for wav in medium_train] +
-                [self._make_multimodal_entry(wav, 3) for wav in weak_train] +
-                [self._make_multimodal_entry(wav, 0) for wav in none_train]
-            )
-            test_dict = (
-                [self._make_multimodal_entry(wav, 1) for wav in strong_test] +
-                [self._make_multimodal_entry(wav, 2) for wav in medium_test] +
-                [self._make_multimodal_entry(wav, 3) for wav in weak_test] +
-                [self._make_multimodal_entry(wav, 0) for wav in none_test]
-            )
-            val_dict = (
-                [self._make_multimodal_entry(wav, 1) for wav in strong_val] +
-                [self._make_multimodal_entry(wav, 2) for wav in medium_val] +
-                [self._make_multimodal_entry(wav, 3) for wav in weak_val] +
-                [self._make_multimodal_entry(wav, 0) for wav in none_val]
-            )
-        else:
-            train_dict = (
-                [[wav, 1] for wav in strong_train] +
-                [[wav, 2] for wav in medium_train] +
-                [[wav, 3] for wav in weak_train] +
-                [[wav, 0] for wav in none_train]
-            )
-            test_dict = (
-                [[wav, 1] for wav in strong_test] +
-                [[wav, 2] for wav in medium_test] +
-                [[wav, 3] for wav in weak_test] +
-                [[wav, 0] for wav in none_test]
-            )
-            val_dict = (
-                [[wav, 1] for wav in strong_val] +
-                [[wav, 2] for wav in medium_val] +
-                [[wav, 3] for wav in weak_val] +
-                [[wav, 0] for wav in none_val]
-            )
+        train_dict = (
+            [self._make_multimodal_entry(video, 1) for video in strong_train] +
+            [self._make_multimodal_entry(video, 2) for video in medium_train] +
+            [self._make_multimodal_entry(video, 3) for video in weak_train] +
+            [self._make_multimodal_entry(video, 0) for video in none_train]
+        )
+        test_dict = (
+            [self._make_multimodal_entry(video, 1) for video in strong_test] +
+            [self._make_multimodal_entry(video, 2) for video in medium_test] +
+            [self._make_multimodal_entry(video, 3) for video in weak_test] +
+            [self._make_multimodal_entry(video, 0) for video in none_test]
+        )
+        val_dict = (
+            [self._make_multimodal_entry(video, 1) for video in strong_val] +
+            [self._make_multimodal_entry(video, 2) for video in medium_val] +
+            [self._make_multimodal_entry(video, 3) for video in weak_val] +
+            [self._make_multimodal_entry(video, 0) for video in none_val]
+        )
 
         if self.split_strategy == "random_sample":
             logger.info("Applying final shuffle to the train split...")
@@ -1093,30 +1090,36 @@ class FishDataSplitter(BaseDataSplitter):
         return train_dict, test_dict, val_dict
 
     def _format_samples(self, split_name: str, data_list: List[List]) -> List[Dict[str, Any]]:
-        """Parse sample information into standardized dictionaries for file export, with automatic video linking."""
+        """Parse sample information into standardized dictionaries for file export."""
         label_to_class = {0: "none", 1: "strong", 2: "medium", 3: "weak"}
         samples = []
         for item in data_list:
-            # Support both formats: 2-element array [audio_path, label] or 3-element array [audio_path, video_path, label]
+            # Support [audio_path, video_path, label] and video-only [video_path, label].
             if len(item) == 3:
-                wav_path = item[0]
+                audio_path_str = item[0]
                 video_path_str = item[1]
                 label = item[2]
             else:
-                wav_path = item[0]
+                video_path_str = item[0]
                 label = item[1]
-                video_path_str = self._resolve_video_path(wav_path)
+                audio_path_str = self._resolve_audio_path(video_path_str)
 
             # Extract date, session, and sample_id from the absolute path
-            parts = Path(wav_path).parts
+            primary_path = audio_path_str or video_path_str
+            parts = Path(primary_path).parts
             date_part = parts[-4] if len(parts) >= 4 else ""
             session_part = parts[-3] if len(parts) >= 3 else ""
-            stem = Path(wav_path).stem
-            sample_id = stem.split("_audio_")[-1] if "_audio_" in stem else stem
+            stem = Path(primary_path).stem
+            if "_audio_" in stem:
+                sample_id = stem.split("_audio_")[-1]
+            elif "_video_" in stem:
+                sample_id = stem.split("_video_")[-1]
+            else:
+                sample_id = stem
 
             samples.append({
                 "video_path": video_path_str,
-                "audio_path": str(wav_path),
+                "audio_path": str(audio_path_str),
                 "label": int(label),
                 "class_name": label_to_class.get(label, ""),
                 "date": date_part,
@@ -1124,21 +1127,3 @@ class FishDataSplitter(BaseDataSplitter):
                 "sample_id": sample_id
             })
         return samples
-
-# Main execution block for standalone usage reference
-if __name__ == '__main__':
-    # Usage example for FishDataSplitter in Python:
-    # 
-    # from config import TrainConfig, SplitterConfig
-    # from dataset import FishDataSplitter
-    # 
-    # 1. Load splitter config from unified train_config.json:
-    # config = TrainConfig.from_json('config/train_config.json')
-    # splitter_cfg = config.dataset_splitter
-    # 
-    # 2. Initialize the data splitter:
-    # splitter = FishDataSplitter(config=splitter_cfg)
-    # 
-    # 3. Split data and receive dataset lists in RAM:
-    # train_data, test_data, val_data = splitter.split_data()
-    pass

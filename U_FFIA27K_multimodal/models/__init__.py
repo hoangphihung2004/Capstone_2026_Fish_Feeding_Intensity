@@ -1,4 +1,13 @@
-from .multimodal_model import MultimodalModel
-from .surgery import adapt_first_conv_to_multi_channels
+from .video_backbone import ConvNeXtNanoVideoBackbone
+from .audio_backbone import AudioMLPBackbone
+from .multimodal_fusion import MultimodalTournamentFusion, PairwiseBoundaryTournamentHead
+from .multimodal_sota_net import MultimodalSOTANet
 
-__all__ = ["MultimodalModel", "adapt_first_conv_to_multi_channels"]
+__all__ = [
+    "ConvNeXtNanoVideoBackbone",
+    "AudioMLPBackbone",
+    "MultimodalTournamentFusion",
+    "PairwiseBoundaryTournamentHead",
+    "MultimodalSOTANet",
+]
+

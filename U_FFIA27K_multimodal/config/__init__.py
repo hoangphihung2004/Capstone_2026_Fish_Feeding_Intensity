@@ -1,29 +1,33 @@
 from .train_config import (
-    AudioFeaturesConfig,
-    DEFAULT_IMAGE_CACHE_ROOT,
-    ModelConfig,
-    MultimodalTrainConfig,
-    ReduceLROnPlateauConfig,
-    SplitterConfig,
-    TrainConfig,
     VALID_CACHE_MODES,
     VideoFeaturesConfig,
+    AudioFeaturesConfig,
+    VideoTieBreakersConfig,
+    TournamentConfig,
+    SystemConfig,
+    TrainingConfig,
+    EvaluationConfig,
+    LossConfig,
+    ModelConfig,
+    SplitterConfig,
+    TrainConfig,
+    load_train_config,
 )
-
-try:
-    from .artifact_upload_config import ArtifactUploadConfig
-except ImportError:
-    ArtifactUploadConfig = None
+from .artifact_upload_config import ArtifactUploadConfig
 
 __all__ = [
-    "ArtifactUploadConfig",
-    "AudioFeaturesConfig",
-    "DEFAULT_IMAGE_CACHE_ROOT",
-    "ModelConfig",
-    "MultimodalTrainConfig",
-    "ReduceLROnPlateauConfig",
-    "SplitterConfig",
-    "TrainConfig",
     "VALID_CACHE_MODES",
     "VideoFeaturesConfig",
+    "AudioFeaturesConfig",
+    "VideoTieBreakersConfig",
+    "TournamentConfig",
+    "SystemConfig",
+    "TrainingConfig",
+    "EvaluationConfig",
+    "LossConfig",
+    "ModelConfig",
+    "SplitterConfig",
+    "TrainConfig",
+    "load_train_config",
+    "ArtifactUploadConfig",
 ]

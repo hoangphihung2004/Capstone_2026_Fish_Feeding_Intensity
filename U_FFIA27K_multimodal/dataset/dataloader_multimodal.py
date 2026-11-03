@@ -1,347 +1,402 @@
-import concurrent.futures
-import logging
 import os
-import pickle
 import sys
+import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Dict, Any, Optional
 
-import numpy as np
-import torch
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-
+# Ensure project root is in sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from config import DEFAULT_IMAGE_CACHE_ROOT, VALID_CACHE_MODES, SplitterConfig
-from dataset import FishDataSplitter
-from transforms import VideoTransform
+import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader
 
+from config import (
+    VALID_CACHE_MODES,
+    SplitterConfig,
+)
+from dataset.data_split import FishDataSplitter
+from transforms.video_transform import ConsistentVideoTransform
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-VIDEO_FRAME_POLICY = "first_last"
-VIDEO_CHANNELS = 6
 
-
-def _resolve_workers(value: int) -> int:
-    if value >= 0:
-        return value
-    max_cpu = os.cpu_count()
-    if max_cpu is None or max_cpu <= 0:
-        return 0
-    if max_cpu == 2:
-        return max_cpu // 2
-    return (max_cpu // 2) + 1
-
-
-def _first_last_cache_dir(image_size: int, cache_root: Optional[str] = None) -> str:
-    return os.path.join(os.path.normpath(cache_root or DEFAULT_IMAGE_CACHE_ROOT), f"{VIDEO_FRAME_POLICY}_size_{image_size}")
-
-
-def _cache_path(cache_dir: Optional[str], split: str, index: int) -> Optional[str]:
-    if not cache_dir:
-        return None
-    return os.path.join(cache_dir, split, f"{index}.pkl")
-
-
-def _load_video_cache(cache_path: Optional[str], video_path: str, image_size: int, label: int) -> Optional[Dict[str, Any]]:
-    if cache_path is None or not os.path.exists(cache_path):
-        return None
+def _decode_video_frames_raw(video_path: str, image_size: int = 224, num_frames: int = 2) -> np.ndarray:
+    """
+    Decode video frames into uint8 NumPy array [num_frames, image_size, image_size, 3] RGB.
+    Uses decord with cv2 fallback.
+    """
     try:
-        with open(cache_path, "rb") as f:
-            sample = pickle.load(f)
-    except Exception as exc:
-        logger.warning(f"Could not read video cache '{cache_path}'. It will be regenerated. Error: {exc}")
-        return None
-
-    video_form = sample.get("video_form")
-    meta = sample.get("_cache_meta", {})
-    if sample.get("video_name") != video_path:
-        return None
-    if sample.get("target") != label:
-        return None
-    if meta.get("image_size") != image_size or meta.get("frame_policy") != VIDEO_FRAME_POLICY:
-        return None
-    if not isinstance(video_form, np.ndarray) or video_form.shape != (VIDEO_CHANNELS, image_size, image_size) or video_form.dtype != np.uint8:
-        return None
-    return {"video_name": video_path, "video_form": video_form, "target": label}
-
-
-def _save_video_cache(cache_path: Optional[str], sample: Dict[str, Any], image_size: int) -> None:
-    if cache_path is None:
-        return
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    payload = {
-        "video_name": sample["video_name"],
-        "video_form": sample["video_form"],
-        "target": int(sample["target"]),
-        "_cache_meta": {
-            "image_size": image_size,
-            "format": "uint8_CHW",
-            "frame_policy": VIDEO_FRAME_POLICY,
-        },
-    }
-    tmp_path = f"{cache_path}.tmp.{os.getpid()}"
-    try:
-        with open(tmp_path, "wb") as f:
-            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
-        os.replace(tmp_path, cache_path)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-
-def _first_last_indices(full_vid_length: int) -> List[int]:
-    if full_vid_length <= 0:
-        return [0, 0]
-    return [0, full_vid_length - 1]
-
-
-def decode_first_last_video(video_path: str, label: int, image_size: int) -> Dict[str, Any]:
-    from decord import VideoReader, cpu, gpu
-
-    try:
-        vr = VideoReader(video_path, width=image_size, height=image_size, ctx=gpu(0))
-    except Exception:
+        from decord import VideoReader, cpu
         vr = VideoReader(video_path, width=image_size, height=image_size, ctx=cpu(0))
+        total = len(vr)
+        if total > 0:
+            indices = np.linspace(0, total - 1, num_frames).astype(int).tolist()
+            return vr.get_batch(indices).asnumpy()
+    except Exception:
+        pass
 
-    if len(vr) <= 0:
-        video_uint8 = np.zeros((VIDEO_CHANNELS, image_size, image_size), dtype=np.uint8)
-    else:
-        batch = vr.get_batch(_first_last_indices(len(vr))).asnumpy()
-        image = np.concatenate([batch[0], batch[1]], axis=-1)
-        video_uint8 = image.transpose(2, 0, 1).astype(np.uint8)
-
-    return {"video_name": video_path, "video_form": video_uint8, "target": int(label)}
-
-
-def decode_first_last_video_cv2(video_path: str, label: int, image_size: int) -> Dict[str, Any]:
     import cv2
-
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        logger.error(f"Could not open video file: '{video_path}'")
-        video_uint8 = np.zeros((VIDEO_CHANNELS, image_size, image_size), dtype=np.uint8)
-    else:
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frames = []
-        for frame_index in _first_last_indices(frame_count):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-            ok, frame = cap.read()
-            if not ok:
-                frames = []
-                break
-            frame = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), (image_size, image_size))
-            frames.append(frame)
+    frames = []
+    if video_path and os.path.exists(video_path):
+        cap = cv2.VideoCapture(video_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total > 0:
+            indices = np.linspace(0, total - 1, num_frames).astype(int).tolist()
+            for idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if frame.shape[0] != image_size or frame.shape[1] != image_size:
+                        frame = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+                    frames.append(frame)
         cap.release()
-        if len(frames) != 2:
-            video_uint8 = np.zeros((VIDEO_CHANNELS, image_size, image_size), dtype=np.uint8)
-        else:
-            video_uint8 = np.concatenate(frames, axis=-1).transpose(2, 0, 1).astype(np.uint8)
 
-    return {"video_name": video_path, "video_form": video_uint8, "target": int(label)}
+    while len(frames) < num_frames:
+        frames.append(np.zeros((image_size, image_size, 3), dtype=np.uint8))
+
+    return np.stack(frames[:num_frames])
 
 
-def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
-    import torchaudio
+def _decode_audio_waveform_raw(audio_path: str, sample_rate: int = 256000) -> np.ndarray:
+    """
+    Load raw audio waveform into float32 NumPy array [sample_rate * 2].
+    Zero pads or truncates to exactly 2 seconds (512,000 samples @ 256 kHz).
+    """
+    target_len = sample_rate * 2
+    if audio_path and os.path.exists(audio_path):
+        try:
+            import torchaudio
+            waveform, sr = torchaudio.load(audio_path)
+            if sr != sample_rate:
+                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)
+                waveform = resampler(waveform)
+            if waveform.ndim == 2 and waveform.size(0) > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            y = waveform.squeeze(0).to(torch.float32)
+            if y.numel() > target_len:
+                y = y[:target_len]
+            elif y.numel() < target_len:
+                y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
+            return y.numpy()
+        except Exception:
+            pass
 
+        try:
+            import soundfile as sf
+            data, sr = sf.read(audio_path, dtype='float32')
+            if data.ndim > 1:
+                data = np.mean(data, axis=-1)
+            if sr != sample_rate:
+                from scipy.signal import resample_poly
+                import math
+                gcd = math.gcd(sample_rate, sr)
+                data = resample_poly(data, sample_rate // gcd, sr // gcd).astype(np.float32)
+            if len(data) > target_len:
+                data = data[:target_len]
+            elif len(data) < target_len:
+                data = np.pad(data, (0, target_len - len(data)))
+            return data
+        except Exception:
+            pass
+
+    return np.zeros(target_len, dtype=np.float32)
+
+
+def _parse_target_to_onehot(tgt: Any) -> np.ndarray:
+    """
+    Parses label representation (int index, string class name, or vector)
+    into a canonical 4-element one-hot float32 array.
+    """
+    if isinstance(tgt, (int, np.integer)):
+        tgt_onehot = np.zeros(4, dtype=np.float32)
+        if 0 <= int(tgt) < 4:
+            tgt_onehot[int(tgt)] = 1.0
+        return tgt_onehot
+    if isinstance(tgt, str):
+        tgt_str = tgt.strip().lower()
+        class_map = {"none": 0, "strong": 1, "medium": 2, "weak": 3}
+        tgt_onehot = np.zeros(4, dtype=np.float32)
+        if tgt_str in class_map:
+            tgt_onehot[class_map[tgt_str]] = 1.0
+        return tgt_onehot
     try:
-        waveform, original_sr = torchaudio.load(path)
-    except ImportError:
-        # New torchaudio releases require TorchCodec; PCM WAV can use SoundFile.
-        import soundfile as sf
-
-        samples, original_sr = sf.read(path, dtype="float32", always_2d=True)
-        waveform = torch.from_numpy(samples.T.copy())
-    if waveform.ndim == 2 and waveform.size(0) > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    if original_sr != sr:
-        waveform = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sr)(waveform)
-
-    y = waveform.squeeze(0).to(torch.float32)
-    target_length = sr * 2
-    if y.numel() > target_length:
-        y = y[:target_length]
-    elif y.numel() < target_length:
-        y = torch.nn.functional.pad(y, (0, target_length - y.numel()))
-    return y
+        arr = np.array(tgt, dtype=np.float32)
+        return arr.reshape(4) if arr.size == 4 else np.zeros(4, dtype=np.float32)
+    except Exception:
+        return np.zeros(4, dtype=np.float32)
 
 
 class FishMultimodalDataLoader:
     """
-    DataLoader manager for paired audio-video fish feeding intensity samples.
-
-    Audio follows the raw waveform RAM-cache baseline. Video is fixed to the
-    best 1_49_channels policy: first RGB frame + last RGB frame => 6 channels.
+    Unified DataLoader Manager for Multimodal Fish Feeding Intensity Assessment.
+    Loads paired Video Frames [B, T, 3, H, W] and Audio Waveforms [B, 512000].
+    Implements multi-threaded RAM preloading for zero disk I/O in epochs 2+.
     """
-
     def __init__(
         self,
-        sample_rate: int = 64000,
-        batch_size: int = 128,
+        batch_size: int = 32,
         dataloader_workers: int = -1,
         prefetch_factor: Optional[int] = None,
-        cache_audio: bool = True,
-        cache_video_mode: str = "ram",
+        cache_mode: str = "ram",
         image_size: int = 224,
+        num_frames: int = 2,
+        sample_rate: int = 256000,
         splitter_config: Optional[SplitterConfig] = None,
+        persistent_workers: bool = True,
     ) -> None:
-        self.sample_rate = sample_rate
         self.batch_size = batch_size
-        self.dataloader_workers = _resolve_workers(dataloader_workers)
+        self.dataloader_workers = dataloader_workers
         self.prefetch_factor = prefetch_factor
-        self.cache_audio = cache_audio
-        self.cache_video_mode = cache_video_mode.lower()
-        if self.cache_video_mode not in VALID_CACHE_MODES:
-            raise ValueError(f"Invalid cache_video_mode='{cache_video_mode}'. Expected {sorted(VALID_CACHE_MODES)}.")
-        self.image_size = image_size
-        self.video_cache_dir = _first_last_cache_dir(image_size=image_size)
+        self.persistent_workers = bool(persistent_workers)
+        self.cache_mode = cache_mode.lower()
+        if self.cache_mode not in VALID_CACHE_MODES:
+            raise ValueError(f"Invalid cache_mode='{cache_mode}'. Expected one of {sorted(VALID_CACHE_MODES)}.")
 
-        self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig()
+        self.image_size = image_size
+        self.num_frames = num_frames
+        self.sample_rate = sample_rate
+
+
+        if self.dataloader_workers == -1:
+            max_cpu = os.cpu_count()
+            if max_cpu is None or max_cpu <= 0:
+                self.dataloader_workers = 0
+            elif max_cpu <= 4:
+                self.dataloader_workers = 2
+            else:
+                self.dataloader_workers = (max_cpu // 2) + 1
+
+        self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig(include_video=True)
         self.splitter_config.include_video = True
-        self.splitter = FishDataSplitter(config=self.splitter_config)
-        self.train_dict, self.test_dict, self.val_dict = self.splitter.split_data()
+
+        try:
+            self.splitter = FishDataSplitter(config=self.splitter_config)
+            self.train_dict, self.test_dict, self.val_dict = self.splitter.split_data()
+        except Exception as exc:
+            logger.error(f"Failed to load dataset from '{self.splitter_config.dataset_path}': {exc}")
+            raise
 
         logger.info("==================================================")
         logger.info("Initializing FishMultimodalDataLoader:")
-        logger.info(f"  - Sample Rate:              {self.sample_rate} Hz")
         logger.info(f"  - Batch Size:               {self.batch_size}")
         logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
-        logger.info(f"  - Cache audio in RAM:       {self.cache_audio}")
-        logger.info(f"  - Cache video mode:         {self.cache_video_mode}")
-        logger.info(f"  - Video input policy:       {VIDEO_FRAME_POLICY}")
+        logger.info(f"  - Cache Mode:               {self.cache_mode}")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
+        logger.info(f"  - Number of Frames:         {self.num_frames}")
+        logger.info(f"  - Audio Sample Rate:        {self.sample_rate} Hz")
         logger.info("==================================================")
-
-    def save_splits(self, output_dir: str | Path) -> None:
-        """Save the active deterministic split with the current experiment artifacts."""
-        self.splitter.save_splits(self.train_dict, self.test_dict, self.val_dict, Path(output_dir))
 
     @staticmethod
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+        clip_names = [data['clip_name'] for data in batch]
+        targets = [data['target'] for data in batch]
+
+        video_tensors = torch.stack([data['video_form'] for data in batch])
+        audio_tensors = torch.stack([data['audio_form'] for data in batch])
+        targets_tensor = torch.FloatTensor(np.array(targets))
+
         return {
-            "audio_name": [item["audio_name"] for item in batch],
-            "video_name": [item["video_name"] for item in batch],
-            "waveform": torch.tensor(np.stack([item["waveform"] for item in batch]), dtype=torch.float32),
-            "video_form": torch.stack([item["video_form"] for item in batch]),
-            "target": torch.tensor(np.stack([item["target"] for item in batch]), dtype=torch.float32),
+            'clip_name': clip_names,
+            'video_form': video_tensors,
+            'audio_form': audio_tensors,
+            'target': targets_tensor
         }
 
     class _InnerDataset(Dataset):
-        def __init__(self, parent: "FishMultimodalDataLoader", split: str) -> None:
+        def __init__(self, parent: 'FishMultimodalDataLoader', split: str) -> None:
             self.parent = parent
             self.split = split
-            self.data_dict = {
-                "train": parent.train_dict,
-                "test": parent.test_dict,
-                "val": parent.val_dict,
-            }.get(split)
-            if self.data_dict is None:
-                raise ValueError(f"Invalid split value '{split}'. Must be one of ['train', 'test', 'val'].")
-            self.transform = VideoTransform.get_transforms(parent.image_size)[split]
-            self.waveform_cache: List[np.ndarray] | None = None
-            self.video_cache: List[Dict[str, Any]] | None = None
-            if parent.cache_audio:
-                self._preload_audio()
-            if parent.cache_video_mode == "ram":
-                self._preload_video()
 
-        def _preload_audio(self) -> None:
-            logger.info(f"Preloading audio split '{self.split}' to RAM ({len(self.data_dict)} samples)...")
-            workers = max(self.parent.dataloader_workers, 1)
+            if self.split == 'train':
+                self.data_dict = parent.train_dict
+            elif self.split == 'test':
+                self.data_dict = parent.test_dict
+            elif self.split == 'val':
+                self.data_dict = parent.val_dict
+            else:
+                raise ValueError(f"Invalid split value '{self.split}'.")
 
-            def load_one(index: int) -> tuple[int, np.ndarray]:
-                audio_path = self.data_dict[index][0]
-                return index, load_audio(audio_path, sr=self.parent.sample_rate).numpy()
+            transforms = ConsistentVideoTransform.get_transforms(image_size=parent.image_size)
+            self.transform = transforms[self.split]
+            self.ram_cache = None
 
-            cache: List[np.ndarray | None] = [None] * len(self.data_dict)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {executor.submit(load_one, index): index for index in range(len(self.data_dict))}
-                completed = concurrent.futures.as_completed(futures)
-                for future in tqdm(
-                    completed,
-                    total=len(futures),
-                    desc=f"Preloading {self.split} audio to RAM",
-                    unit="file",
-                ):
-                    index, waveform = future.result()
-                    cache[index] = waveform
-            if any(item is None for item in cache):
-                raise RuntimeError(f"Audio RAM preload failed for split '{self.split}'.")
-            self.waveform_cache = [item for item in cache if item is not None]
+            if self.parent.cache_mode == "ram" and len(self.data_dict) > 0:
+                self._preload_to_ram()
 
-        def _decode_video_row(self, index: int) -> Dict[str, Any]:
-            _, video_path, label = self.data_dict[index]
+        def _preload_to_ram(self) -> None:
+            import concurrent.futures
             try:
-                return decode_first_last_video(video_path=video_path, label=label, image_size=self.parent.image_size)
-            except Exception as exc:
-                logger.warning(f"Decord failed for '{video_path}', falling back to OpenCV. Error: {exc}")
-                return decode_first_last_video_cv2(video_path=video_path, label=label, image_size=self.parent.image_size)
+                from tqdm import tqdm
+                has_tqdm = True
+            except ImportError:
+                has_tqdm = False
 
-        def _preload_video(self) -> None:
-            logger.info(f"Preloading first-last video split '{self.split}' to RAM ({len(self.data_dict)} samples)...")
-            workers = max(self.parent.dataloader_workers, 1)
-            cache: List[Dict[str, Any] | None] = [None] * len(self.data_dict)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {executor.submit(self._decode_video_row, index): index for index in range(len(self.data_dict))}
-                completed = concurrent.futures.as_completed(futures)
-                for future in tqdm(
-                    completed,
-                    total=len(futures),
-                    desc=f"Preloading {self.split} video to RAM",
-                    unit="file",
-                ):
-                    cache[futures[future]] = future.result()
-            if any(item is None for item in cache):
-                raise RuntimeError(f"Video RAM preload failed for split '{self.split}'.")
-            self.video_cache = [item for item in cache if item is not None]
+            preload_threads = max(1, self.parent.dataloader_workers * 2 if self.parent.dataloader_workers > 0 else 4)
+            logger.info("==================================================")
+            logger.info(f"Starting Multimodal -> RAM preload for split '{self.split}' ({len(self.data_dict)} samples)...")
+            logger.info(f"Using ThreadPoolExecutor with {preload_threads} workers for RAM preload.")
+
+            def load_single_entry(idx_and_item):
+                idx, item = idx_and_item
+                if isinstance(item, (list, tuple)):
+                    if len(item) == 3:
+                        audio_p, video_p, tgt = str(item[0]), str(item[1]), item[2]
+                    elif len(item) == 2:
+                        p0, tgt = str(item[0]), item[1]
+                        if "_audio_" in p0 or p0.endswith(".wav"):
+                            audio_p, video_p = p0, ""
+                        else:
+                            audio_p, video_p = "", p0
+                    else:
+                        audio_p, video_p, tgt = "", "", 0
+                elif isinstance(item, dict):
+                    audio_p = str(item.get('audio_path', ''))
+                    video_p = str(item.get('video_path', ''))
+                    tgt = item.get('label', item.get('target', 0))
+                else:
+                    audio_p, video_p, tgt = "", "", 0
+
+                if not audio_p and video_p:
+                    cand = video_p.replace("/video/", "/audio/").replace("\\video\\", "\\audio\\").replace("_video_", "_audio_")
+                    if cand.endswith(".mp4"):
+                        cand = cand[:-4] + ".wav"
+                    if os.path.exists(cand):
+                        audio_p = cand
+                if not video_p and audio_p:
+                    cand = audio_p.replace("/audio/", "/video/").replace("\\audio\\", "\\video\\").replace("_audio_", "_video_")
+                    if cand.endswith(".wav"):
+                        cand = cand[:-4] + ".mp4"
+                    if os.path.exists(cand):
+                        video_p = cand
+
+                tgt_onehot = _parse_target_to_onehot(tgt)
+
+                video_raw = _decode_video_frames_raw(video_p, self.parent.image_size, self.parent.num_frames)
+                audio_raw = _decode_audio_waveform_raw(audio_p, self.parent.sample_rate)
+                clip_name = os.path.basename(video_p or audio_p or f"sample_{idx}")
+
+                return idx, (video_raw, audio_raw, tgt_onehot, clip_name)
+
+            cache = [None] * len(self.data_dict)
+            total_bytes = 0
+            indexed_items = list(enumerate(self.data_dict))
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=preload_threads) as executor:
+                futures = {
+                    executor.submit(load_single_entry, item): item[0]
+                    for item in indexed_items
+                }
+                iterator = concurrent.futures.as_completed(futures)
+                if has_tqdm:
+                    pbar = tqdm(total=len(futures), desc=f"Preloading {self.split} to RAM")
+                    for future in iterator:
+                        idx = futures[future]
+                        try:
+                            result_idx, sample = future.result()
+                            cache[result_idx] = sample
+                            total_bytes += sample[0].nbytes + sample[1].nbytes
+                        except Exception as exc:
+                            logger.error(f"Error preloading sample {idx}: {exc}")
+                        pbar.update(1)
+                    pbar.close()
+                else:
+                    for future in iterator:
+                        idx = futures[future]
+                        try:
+                            result_idx, sample = future.result()
+                            cache[result_idx] = sample
+                            total_bytes += sample[0].nbytes + sample[1].nbytes
+                        except Exception as exc:
+                            logger.error(f"Error preloading sample {idx}: {exc}")
+
+            self.ram_cache = cache
+            cache_mb = total_bytes / (1024 ** 2)
+            logger.info(f"Successfully cached '{self.split}' split to RAM: {len(self.ram_cache)} samples ({cache_mb:.1f} MB)")
+            logger.info("==================================================")
 
         def __len__(self) -> int:
             return len(self.data_dict)
 
-        def __getitem__(self, index: int) -> Dict[str, Any]:
-            audio_path, video_path, label = self.data_dict[index]
-            if self.waveform_cache is not None:
-                waveform = self.waveform_cache[index]
-            else:
-                waveform = load_audio(audio_path, sr=self.parent.sample_rate).numpy()
+        def __getitem__(self, idx: int) -> Dict[str, Any]:
+            if self.ram_cache is not None and self.ram_cache[idx] is not None:
+                video_raw, audio_raw, target_onehot, clip_name = self.ram_cache[idx]
+                video_tensor = self.transform(video_raw)
+                if video_tensor.ndim == 3:
+                    video_tensor = video_tensor.unsqueeze(0)
+                video_tensor = video_tensor[:self.parent.num_frames]
+                audio_tensor = torch.from_numpy(audio_raw).to(torch.float32)  # [512000] (2.0s @ 256 kHz)
+                return {
+                    'clip_name': clip_name,
+                    'video_form': video_tensor,
+                    'audio_form': audio_tensor,
+                    'target': target_onehot
+                }
 
-            if self.video_cache is not None:
-                video_sample = self.video_cache[index]
-            elif self.parent.cache_video_mode == "disk":
-                cache_path = _cache_path(self.parent.video_cache_dir, self.split, index)
-                video_sample = _load_video_cache(cache_path, video_path, self.parent.image_size, int(label))
-                if video_sample is None:
-                    video_sample = self._decode_video_row(index)
-                    _save_video_cache(cache_path, video_sample, self.parent.image_size)
+            # On-the-fly disk loading fallback
+            item = self.data_dict[idx]
+            if isinstance(item, (list, tuple)):
+                audio_p = str(item[0]) if len(item) > 0 else ""
+                video_p = str(item[1]) if len(item) > 1 else ""
+                tgt = item[2] if len(item) > 2 else 0
+            elif isinstance(item, dict):
+                audio_p = str(item.get('audio_path', ''))
+                video_p = str(item.get('video_path', ''))
+                tgt = item.get('label', item.get('target', 0))
             else:
-                video_sample = self._decode_video_row(index)
+                audio_p, video_p, tgt = "", "", 0
+
+            if not audio_p and video_p:
+                cand = video_p.replace("/video/", "/audio/").replace("\\video\\", "\\audio\\").replace("_video_", "_audio_")
+                if cand.endswith(".mp4"):
+                    cand = cand[:-4] + ".wav"
+                if os.path.exists(cand):
+                    audio_p = cand
+
+            tgt_onehot = _parse_target_to_onehot(tgt)
+
+            video_raw = _decode_video_frames_raw(video_p, self.parent.image_size, self.parent.num_frames)
+            audio_raw = _decode_audio_waveform_raw(audio_p, self.parent.sample_rate)
+            clip_name = os.path.basename(video_p or audio_p or f"sample_{idx}")
+
+            video_tensor = self.transform(video_raw)
+            if video_tensor.ndim == 3:
+                video_tensor = video_tensor.unsqueeze(0)
+            video_tensor = video_tensor[:self.parent.num_frames]
+            audio_tensor = torch.from_numpy(audio_raw).to(torch.float32)
 
             return {
-                "audio_name": audio_path,
-                "video_name": video_path,
-                "waveform": waveform,
-                "video_form": self.transform(video_sample["video_form"]),
-                "target": np.eye(4)[int(label)],
+                'clip_name': clip_name,
+                'video_form': video_tensor,
+                'audio_form': audio_tensor,
+                'target': tgt_onehot
             }
 
-    def get_dataloader(self, split: str, shuffle: bool = False, drop_last: bool = False) -> DataLoader:
-        dataset = self._InnerDataset(parent=self, split=split)
+    def get_data_loader(self, split: str = 'train') -> DataLoader:
+        dataset = self._InnerDataset(self, split)
+        is_train = (split == 'train')
+
         kwargs = {
-            "dataset": dataset,
-            "batch_size": self.batch_size,
-            "shuffle": shuffle,
-            "drop_last": drop_last,
-            "num_workers": self.dataloader_workers,
-            "collate_fn": self.collate_fn,
-            "pin_memory": True,
-            "persistent_workers": self.dataloader_workers > 0,
+            'batch_size': self.batch_size,
+            'shuffle': is_train,
+            'num_workers': self.dataloader_workers,
+            'collate_fn': self.collate_fn,
+            'pin_memory': torch.cuda.is_available(),
+            'drop_last': is_train,
         }
-        if self.dataloader_workers > 0 and self.prefetch_factor is not None:
-            kwargs["prefetch_factor"] = self.prefetch_factor
-        return DataLoader(**kwargs)
+        if self.dataloader_workers > 0:
+            if self.prefetch_factor is not None:
+                kwargs['prefetch_factor'] = self.prefetch_factor
+            if self.persistent_workers:
+                kwargs['persistent_workers'] = True
+
+        return DataLoader(dataset, **kwargs)
+

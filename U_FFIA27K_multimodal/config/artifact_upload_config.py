@@ -1,19 +1,62 @@
 import json
-from pathlib import Path
-
+import logging
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
+logger = logging.getLogger(__name__)
+
+
 class ArtifactUploadConfig(BaseModel):
-    enabled: bool = Field(default=False)
-    repo_id: str = Field(default="")
-    repo_type: str = Field(default="dataset")
-    create_repo: bool = Field(default=True)
-    source_dir: str = Field(default="/marimo/Capstone_2026_Fish_Feeding_Intensity")
-    zip_path: str = Field(default="/marimo/Capstone_2026_Fish_Feeding_Intensity.zip")
-    path_in_repo: str = Field(default="Capstone_2026_Fish_Feeding_Intensity.zip")
+    """
+    Configuration for uploading the completed training artifact to Hugging Face.
+    """
+    enabled: bool = Field(
+        default=True,
+        description="Whether to zip and upload the project after training completes successfully."
+    )
+    source_dir: str = Field(
+        default="/marimo/Capstone_2026_Fish_Feeding_Intensity",
+        description="Directory to zip after training completes."
+    )
+    zip_path: str = Field(
+        default="/marimo",
+        description="Destination parent directory or template path for the zip file."
+    )
+    repo_id: str = Field(
+        default="manhmitcf/final",
+        description="Hugging Face repository ID, for example 'username/repo-name'."
+    )
+    repo_type: str = Field(
+        default="dataset",
+        description="Hugging Face repository type: 'dataset', 'model', or 'space'."
+    )
+    path_in_repo: Optional[str] = Field(
+        default=None,
+        description="Destination file path inside the Hugging Face repository. If None or null, automatically uses dynamic timestamped artifact filename."
+    )
+    create_repo: bool = Field(
+        default=True,
+        description="Create the Hugging Face repository if it does not exist."
+    )
+    branch: str = Field(
+        default="main",
+        description="Target branch in the Hugging Face repository."
+    )
 
     @classmethod
     def from_json(cls, path: str = "config/artifact_upload_config.json") -> "ArtifactUploadConfig":
-        with Path(path).open("r", encoding="utf-8") as f:
-            return cls(**json.load(f))
+        from pathlib import Path
+        config_path = Path(path)
+        if not config_path.is_file():
+            pkg_fallback = Path(__file__).resolve().parent / Path(path).name
+            if pkg_fallback.is_file():
+                config_path = pkg_fallback
+            else:
+                root_fallback = Path(__file__).resolve().parent.parent / path
+                if root_fallback.is_file():
+                    config_path = root_fallback
+        logger.info(f"Loading artifact upload configuration from JSON: '{config_path}'")
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls(**data)

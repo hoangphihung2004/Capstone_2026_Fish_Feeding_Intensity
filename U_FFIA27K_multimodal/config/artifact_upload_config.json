@@ -1,9 +1,10 @@
 {
   "enabled": true,
-  "repo_id": "hoangphihung442004/U_FFIA27K_multimodal_results",
-  "repo_type": "dataset",
-  "create_repo": true,
   "source_dir": "/marimo/Capstone_2026_Fish_Feeding_Intensity",
-  "zip_path": "/marimo/Capstone_2026_Fish_Feeding_Intensity.zip",
-  "path_in_repo": "Capstone_2026_Fish_Feeding_Intensity.zip"
+  "zip_path": "/marimo",
+  "repo_id": "manhmitcf/final",
+  "repo_type": "dataset",
+  "path_in_repo": null,
+  "create_repo": true,
+  "branch": "main"
 }
