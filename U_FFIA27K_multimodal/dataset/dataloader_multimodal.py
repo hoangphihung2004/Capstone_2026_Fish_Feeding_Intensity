@@ -148,12 +148,12 @@ def decode_first_last_video_cv2(video_path: str, label: int, image_size: int) ->
 
 
 def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
-    import torchaudio
-
     try:
+        import torchaudio
+
         waveform, original_sr = torchaudio.load(path)
-    except ImportError:
-        # New torchaudio releases require TorchCodec; PCM WAV can use SoundFile.
+    except (ImportError, OSError, RuntimeError):
+        # torchaudio may need TorchCodec or be built for another torch version; PCM WAV reads identically with SoundFile.
         import soundfile as sf
 
         samples, original_sr = sf.read(path, dtype="float32", always_2d=True)
@@ -161,6 +161,8 @@ def load_audio(path: str, sr: int = 64000) -> torch.Tensor:
     if waveform.ndim == 2 and waveform.size(0) > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if original_sr != sr:
+        import torchaudio
+
         waveform = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=sr)(waveform)
 
     y = waveform.squeeze(0).to(torch.float32)
