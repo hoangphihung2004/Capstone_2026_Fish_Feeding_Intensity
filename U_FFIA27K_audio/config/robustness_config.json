@@ -11,7 +11,7 @@
   "video_pgd": {
     "mode": "sweep",
     "epsilon": 0.03137254902,
-    "sweep": { "start": 0.00001, "end": 1.0, "num": 26, "spacing": "log" },
+    "sweep": { "start": 0.00001, "end": 1.0, "num": 16, "spacing": "log" },
     "include_epsilons": [0.03137254902],
     "sanity_epsilon": 0.03137254902,
     "norm": "linf",
