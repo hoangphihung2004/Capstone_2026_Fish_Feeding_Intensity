@@ -57,6 +57,9 @@ python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', 
 #    Không git checkout nhánh khác trong cùng thư mục khi lệnh này đang chạy.
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_audio_robustness && git pull && cd U_FFIA27K_audio
+# Cài torchaudio khớp đúng phiên bản torch (vd torch 2.11.0 -> torchaudio 2.11.0), tránh lỗi libtorchaudio.so: undefined symbol
+TV=$(python -c "import torch;print(torch.__version__)"); V=${TV%%+*}; if [[ $TV == *+* ]]; then pip install --no-deps --force-reinstall "torchaudio==$V" --index-url https://download.pytorch.org/whl/${TV#*+}; else pip install --no-deps --force-reinstall "torchaudio==$V"; fi
+python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
 tail -n +1 -f robustness.log
 
