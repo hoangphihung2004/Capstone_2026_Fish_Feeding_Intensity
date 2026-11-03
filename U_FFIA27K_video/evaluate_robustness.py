@@ -26,6 +26,11 @@ class VideoAdapter(BaseAdapter):
     def __init__(self, fold, config, paths, checkpoint_path, device) -> None:
         self.device = device
         train_config = TrainConfig.from_json(paths.train_config_path)
+        if train_config.model.backbone != "EfficientNetB0" or train_config.video_features.frame_policy != FRAME_POLICY:
+            raise ValueError(
+                f"Robustness evaluates EfficientNetB0 with {FRAME_POLICY}, but {paths.train_config_path} says "
+                f"{train_config.model.backbone} with {train_config.video_features.frame_policy}."
+            )
         manager = FishVideoDataLoader(
             batch_size=config.batch_size,
             dataloader_workers=train_config.dataloader_workers,
