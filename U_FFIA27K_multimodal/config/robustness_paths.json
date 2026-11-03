@@ -1,7 +1,13 @@
 {
   "train_config_path": "config/train_config.json",
   "dataset_path": "",
-  "checkpoint_template": "checkpoint/multimodal_model/fold_{fold:02d}/multimodal_best.pt",
-  "checkpoints": {},
+  "checkpoint_template": "",
+  "checkpoints": {
+    "0": "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_AF5_cross_validation_random_sample_first_last_fold_00_20260924_142228/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_00/multimodal_best.pt",
+    "1": "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_AF5_cross_validation_random_sample_first_last_fold_01_20260924_142444/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_01/multimodal_best.pt",
+    "2": "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_AF5_cross_validation_random_sample_first_last_fold_02_20260924_145340/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_02/multimodal_best.pt",
+    "3": "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_AF5_cross_validation_random_sample_first_last_fold_03_20260924_143253/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_03/multimodal_best.pt",
+    "4": "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_AF5_cross_validation_random_sample_first_last_fold_04_20260924_165810/U_FFIA27K_multimodal/checkpoint/multimodal_model/fold_04/multimodal_best.pt"
+  },
   "output_dir": "outputs/robustness"
 }
