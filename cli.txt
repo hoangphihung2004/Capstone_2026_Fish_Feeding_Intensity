@@ -49,9 +49,18 @@ pip install -r requirements.txt
 python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY: sanity fold 0 trước, qua thì chạy đủ 5 fold (mỗi fold xong tự upload)
+# 5. CHẠY (mỗi fold xong tự upload). CHỌN 1 TRONG 3 CÁCH:
 # ------------------------------------------------------------------------------
-nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py" > robustness.log 2>&1 &
+# Cách A (khuyên dùng): kiểm tra sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold (0,1,2,3,4)
+nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
+
+# Cách B: chạy luôn TOÀN BỘ 5 fold, bỏ qua sanity
+nohup python evaluate_robustness.py --folds 0 1 2 3 4 > robustness.log 2>&1 &
+
+# Cách C: chạy riêng 1 fold (đổi số 0 thành fold muốn chạy)
+nohup python evaluate_robustness.py --folds 0 > robustness.log 2>&1 &
+
+# Xem log
 tail -n +1 -f robustness.log
 
 # Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong
