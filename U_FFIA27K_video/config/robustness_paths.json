@@ -1,7 +1,13 @@
 {
   "train_config_path": "config/train_config.json",
   "dataset_path": "",
-  "checkpoint_template": "checkpoint/efficientnet_b0/fold_{fold:02d}/video_best.pt",
-  "checkpoints": {},
+  "checkpoint_template": "",
+  "checkpoints": {
+    "0": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_00/video_best.pt",
+    "1": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_01/video_best.pt",
+    "2": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_02/video_best.pt",
+    "3": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_03/video_best.pt",
+    "4": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_04/video_best.pt"
+  },
   "output_dir": "outputs/robustness"
 }
