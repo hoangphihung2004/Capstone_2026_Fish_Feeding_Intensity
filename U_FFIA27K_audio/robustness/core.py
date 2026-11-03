@@ -244,7 +244,14 @@ class BaseAdapter:
 
 def prepare_model(model: torch.nn.Module, checkpoint_path: Path, device: torch.device) -> torch.nn.Module:
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint.get("model_state_dict", checkpoint), strict=True)
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    # thop's FLOP profiler registers total_ops/total_params counters on every module during training;
+    # they are not weights. Everything else must match exactly.
+    profiler_keys = [key for key in state_dict if key.rsplit(".", 1)[-1] in ("total_ops", "total_params")]
+    if profiler_keys:
+        state_dict = {key: value for key, value in state_dict.items() if key not in set(profiler_keys)}
+        logger.info("Ignored %d thop profiler counters in %s", len(profiler_keys), checkpoint_path)
+    model.load_state_dict(state_dict, strict=True)
     model.to(device).eval()
     model.requires_grad_(False)
     return model
