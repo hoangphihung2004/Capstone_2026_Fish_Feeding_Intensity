@@ -3,11 +3,17 @@
 import argparse
 import csv
 import json
+import logging
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy import stats
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from robustness.hub import check_ready, load_upload_config, upload_summary  # noqa: E402
 
 SURFACE = "#fcfcfb"
 TEXT_PRIMARY = "#0b0b0b"
@@ -298,13 +304,22 @@ def main() -> None:
     parser.add_argument("--video-dir", required=True, type=Path)
     parser.add_argument("--multimodal-dir", required=True, type=Path)
     parser.add_argument("--output", default=Path("outputs/robustness_summary"), type=Path)
+    parser.add_argument("--upload-config", default=PROJECT_ROOT / "config/robustness_upload.json", type=Path)
+    parser.add_argument("--no-upload", action="store_true", help="Keep the summary local even if upload is enabled.")
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    upload_config = load_upload_config(args.upload_config)
+    if args.no_upload:
+        upload_config.enabled = False
+    check_ready(upload_config)
 
     rows = read_results(args.audio_dir) + read_results(args.video_dir) + read_results(args.multimodal_dir)
     folds = validate(rows)
     args.output.mkdir(parents=True, exist_ok=True)
     plot(analyze(rows, folds, args.output), args.output)
     print(f"Saved tables and figures to {args.output}")
+    upload_summary(upload_config, args.output)
 
 
 if __name__ == "__main__":

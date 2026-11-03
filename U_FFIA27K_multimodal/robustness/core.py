@@ -19,6 +19,8 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field, model_validator
 from sklearn.metrics import accuracy_score, average_precision_score, confusion_matrix, f1_score
 
+from .hub import MODALITY, check_ready, load_upload_config, upload_fold
+
 logger = logging.getLogger(__name__)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -585,29 +587,63 @@ def run_cli(build_adapter: Callable[[int, RobustnessConfig, PathsConfig, Path, t
     parser.add_argument("--max-batches", type=int, help="Smoke test only; results are marked partial.")
     parser.add_argument("--sanity", action="store_true", help="Run reliability checks instead of the full evaluation.")
     parser.add_argument("--resume", action="store_true", help="Continue an interrupted run and keep its finished levels.")
+    parser.add_argument("--upload-config", default=str(project_root / "config/robustness_upload.json"))
+    parser.add_argument("--no-upload", action="store_true", help="Keep results local even if upload is enabled.")
+    parser.add_argument("--upload-only", action="store_true", help="Upload existing fold results without evaluating.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     config = load_json_model(RobustnessConfig, Path(args.config))
     paths = load_json_model(PathsConfig, Path(args.paths))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Robustness config hash: %s | device: %s", config_hash(config), device)
+    upload_config = load_upload_config(Path(args.upload_config))
+    if args.no_upload:
+        upload_config.enabled = False
+    if args.upload_only and not upload_config.enabled:
+        raise SystemExit("--upload-only needs upload enabled in the upload config.")
+    check_ready(upload_config)
 
     folds = args.folds if args.folds else config.folds
     unknown = sorted(set(folds) - set(config.folds))
     if unknown:
         raise ValueError(f"Folds {unknown} are not in the shared config: {config.folds}")
-
     output_dir = Path(paths.output_dir)
-    failed = []
-    for fold in folds:
-        checkpoint_path = paths.checkpoint_for(fold)
-        adapter = build_adapter(fold, config, paths, checkpoint_path, device)
-        verify_test_split(adapter, checkpoint_path)
-        if args.sanity:
-            if not run_sanity(adapter, config, fold, checkpoint_path, output_dir, args.max_batches):
-                failed.append(fold)
-        else:
-            evaluate_fold(adapter, config, fold, checkpoint_path, output_dir, args.max_batches, args.resume)
-    if failed:
-        raise SystemExit(f"Sanity checks failed on folds: {failed}")
+
+    upload_failed = []
+
+    def upload(model: str, fold: int, kind: str) -> None:
+        # A failed upload must not stop the evaluation; the results stay on disk.
+        try:
+            upload_fold(upload_config, output_dir, model, fold, kind)
+        except Exception:
+            logger.exception("Upload failed for %s fold %d; results are still in %s", model, fold, output_dir)
+            upload_failed.append(fold)
+
+    if args.upload_only:
+        models = [path.name for path in output_dir.iterdir() if path.name in MODALITY] if output_dir.is_dir() else []
+        if not models:
+            raise SystemExit(f"No model results under {output_dir}")
+        for model in models:
+            for fold in folds:
+                upload(model, fold, "results")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info("Robustness config hash: %s | device: %s", config_hash(config), device)
+        failed = []
+        kind = "sanity" if args.sanity else "full"
+        if args.max_batches is not None:
+            kind += "-partial"
+        for fold in folds:
+            checkpoint_path = paths.checkpoint_for(fold)
+            adapter = build_adapter(fold, config, paths, checkpoint_path, device)
+            verify_test_split(adapter, checkpoint_path)
+            if args.sanity:
+                if not run_sanity(adapter, config, fold, checkpoint_path, output_dir, args.max_batches):
+                    failed.append(fold)
+            else:
+                evaluate_fold(adapter, config, fold, checkpoint_path, output_dir, args.max_batches, args.resume)
+            upload(adapter.name, fold, kind)
+        if failed:
+            raise SystemExit(f"Sanity checks failed on folds: {failed}")
+    if upload_failed:
+        folds_text = " ".join(str(fold) for fold in sorted(set(upload_failed)))
+        raise SystemExit(f"Upload failed on folds {folds_text}. Retry with: --upload-only --folds {folds_text}")
