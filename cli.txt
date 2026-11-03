@@ -41,9 +41,9 @@ git pull
 cd U_FFIA27K_video
 pip install --upgrade pip
 pip install -r requirements.txt
-# Cài lại torchaudio cho khớp đúng phiên bản torch đang có (tránh lỗi libtorchaudio.so: undefined symbol)
-TV=$(python -c "import torch;print(torch.__version__)"); V=${TV%%+*}; if [[ $TV == *+* ]]; then pip install --no-deps --force-reinstall "torchaudio==$V" --index-url https://download.pytorch.org/whl/${TV#*+}; else pip install --no-deps --force-reinstall "torchaudio==$V"; fi
-# Kiểm tra: 2 phiên bản phải trùng số chính (vd 2.8.0+cu128 và 2.8.0+cu128)
+# Cài torchaudio cùng phiên bản với torch (máy marimo: torch 2.11.0). Torch khác thì đổi số 2.11.0 cho khớp.
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
+# Kiểm tra: phải in ra torch 2.11.0 | torchaudio 2.11.0
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
 # ------------------------------------------------------------------------------
