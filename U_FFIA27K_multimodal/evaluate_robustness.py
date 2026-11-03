@@ -38,7 +38,13 @@ class MultimodalAdapter(BaseAdapter):
         if missing:
             raise ValueError(f"{missing} test samples have no paired video; refusing to evaluate on blank frames.")
         self.loader = manager.get_dataloader("test", shuffle=False, drop_last=False)
-        model = MultimodalModel(train_config.audio_features, pretrained_video=False)
+        # Same constructor arguments as main.build_model, so the weights load into the trained architecture.
+        model = MultimodalModel(
+            train_config.audio_features,
+            pretrained_video=False,
+            ablation_mode=train_config.ablation.mode,
+            dropout_rate=train_config.model.dropout_rate,
+        )
         self.model = prepare_model(model, checkpoint_path, device)
 
     def batches(self, max_batches: Optional[int] = None) -> Iterator[Batch]:
