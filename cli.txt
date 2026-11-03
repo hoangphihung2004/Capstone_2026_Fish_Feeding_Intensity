@@ -1,0 +1,79 @@
+# ==============================================================================
+# ROBUSTNESS EVALUATION - U_FFIA27K_multimodal (chỉ nạp weight đã train, KHÔNG train lại)
+# Branch: U_FFIA27K_multimodal_robustness
+# Kết quả tự đẩy lên HF: hoangphihung442004/Adversarial_Attack_Model
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. TOKEN HUGGING FACE (token Write, chỉ cần làm 1 lần trên máy)
+#    Không dán token vào file này. Lưu token vào /marimo/token.txt:
+#    echo 'hf_xxx' > /marimo/token.txt
+# ------------------------------------------------------------------------------
+export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' /marimo/token.txt | head -n 1)
+if [ -z "$HF_TOKEN" ]; then echo "⚠️ Chưa có token trong /marimo/token.txt"; fi
+hf auth login --token "$HF_TOKEN" || huggingface-cli login --token "$HF_TOKEN"
+
+# ------------------------------------------------------------------------------
+# 2. TẢI DATASET (bỏ qua nếu /marimo/Fish_Feeding_Intensity_Dataset đã có)
+# ------------------------------------------------------------------------------
+sudo apt update && sudo apt install git-lfs -y
+git lfs install
+git config --global lfs.concurrenttransfers 64
+cd /marimo && nohup git clone https://huggingface.co/datasets/manhmitcf/Fish_Feeding_Intensity_Dataset > /marimo/clone.log 2>&1 &
+tail -n +1 -f /marimo/clone.log
+
+mv /marimo/Fish_Feeding_Intensity_Dataset/audio/audio/* /marimo/Fish_Feeding_Intensity_Dataset/audio/
+mv /marimo/Fish_Feeding_Intensity_Dataset/video/video/* /marimo/Fish_Feeding_Intensity_Dataset/video/
+rm -rf /marimo/Fish_Feeding_Intensity_Dataset/audio/audio
+rm -rf /marimo/Fish_Feeding_Intensity_Dataset/video/video
+find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l
+find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
+
+# ------------------------------------------------------------------------------
+# 3. LẤY CODE VÀ CÀI THƯ VIỆN
+# ------------------------------------------------------------------------------
+cd /marimo
+git clone https://github.com/hoangphihung2004/Capstone_2026_Fish_Feeding_Intensity.git
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity
+git fetch origin
+git checkout U_FFIA27K_multimodal_robustness
+git pull
+cd U_FFIA27K_multimodal
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# ------------------------------------------------------------------------------
+# 4. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
+#    Phải in ra 5 dòng OK. Có dòng MISSING thì tải weight về /marimo/Results trước.
+# ------------------------------------------------------------------------------
+python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
+
+# ------------------------------------------------------------------------------
+# 5. CHẠY: sanity fold 0 trước, qua thì chạy đủ 5 fold (mỗi fold xong tự upload)
+# ------------------------------------------------------------------------------
+nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py" > robustness.log 2>&1 &
+tail -n +1 -f robustness.log
+
+# Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong
+nohup python evaluate_robustness.py --resume > robustness.log 2>&1 &
+
+# Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
+python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
+
+# ------------------------------------------------------------------------------
+# 6. GỘP KẾT QUẢ 3 NHÁNH (chạy sau khi cả audio, video, multimodal đều xong)
+#    Tải các zip từ hoangphihung442004/Adversarial_Attack_Model rồi giải nén
+#    tất cả zip của cùng một nhánh vào một thư mục.
+# ------------------------------------------------------------------------------
+cd /marimo
+hf download hoangphihung442004/Adversarial_Attack_Model --repo-type dataset --local-dir /marimo/robustness_hub
+for m in audio_amaru video_efficientnet_b0 multimodal_multimodal; do
+    mkdir -p /marimo/robustness_results/$m
+    for z in /marimo/robustness_hub/$m/*_full_*.zip; do unzip -o -q "$z" -d /marimo/robustness_results/$m; done
+done
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
+python robustness/aggregate.py \
+  --audio-dir /marimo/robustness_results/audio_amaru \
+  --video-dir /marimo/robustness_results/video_efficientnet_b0 \
+  --multimodal-dir /marimo/robustness_results/multimodal_multimodal \
+  --output outputs/robustness_summary
