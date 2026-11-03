@@ -153,6 +153,12 @@ class ModelConfig(BaseModel):
         le=0.5,
         description="Stochastic Depth / DropPath rate for ConvNeXt-Nano video backbone."
     )
+    fusion_dropout: float = Field(
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description="Dropout rate applied to f_fused = LayerNorm(f_V + f_A) before the tournament heads."
+    )
     tie_breakers: VideoTieBreakersConfig = Field(
         default_factory=VideoTieBreakersConfig,
         description="Pairwise Video Kinematics Referee configurations for B12, B23, B13."

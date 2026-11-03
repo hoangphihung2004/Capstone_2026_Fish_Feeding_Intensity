@@ -359,16 +359,20 @@ class MultimodalTournamentFusion(nn.Module):
         tie_temperature: float = 1.0,
         voting_temperature: float = 1.0,
         head_hidden_dims: Tuple[int, ...] = (),
+        fusion_dropout: float = 0.0,
         **kwargs
     ) -> None:
         super().__init__()
         self.dim = dim
+        self.fusion_dropout = fusion_dropout
         self.enable_b12, self.enable_b23, self.enable_b13 = _parse_tie_breakers(
             tie_breakers, enable_b12, enable_b23, enable_b13
         )
 
         # 1. Direct Sum + LayerNorm Fusion (No learnable gating parameters)
         self.norm_fused = nn.LayerNorm(dim)
+        # Dropout on the fused embedding (regularizes all tournament heads; identity in eval mode)
+        self.drop_fused = nn.Dropout(fusion_dropout)
 
         # 2. Pairwise Boundary Tournament Decision Head (Directly fed from f_fused)
         self.tournament_head = PairwiseBoundaryTournamentHead(
@@ -396,7 +400,7 @@ class MultimodalTournamentFusion(nn.Module):
             f_audio = f_audio.unsqueeze(0)
 
         # Step 1: Direct Sum + LayerNorm Fusion
-        f_fused = self.norm_fused(f_video + f_audio)  # [B, dim]
+        f_fused = self.drop_fused(self.norm_fused(f_video + f_audio))  # [B, dim]
 
         # Step 2: Direct feed into Tournament Head
         out = self.tournament_head(f_fused, f_video=f_video)

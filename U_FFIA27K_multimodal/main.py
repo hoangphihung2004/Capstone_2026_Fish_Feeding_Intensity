@@ -105,6 +105,7 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
         tie_breakers=tb_cfg,
         tournament=getattr(config.model, "tournament", None),
         video_drop_path=getattr(config.model, "video_drop_path", 0.1),
+        fusion_dropout=getattr(config.model, "fusion_dropout", 0.0),
     )
 
 

@@ -58,6 +58,7 @@ class MultimodalSOTANet(nn.Module):
         tie_breakers: Optional[Any] = None,
         tournament: Optional[Any] = None,
         video_drop_path: float = 0.1,
+        fusion_dropout: float = 0.0,
         **kwargs
     ) -> None:
         super().__init__()
@@ -71,6 +72,7 @@ class MultimodalSOTANet(nn.Module):
         self.tie_breakers = tie_breakers
         self.tournament = tournament
         self.video_drop_path = video_drop_path
+        self.fusion_dropout = fusion_dropout
 
         # 1. Frontends
         self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
@@ -96,6 +98,7 @@ class MultimodalSOTANet(nn.Module):
             dim=embed_dim,
             tie_breakers=tie_breakers,
             tournament=tournament,
+            fusion_dropout=fusion_dropout,
             **kwargs
         )
 

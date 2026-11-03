@@ -36,6 +36,7 @@
       512
     ],
     "video_drop_path": 0.1,
+    "fusion_dropout": 0.2,
     "tie_breakers": {
       "enable_b12": false,
       "enable_b23": true,
