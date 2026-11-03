@@ -67,13 +67,6 @@ python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
 # ------------------------------------------------------------------------------
 cd /marimo
 hf download hoangphihung442004/Adversarial_Attack_Model --repo-type dataset --local-dir /marimo/robustness_hub
-for m in audio_amaru video_efficientnet_b0 multimodal_multimodal; do
-    mkdir -p /marimo/robustness_results/$m
-    for z in /marimo/robustness_hub/$m/*_full_*.zip; do unzip -o -q "$z" -d /marimo/robustness_results/$m; done
-done
+for m in audio_amaru video_efficientnet_b0 multimodal_multimodal; do mkdir -p /marimo/robustness_results/$m; for z in /marimo/robustness_hub/$m/*_full_*.zip; do unzip -o -q "$z" -d /marimo/robustness_results/$m; done; done
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
-python robustness/aggregate.py \
-  --audio-dir /marimo/robustness_results/audio_amaru \
-  --video-dir /marimo/robustness_results/video_efficientnet_b0 \
-  --multimodal-dir /marimo/robustness_results/multimodal_multimodal \
-  --output outputs/robustness_summary
+python robustness/aggregate.py --audio-dir /marimo/robustness_results/audio_amaru --video-dir /marimo/robustness_results/video_efficientnet_b0 --multimodal-dir /marimo/robustness_results/multimodal_multimodal --output outputs/robustness_summary
