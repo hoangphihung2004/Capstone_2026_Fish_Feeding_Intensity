@@ -187,22 +187,31 @@ def pgd_attack(
 ) -> Tuple[torch.Tensor, List[float]]:
     """Untargeted L-infinity PGD in [0, 1] pixel space. Takes and returns normalized video.
 
-    The update is standard PGD (Madry et al.). Robust accuracy is reported per sample on the worst
-    iterate, as in AutoAttack/RobustBench: a sample counts as robust only if every iterate is still
-    classified correctly. Each sample keeps its first misclassified iterate, otherwise its
-    highest-loss iterate. With a large step the final iterate can bounce back to a correct
-    prediction, which would overstate robustness.
+    Follows the AutoAttack/RobustBench evaluation protocol:
+    - a sample misclassified on the clean input counts as wrong and is not attacked (it keeps its
+      clean input), so robust accuracy can never exceed clean accuracy;
+    - correctly classified samples are attacked with standard PGD (Madry et al.), and each keeps its
+      worst iterate: the first misclassified one, otherwise the highest-loss one. A sample counts as
+      robust only if every iterate is still classified correctly. With a large step the final
+      iterate can bounce back to a correct prediction, which would overstate robustness.
+    The whole batch still goes through the model so multimodal inputs stay aligned; samples are
+    independent because the model is in eval mode.
     """
     alpha = epsilon * alpha_ratio
     mean, std = _normalization(video)
     pixels = (video.detach() * std + mean).clamp(0.0, 1.0)
+    with torch.no_grad():
+        clean_correct = forward((pixels - mean) / std).argmax(dim=1) == labels
+    attacked = clean_correct.to(pixels.dtype).view(-1, *([1] * (pixels.dim() - 1)))
+
     adversarial = pixels.clone()
     if random_start:
-        adversarial = (pixels + _uniform_delta(video, keys, epsilon, "pgd", seed)).clamp(0.0, 1.0)
+        start = (pixels + _uniform_delta(video, keys, epsilon, "pgd", seed)).clamp(0.0, 1.0)
+        adversarial = torch.where(attacked.bool(), start, pixels)
 
-    best = adversarial.detach().clone()
+    best = pixels.clone()
     best_loss = torch.full((video.shape[0],), -float("inf"), device=video.device)
-    fooled = torch.zeros(video.shape[0], dtype=torch.bool, device=video.device)
+    fooled = ~clean_correct
 
     def keep_worst(candidate: torch.Tensor, logits: torch.Tensor, sample_loss: torch.Tensor) -> None:
         wrong = logits.argmax(dim=1) != labels
@@ -220,7 +229,7 @@ def pgd_attack(
         gradient = torch.autograd.grad(loss, adversarial)[0]
         losses.append(loss.item())
         keep_worst(adversarial.detach(), logits.detach(), sample_loss.detach())
-        adversarial = adversarial.detach() + alpha * gradient.sign()
+        adversarial = adversarial.detach() + alpha * gradient.sign() * attacked
         delta = (adversarial - pixels).clamp(-epsilon, epsilon)
         adversarial = (pixels + delta).clamp(0.0, 1.0)
     with torch.no_grad():
