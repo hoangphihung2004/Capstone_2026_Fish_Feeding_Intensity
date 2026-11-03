@@ -41,9 +41,9 @@ git pull
 cd U_FFIA27K_multimodal
 pip install --upgrade pip
 pip install -r requirements.txt
-# Cài lại torchaudio cho khớp đúng phiên bản torch đang có (tránh lỗi libtorchaudio.so: undefined symbol)
-TV=$(python -c "import torch;print(torch.__version__)"); V=${TV%%+*}; if [[ $TV == *+* ]]; then pip install --no-deps --force-reinstall "torchaudio==$V" --index-url https://download.pytorch.org/whl/${TV#*+}; else pip install --no-deps --force-reinstall "torchaudio==$V"; fi
-# Kiểm tra: 2 phiên bản phải trùng số chính (vd 2.8.0+cu128 và 2.8.0+cu128)
+# Cài torchaudio cùng phiên bản với torch (máy marimo: torch 2.11.0). Torch khác thì đổi số 2.11.0 cho khớp.
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
+# Kiểm tra: phải in ra torch 2.11.0 | torchaudio 2.11.0
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
 # ------------------------------------------------------------------------------
@@ -57,8 +57,8 @@ python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', 
 #    Không git checkout nhánh khác trong cùng thư mục khi lệnh này đang chạy.
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_multimodal_robustness && git pull && cd U_FFIA27K_multimodal
-# Cài torchaudio khớp đúng phiên bản torch (vd torch 2.11.0 -> torchaudio 2.11.0), tránh lỗi libtorchaudio.so: undefined symbol
-TV=$(python -c "import torch;print(torch.__version__)"); V=${TV%%+*}; if [[ $TV == *+* ]]; then pip install --no-deps --force-reinstall "torchaudio==$V" --index-url https://download.pytorch.org/whl/${TV#*+}; else pip install --no-deps --force-reinstall "torchaudio==$V"; fi
+# Cài torchaudio cùng phiên bản với torch (máy marimo: torch 2.11.0), tránh lỗi libtorchaudio.so: undefined symbol
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
 tail -n +1 -f robustness.log
