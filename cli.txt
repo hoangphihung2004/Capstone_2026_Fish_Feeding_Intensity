@@ -49,19 +49,16 @@ pip install -r requirements.txt
 python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY (mỗi fold xong tự upload). CHỌN 1 TRONG 3 CÁCH:
+# 5. CHẠY: sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold (0,1,2,3,4). Mỗi fold xong tự upload.
+#    Không git checkout nhánh khác trong cùng thư mục khi lệnh này đang chạy.
 # ------------------------------------------------------------------------------
-# Cách A (khuyên dùng): kiểm tra sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold (0,1,2,3,4)
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_video_robustness && git pull && cd U_FFIA27K_video
 nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
-
-# Cách B: chạy luôn TOÀN BỘ 5 fold, bỏ qua sanity
-nohup python evaluate_robustness.py --folds 0 1 2 3 4 > robustness.log 2>&1 &
-
-# Cách C: chạy riêng 1 fold (đổi số 0 thành fold muốn chạy)
-nohup python evaluate_robustness.py --folds 0 > robustness.log 2>&1 &
-
-# Xem log
 tail -n +1 -f robustness.log
+
+# Đọc log:
+#   - Sanity qua: các dòng [sanity] ... PASS, rồi chạy fold 0-4; mỗi fold xong có dòng "Uploaded ..._fold0X_full_....zip"
+#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [0]" -> gửi robustness.log hoặc outputs/robustness/*/fold_00/sanity.json
 
 # Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong
 nohup python evaluate_robustness.py --resume > robustness.log 2>&1 &
