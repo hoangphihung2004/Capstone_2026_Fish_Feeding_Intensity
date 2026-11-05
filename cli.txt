@@ -5,7 +5,7 @@
 # Nhiễu PGD sinh từ model nguồn (ResNet18 / ConvNeXtTiny / SwinTiny), đánh giá trên tập val và test.
 # Fold đại diện: 2 (accuracy sạch gần trung bình 5 fold nhất cho EfficientNet-B0, AF4 và cả 3 model nguồn).
 # Mỗi bước: chú thích nằm ở tiêu đề, khối bên dưới chỉ toàn lệnh -> copy nguyên khối để chạy.
-# Bước 5 = test nhanh (sanity fold 2), bước 6 = chạy chính thức (6A: chỉ fold 2, 6B: đủ 5 fold). Mỗi mục 1 nguồn, chạy từng mục.
+# Bước 5 = test nhanh tùy chọn (chỉ sanity). Bước 6 = chạy chính thức, tự sanity trước (6A: chỉ fold 2, 6B: đủ 5 fold). Mỗi mục 1 nguồn.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -45,7 +45,7 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && python -c "im
 # ------------------------------------------------------------------------------
 # 5-1. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN ResNet18 (vài phút, chạy từng mục một)
 #    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
-#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Bước này là TÙY CHỌN: lệnh chính thức ở bước 6 đã tự chạy sanity trước. Kết quả sanity cũng được upload (kind = sanity).
 #    Log: blackbox_ResNet18_test.log
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity > blackbox_ResNet18_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ResNet18_test.log
@@ -53,7 +53,7 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup python 
 # ------------------------------------------------------------------------------
 # 5-2. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN ConvNeXtTiny (vài phút, chạy từng mục một)
 #    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
-#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Bước này là TÙY CHỌN: lệnh chính thức ở bước 6 đã tự chạy sanity trước. Kết quả sanity cũng được upload (kind = sanity).
 #    Log: blackbox_ConvNeXtTiny_test.log
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity > blackbox_ConvNeXtTiny_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ConvNeXtTiny_test.log
@@ -61,73 +61,79 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup python 
 # ------------------------------------------------------------------------------
 # 5-3. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN SwinTiny (vài phút, chạy từng mục một)
 #    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
-#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Bước này là TÙY CHỌN: lệnh chính thức ở bước 6 đã tự chạy sanity trước. Kết quả sanity cũng được upload (kind = sanity).
 #    Log: blackbox_SwinTiny_test.log
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity > blackbox_SwinTiny_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_SwinTiny_test.log
 
 # ------------------------------------------------------------------------------
-# 6A-1. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ResNet18 (sau khi 5-1 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6A-1. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ResNet18 (tự sanity trước, PASS mới chạy tiếp)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Log: blackbox_ResNet18_fold2.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ResNet18_fold2.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ResNet18_fold2.log
 
 # ------------------------------------------------------------------------------
-# 6A-2. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ConvNeXtTiny (sau khi 5-2 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6A-2. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ConvNeXtTiny (tự sanity trước, PASS mới chạy tiếp)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Log: blackbox_ConvNeXtTiny_fold2.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ConvNeXtTiny_fold2.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ConvNeXtTiny_fold2.log
 
 # ------------------------------------------------------------------------------
-# 6A-3. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN SwinTiny (sau khi 5-3 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6A-3. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN SwinTiny (tự sanity trước, PASS mới chạy tiếp)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Log: blackbox_SwinTiny_fold2.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_SwinTiny_fold2.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_SwinTiny_fold2.log
 
 # ------------------------------------------------------------------------------
-# 6B-1. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ResNet18 (sau khi 5-1 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6B-1. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ResNet18 (tự sanity fold 2 trước)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
 #    Log: blackbox_ResNet18_all_folds.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ResNet18_all_folds.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ResNet18_all_folds.log
 
 # ------------------------------------------------------------------------------
-# 6B-2. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ConvNeXtTiny (sau khi 5-2 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6B-2. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ConvNeXtTiny (tự sanity fold 2 trước)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
 #    Log: blackbox_ConvNeXtTiny_all_folds.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ConvNeXtTiny_all_folds.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_ConvNeXtTiny_all_folds.log
 
 # ------------------------------------------------------------------------------
-# 6B-3. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN SwinTiny (sau khi 5-3 PASS)
-#    Chạy chính thức (đã test sanity ở bước 5):
+# 6B-3. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN SwinTiny (tự sanity fold 2 trước)
+#    Chạy chính thức: tự sanity ở fold 2 trước (FAIL thì dừng), PASS thì chạy thật:
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file video_efficientnet_b0_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Log đầy đủ được lưu trong thư mục kết quả (console_sanity.log, console_full.log, run.log) và nằm luôn trong zip upload.
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
 #    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
 #    Log: blackbox_SwinTiny_all_folds.log
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_SwinTiny_all_folds.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video/blackbox_SwinTiny_all_folds.log
 
 # ------------------------------------------------------------------------------
 # 7. KIỂM TRA TRẠNG THÁI TẤT CẢ LẦN CHẠY (copy toàn bộ kết quả gửi lại để kiểm tra)
