@@ -33,13 +33,6 @@ class ModelConfig(BaseModel):
     video_backbone: Literal["EfficientNetB0_S7"] = "EfficientNetB0_S7"
     pretrained_video: bool = Field(default=True, description="Use ImageNet weights for video encoder.")
     pretrained_audio: Literal[False] = False
-    dropout_rate: float = Field(default=0.2, ge=0.0, lt=1.0, description="Dropout probability before the multimodal classifier.")
-
-
-class AblationConfig(BaseModel):
-    """Fusion ablations, enabled cumulatively from the deepest scale to the shallowest."""
-
-    mode: Literal["AF0", "AF1", "AF2", "AF3", "AF4", "AF5"] = "AF4"
 
 
 class SplitterConfig(BaseModel):
@@ -81,7 +74,6 @@ class MultimodalTrainConfig(BaseModel):
 
     lr_scheduler: ReduceLROnPlateauConfig = Field(default_factory=ReduceLROnPlateauConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
-    ablation: AblationConfig = Field(default_factory=AblationConfig)
     dataset_splitter: SplitterConfig = Field(default_factory=SplitterConfig)
     audio_features: AudioFeaturesConfig = Field(default_factory=AudioFeaturesConfig)
     video_features: VideoFeaturesConfig = Field(default_factory=VideoFeaturesConfig)
