@@ -47,8 +47,22 @@ pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
 # ------------------------------------------------------------------------------
-# 4. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
-#    Phải in ra 5 dòng OK. Có dòng MISSING thì tải weight về /marimo/Results trước.
+# 4. TẢI WEIGHT ĐÃ TRAIN VỀ /marimo/Results (cần token ở bước 1; bỏ qua nếu đã có)
+#    Mỗi zip giải nén vào thư mục cùng tên, đúng với đường dẫn trong config/robustness_paths.json.
+# ------------------------------------------------------------------------------
+# Audio - AMARU (5 fold)
+hf download hoangphihung442004/Results_U_FFIA27K_audio AMARU_cross_validation_random_sample_fold_00_20261001_195846.zip AMARU_cross_validation_random_sample_fold_01_20261001_213447.zip AMARU_cross_validation_random_sample_fold_02_20261001_200323.zip AMARU_cross_validation_random_sample_fold_03_20261001_200203.zip AMARU_cross_validation_random_sample_fold_04_20261001_200504.zip --repo-type dataset --local-dir /marimo/Results
+for f in /marimo/Results/AMARU_cross_validation_random_sample_fold_*.zip; do unzip -o "$f" -d "/marimo/Results/$(basename "$f" .zip)"; done
+# Video - EfficientNet-B0 (1 zip chứa cả 5 fold)
+hf download hoangphihung442004/Results_U_FFIA27K_video EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip --repo-type dataset --local-dir /marimo/Results
+unzip -o /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip -d /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611
+# Multimodal - AF4 (5 fold)
+hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_00_20260920_112934.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_03_20260922_120215.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_04_20260922_203321.zip --repo-type dataset --local-dir /marimo/Results
+for f in /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_*.zip; do unzip -o "$f" -d "/marimo/Results/$(basename "$f" .zip)"; done
+
+# ------------------------------------------------------------------------------
+# 4b. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
+#    Phải in ra 5 dòng OK. Có dòng MISSING thì chạy lại bước 4.
 # ------------------------------------------------------------------------------
 python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
 
