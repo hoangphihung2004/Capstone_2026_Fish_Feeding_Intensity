@@ -1,0 +1,35 @@
+{
+  "folds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "splits": [
+    "val",
+    "test"
+  ],
+  "source": "ConvNeXtTiny",
+  "batch_size": 64,
+  "seed": 42,
+  "video_pgd": {
+    "mode": "sweep",
+    "epsilon": 0.03137254902,
+    "sweep": {
+      "start": 1e-05,
+      "end": 1.0,
+      "num": 16,
+      "spacing": "log"
+    },
+    "include_epsilons": [
+      0.03137254902
+    ],
+    "sanity_epsilon": 0.03137254902,
+    "norm": "linf",
+    "alpha_ratio": 0.25,
+    "steps": 20,
+    "random_start": true,
+    "loss": "cross_entropy"
+  }
+}
