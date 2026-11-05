@@ -1,0 +1,17 @@
+{
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "",
+  "targets": {
+    "0": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_00/video_best.pt",
+    "1": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_01/video_best.pt",
+    "2": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_02/video_best.pt",
+    "3": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_03/video_best.pt",
+    "4": "/marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611/U_FFIA27K_video/checkpoint/efficientnet_b0/fold_04/video_best.pt"
+  },
+  "sources": {
+    "ConvNeXtTiny": "/marimo/Results/ConvNeXtTiny_cross_validation_random_sample_1_49_channels_20260906_052820/U_FFIA27K_video/checkpoint/convnext_tiny/fold_{fold:02d}/video_best.pt",
+    "SwinTiny": "/marimo/Results/SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039/U_FFIA27K_video/checkpoint/swin_tiny/fold_{fold:02d}/video_best.pt",
+    "ResNet18": "/marimo/Results/ResNet18_cross_validation_random_sample_1_49_channels_20260908_060115/U_FFIA27K_video/checkpoint/resnet18/fold_{fold:02d}/video_best.pt"
+  },
+  "output_dir": "outputs/blackbox"
+}

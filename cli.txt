@@ -1,6 +1,8 @@
 # ==============================================================================
-# ROBUSTNESS EVALUATION - U_FFIA27K_video (chỉ nạp weight đã train, KHÔNG train lại)
-# Branch: U_FFIA27K_video_robustness
+# BLACK-BOX (TRANSFER) ATTACK - U_FFIA27K_video (chỉ nạp weight đã train, KHÔNG train lại)
+# Branch: U_FFIA27K_video_blackbox
+# Model đích: EfficientNet-B0 (video, first-last 6 kênh)
+# Nhiễu PGD sinh từ model nguồn (ConvNeXtTiny / SwinTiny / ResNet18), đánh giá trên tập val và test
 # Kết quả tự đẩy lên HF: hoangphihung442004/Adversarial_Attack_Model
 # ==============================================================================
 
@@ -36,7 +38,7 @@ cd /marimo
 git clone https://github.com/hoangphihung2004/Capstone_2026_Fish_Feeding_Intensity.git
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity
 git fetch origin
-git checkout U_FFIA27K_video_robustness
+git checkout U_FFIA27K_video_blackbox
 git pull
 cd U_FFIA27K_video
 pip install --upgrade pip
@@ -64,25 +66,40 @@ hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal
 for f in /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_*.zip; do unzip -o "$f" -d "/marimo/Results/$(basename "$f" .zip)"; done
 
 # ------------------------------------------------------------------------------
-# 4b. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
-#    Phải in ra 5 dòng OK. Có dòng MISSING thì chạy lại bước 4.
+# 4b. KIỂM TRA WEIGHT: model đích + 3 model nguồn, fold 0-4 (đường dẫn trong config/blackbox_paths.json)
+#    Phải in ra 20 dòng OK (5 target + 15 source). Có dòng MISSING thì chạy lại bước 4.
 # ------------------------------------------------------------------------------
-python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_video && python -c "import json,os;c=json.load(open('config/blackbox_paths.json'));[print('OK     ' if os.path.isfile(p) else 'MISSING', 'target', f, p) for f,p in c['targets'].items()];[print('OK     ' if os.path.isfile(t.format(fold=f)) else 'MISSING', s, f, t.format(fold=f)) for s,t in c['sources'].items() for f in range(5)]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY: sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold (0,1,2,3,4). Mỗi fold xong tự upload.
-#    Không git checkout nhánh khác trong cùng thư mục khi lệnh này đang chạy.
+# 5. CHẠY BLACK-BOX: sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold, cả tập val và test.
+#    Model nguồn chọn trong config/blackbox_config.json ("source": "ConvNeXtTiny" | "SwinTiny" | "ResNet18"),
+#    hoặc ghi đè bằng --source trên dòng lệnh (lệnh dưới dùng --source cho rõ).
+#    Mỗi fold xong tự upload lên HF vào thư mục blackbox_from_<Source>/, tên file ví dụ:
+#    video_..._blackbox_from_ConvNeXtTiny_fold00_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong cùng thư mục khi lệnh đang chạy.
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_video_robustness && git pull && cd U_FFIA27K_video
-nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
-tail -n +1 -f robustness.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_video_blackbox && git pull && cd U_FFIA27K_video
+# Chọn 1 trong 3 dòng nohup sau (mỗi dòng 1 model nguồn):
+nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 0 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 0 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18.log 2>&1 &
+# Hoặc chạy lần lượt cả 3 model nguồn trong 1 lệnh:
+nohup sh -c "for s in ConvNeXtTiny SwinTiny ResNet18; do python evaluate_blackbox.py --source \$s --folds 0 --sanity && python evaluate_blackbox.py --source \$s --folds 0 1 2 3 4 || exit 1; done" > blackbox_all.log 2>&1 &
+# Xem log (đổi tên file theo lệnh đã chạy):
+tail -n +1 -f blackbox_ConvNeXtTiny.log
 
 # Đọc log:
-#   - Sanity qua: các dòng [sanity] ... PASS, rồi chạy fold 0-4; mỗi fold xong có dòng "Uploaded ..._fold0X_full_....zip"
-#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [0]" -> gửi robustness.log hoặc outputs/robustness/*/fold_00/sanity.json
+#   - Sanity qua: các dòng [sanity] ... PASS (target/source clean khớp summary.csv ở val và test, nhiễu tái lập được,
+#     nhiễu nằm trong epsilon, model nguồn bị chính nó đánh lừa), rồi chạy fold 0-4.
+#   - Mỗi mức: "[..._from_<Source> fold X val|test] epsilon ...: target accuracy=... | source accuracy=..."
+#   - Mỗi fold xong: "Uploaded blackbox_from_<Source>/..._fold0X_val-test_full_....zip"
+#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [0]" -> gửi log hoặc outputs/blackbox/*/fold_00/sanity.json
 
-# Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong
-nohup python evaluate_robustness.py --resume > robustness.log 2>&1 &
+# Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong (nhớ đúng --source)
+nohup python evaluate_blackbox.py --source ConvNeXtTiny --resume > blackbox_ConvNeXtTiny.log 2>&1 &
 
 # Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
-python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
+python evaluate_blackbox.py --source ConvNeXtTiny --upload-only --folds 0 1 2 3 4
+
+# Chỉ chạy 1 tập: thêm --splits test (hoặc --splits val). Mặc định chạy cả val và test.
