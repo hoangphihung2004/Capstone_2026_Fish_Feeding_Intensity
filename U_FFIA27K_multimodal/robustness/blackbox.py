@@ -16,6 +16,7 @@ accuracy under attack can never exceed the clean accuracy.
 
 import argparse
 import csv
+import sys
 import hashlib
 import json
 import logging
@@ -542,20 +543,38 @@ def run_cli(build_target: Callable[[int, BlackBoxConfig, BlackBoxPaths, Path, to
         if args.max_batches is not None:
             kind += "-partial"
         for fold in folds:
-            target_checkpoint = paths.target_for(fold)
-            source_checkpoint = paths.source_for(config.source, fold)
-            target = build_target(fold, config, paths, target_checkpoint, device)
-            source = load_source(config.source, source_checkpoint, device)
-            for split in config.splits:
-                records = target.split_records(split)
-                verify_split(records, target_checkpoint, split)
-                verify_split(records, source_checkpoint, split)
-            if args.sanity:
-                if not run_sanity(target, source, config, fold, target_checkpoint, source_checkpoint, output_dir, args.max_batches):
-                    failed.append(fold)
-            else:
-                evaluate_fold(target, source, config, fold, target_checkpoint, source_checkpoint, output_dir,
-                              args.max_batches, args.resume)
+            # The whole console log of this fold (data loading, split checks, sanity or evaluation) is kept
+            # next to the results as console_<kind>.log, so it travels inside the uploaded zip.
+            fold_dir = output_dir / run_name(getattr(build_target, "name"), config.source) / f"fold_{fold:02d}"
+            fold_dir.mkdir(parents=True, exist_ok=True)
+            console = logging.FileHandler(fold_dir / f"console_{kind}.log", mode="w", encoding="utf-8")
+            console.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+            logging.getLogger().addHandler(console)
+            try:
+                logger.info(
+                    "Black-box run | kind: %s | fold: %d | source: %s | splits: %s | config hash: %s | command: %s",
+                    kind, fold, config.source, config.splits, config_hash(config), " ".join(sys.argv),
+                )
+                target_checkpoint = paths.target_for(fold)
+                source_checkpoint = paths.source_for(config.source, fold)
+                target = build_target(fold, config, paths, target_checkpoint, device)
+                source = load_source(config.source, source_checkpoint, device)
+                for split in config.splits:
+                    records = target.split_records(split)
+                    verify_split(records, target_checkpoint, split)
+                    verify_split(records, source_checkpoint, split)
+                if args.sanity:
+                    if not run_sanity(target, source, config, fold, target_checkpoint, source_checkpoint, output_dir, args.max_batches):
+                        failed.append(fold)
+                else:
+                    evaluate_fold(target, source, config, fold, target_checkpoint, source_checkpoint, output_dir,
+                                  args.max_batches, args.resume)
+            except Exception:
+                logger.exception("Black-box run failed on fold %d", fold)
+                raise
+            finally:
+                logging.getLogger().removeHandler(console)
+                console.close()
             upload(target.name, fold, kind)
             del target, source
             if torch.cuda.is_available():
