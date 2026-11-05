@@ -67,16 +67,18 @@ for f in /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientN
 
 # ------------------------------------------------------------------------------
 # 4b. KIỂM TRA WEIGHT: model đích + 3 model nguồn, fold 0-4 (đường dẫn trong config/blackbox_paths.json)
-#    Phải in ra 20 dòng OK (5 target + 15 source). Có dòng MISSING thì chạy lại bước 4.
+#    Phải in ra 20 dòng OK (5 target + 15 source; chạy black-box chỉ cần fold 2). Có dòng MISSING thì chạy lại bước 4.
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -c "import json,os;c=json.load(open('config/blackbox_paths.json'));[print('OK     ' if os.path.isfile(p) else 'MISSING', 'target', f, p) for f,p in c['targets'].items()];[print('OK     ' if os.path.isfile(t.format(fold=f)) else 'MISSING', s, f, t.format(fold=f)) for s,t in c['sources'].items() for f in range(5)]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY BLACK-BOX: sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold, cả tập val và test.
+# 5. CHẠY BLACK-BOX trên 1 fold đại diện (fold 2): sanity rồi chạy đầy đủ, cả tập val và test.
+#    Fold 2 có accuracy sạch gần trung bình 5 fold nhất cho cả EfficientNet-B0 (-0.17) và AF4 (+0.14),
+#    và cả 3 model nguồn (ConvNeXt -0.07, Swin +0.04, ResNet18 -0.61). Đổi fold: sửa "folds" trong config/blackbox_config.json.
 #    Model nguồn chọn trong config/blackbox_config.json ("source": "ConvNeXtTiny" | "SwinTiny" | "ResNet18"),
 #    hoặc ghi đè bằng --source trên dòng lệnh (lệnh dưới dùng --source cho rõ).
-#    Mỗi fold xong tự upload lên HF vào thư mục blackbox_from_<Source>/, tên file ví dụ:
-#    multimodal_..._blackbox_from_ConvNeXtTiny_fold00_val-test_full_<thời gian>.zip
+#    Chạy xong tự upload lên HF vào thư mục blackbox_from_<Source>/, tên file ví dụ:
+#    multimodal_..._blackbox_from_ConvNeXtTiny_fold02_val-test_full_<thời gian>.zip
 #    Không git checkout nhánh khác trong cùng thư mục khi lệnh đang chạy.
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_multimodal_blackbox && git pull && cd U_FFIA27K_multimodal
@@ -84,25 +86,25 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git check
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 # Chọn 1 trong 3 dòng nohup sau (mỗi dòng 1 model nguồn):
-nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny.log 2>&1 &
-nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 0 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny.log 2>&1 &
-nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 0 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18.log 2>&1 &
 # Hoặc chạy lần lượt cả 3 model nguồn trong 1 lệnh:
-nohup sh -c "for s in ConvNeXtTiny SwinTiny ResNet18; do python evaluate_blackbox.py --source \$s --folds 0 --sanity && python evaluate_blackbox.py --source \$s --folds 0 1 2 3 4 || exit 1; done" > blackbox_all.log 2>&1 &
+nohup sh -c "for s in ConvNeXtTiny SwinTiny ResNet18; do python evaluate_blackbox.py --source \$s --folds 2 --sanity && python evaluate_blackbox.py --source \$s --folds 2 || exit 1; done" > blackbox_all.log 2>&1 &
 # Xem log (đổi tên file theo lệnh đã chạy):
 tail -n +1 -f blackbox_ConvNeXtTiny.log
 
 # Đọc log:
 #   - Sanity qua: các dòng [sanity] ... PASS (target/source clean khớp summary.csv ở val và test, nhiễu tái lập được,
-#     nhiễu nằm trong epsilon, model nguồn bị chính nó đánh lừa), rồi chạy fold 0-4.
+#     nhiễu nằm trong epsilon, model nguồn bị chính nó đánh lừa), rồi chạy fold 2.
 #   - Mỗi mức: "[..._from_<Source> fold X val|test] epsilon ...: target accuracy=... | source accuracy=..."
-#   - Mỗi fold xong: "Uploaded blackbox_from_<Source>/..._fold0X_val-test_full_....zip"
-#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [0]" -> gửi log hoặc outputs/blackbox/*/fold_00/sanity.json
+#   - Chạy xong: "Uploaded blackbox_from_<Source>/..._fold02_val-test_full_....zip"
+#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [2]" -> gửi log hoặc outputs/blackbox/*/fold_02/sanity.json
 
 # Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong (nhớ đúng --source)
 nohup python evaluate_blackbox.py --source ConvNeXtTiny --resume > blackbox_ConvNeXtTiny.log 2>&1 &
 
 # Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
-python evaluate_blackbox.py --source ConvNeXtTiny --upload-only --folds 0 1 2 3 4
+python evaluate_blackbox.py --source ConvNeXtTiny --upload-only --folds 2
 
 # Chỉ chạy 1 tập: thêm --splits test (hoặc --splits val). Mặc định chạy cả val và test.
