@@ -72,9 +72,10 @@ for f in /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientN
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -c "import json,os;c=json.load(open('config/blackbox_paths.json'));[print('OK     ' if os.path.isfile(p) else 'MISSING', 'target', f, p) for f,p in c['targets'].items()];[print('OK     ' if os.path.isfile(t.format(fold=f)) else 'MISSING', s, f, t.format(fold=f)) for s,t in c['sources'].items() for f in range(5)]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY BLACK-BOX trên 1 fold đại diện (fold 2): sanity rồi chạy đầy đủ, cả tập val và test.
+# 5. CHẠY BLACK-BOX, cả tập val và test. Có 2 cách: (A) chỉ fold đại diện 2, (B) TOÀN BỘ 5 fold.
+#    Cả 2 cách đều tự upload lên HF sau mỗi fold.
 #    Fold 2 có accuracy sạch gần trung bình 5 fold nhất cho cả EfficientNet-B0 (-0.17) và AF4 (+0.14),
-#    và cả 3 model nguồn (ConvNeXt -0.07, Swin +0.04, ResNet18 -0.61). Đổi fold: sửa "folds" trong config/blackbox_config.json.
+#    và cả 3 model nguồn (ConvNeXt -0.07, Swin +0.04, ResNet18 -0.61). Chọn fold bằng --folds trên dòng lệnh.
 #    Model nguồn chọn trong config/blackbox_config.json ("source": "ConvNeXtTiny" | "SwinTiny" | "ResNet18"),
 #    hoặc ghi đè bằng --source trên dòng lệnh (lệnh dưới dùng --source cho rõ).
 #    Chạy xong tự upload lên HF vào thư mục blackbox_from_<Source>/, tên file ví dụ:
@@ -85,12 +86,21 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git check
 # Cài torchaudio cùng phiên bản với torch (máy marimo: torch 2.11.0), tránh lỗi libtorchaudio.so: undefined symbol
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
-# Chọn 1 trong 3 dòng nohup sau (mỗi dòng 1 model nguồn):
+# (A) CHỈ FOLD 2 - chọn 1 trong 3 dòng nohup sau (mỗi dòng 1 model nguồn):
 nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny.log 2>&1 &
 nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny.log 2>&1 &
 nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18.log 2>&1 &
 # Hoặc chạy lần lượt cả 3 model nguồn trong 1 lệnh:
 nohup sh -c "for s in ConvNeXtTiny SwinTiny ResNet18; do python evaluate_blackbox.py --source \$s --folds 2 --sanity && python evaluate_blackbox.py --source \$s --folds 2 || exit 1; done" > blackbox_all.log 2>&1 &
+# (B) TOÀN BỘ 5 FOLD (0,1,2,3,4) - sanity ở fold 2, qua thì chạy đủ 5 fold; mỗi fold xong tự upload.
+#     Chọn 1 trong 3 dòng nohup sau (mỗi dòng 1 model nguồn, hợp để mỗi tài khoản chạy 1 dòng):
+nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny_all_folds.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny_all_folds.log 2>&1 &
+nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18_all_folds.log 2>&1 &
+# Hoặc chạy lần lượt cả 3 model nguồn x 5 fold trong 1 lệnh (rất lâu):
+nohup sh -c "for s in ConvNeXtTiny SwinTiny ResNet18; do python evaluate_blackbox.py --source \$s --folds 2 --sanity && python evaluate_blackbox.py --source \$s --folds 0 1 2 3 4 || exit 1; done" > blackbox_all_folds.log 2>&1 &
+#     Chạy 5 fold cần weight của cả 5 fold: zip EfficientNet-B0 và 3 zip model nguồn đã chứa đủ 5 fold;
+#     multimodal cần đủ 5 zip AF4 (bước 4). Bước 4b phải in đủ 20 dòng OK.
 # Xem log (đổi tên file theo lệnh đã chạy):
 tail -n +1 -f blackbox_ConvNeXtTiny.log
 
@@ -106,5 +116,6 @@ nohup python evaluate_blackbox.py --source ConvNeXtTiny --resume > blackbox_Conv
 
 # Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
 python evaluate_blackbox.py --source ConvNeXtTiny --upload-only --folds 2
+# (chạy 5 fold thì upload lại bằng: --upload-only --folds 0 1 2 3 4)
 
 # Chỉ chạy 1 tập: thêm --splits test (hoặc --splits val). Mặc định chạy cả val và test.
