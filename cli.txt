@@ -5,7 +5,7 @@
 # Nhiễu PGD sinh từ model nguồn (ResNet18 / ConvNeXtTiny / SwinTiny), đánh giá trên tập val và test.
 # Fold đại diện: 2 (accuracy sạch gần trung bình 5 fold nhất cho EfficientNet-B0, AF4 và cả 3 model nguồn).
 # Mỗi bước: chú thích nằm ở tiêu đề, khối bên dưới chỉ toàn lệnh -> copy nguyên khối để chạy.
-# Các mục 5A / 5B / 5C / 5D là các LỰA CHỌN khác nhau: chỉ copy mục mình cần.
+# Bước 5 = test nhanh (sanity fold 2), bước 6 = chạy chính thức (6A: chỉ fold 2, 6B: đủ 5 fold). Mỗi mục 1 nguồn, chạy từng mục.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -46,87 +46,123 @@ hf download hoangphihung442004/Results_U_FFIA27K_video ResNet18_cross_validation
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -c "import json,os;c=json.load(open('config/blackbox_paths.json'));[print('OK     ' if os.path.isfile(p) else 'MISSING', 'target', f, p) for f,p in c['targets'].items()];[print('OK     ' if os.path.isfile(t.format(fold=f)) else 'MISSING', s, f, t.format(fold=f)) for s,t in c['sources'].items() for f in range(5)]"
 
 # ------------------------------------------------------------------------------
-# 5A. CHẠY FOLD 2 (đại diện) - CẢ 3 MODEL NGUỒN LẦN LƯỢT TRÊN 1 MÁY (an toàn RAM/GPU)
-#    Sanity ở fold 2 trước (accuracy sạch của model đích và nguồn phải khớp summary.csv ở val và test), qua thì chạy thật:
+# 5-1. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN ResNet18 (vài phút, chạy từng mục một)
+#    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
+#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Log: blackbox_ResNet18_test.log
+# ------------------------------------------------------------------------------
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity > blackbox_ResNet18_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ResNet18_test.log
+
+# ------------------------------------------------------------------------------
+# 5-2. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN ConvNeXtTiny (vài phút, chạy từng mục một)
+#    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
+#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Log: blackbox_ConvNeXtTiny_test.log
+# ------------------------------------------------------------------------------
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity > blackbox_ConvNeXtTiny_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ConvNeXtTiny_test.log
+
+# ------------------------------------------------------------------------------
+# 5-3. TEST NHANH FOLD ĐẠI DIỆN 2 - CHỈ SANITY - NGUỒN SwinTiny (vài phút, chạy từng mục một)
+#    Kiểm tra: accuracy sạch của model đích và nguồn khớp summary.csv (val, test), nhiễu tái lập, nhiễu trong epsilon, nguồn bị chính nó đánh lừa.
+#    Tất cả PASS (dòng transfer_vs_random_noise là INFO) thì mới chạy chính thức ở bước 6. Kết quả sanity cũng được upload (kind = sanity).
+#    Log: blackbox_SwinTiny_test.log
+# ------------------------------------------------------------------------------
+pip install --no-deps --force-reinstall "torchaudio==2.11.0"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity > blackbox_SwinTiny_test.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_SwinTiny_test.log
+
+# ------------------------------------------------------------------------------
+# 6A-1. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ResNet18 (sau khi 5-1 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
 #    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
 #    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
 #    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
-#    Thứ tự ResNet18 -> ConvNeXtTiny -> SwinTiny; nguồn nào lỗi thì dừng ở đó. Log: blackbox_fold2_all.log
+#    Log: blackbox_ResNet18_fold2.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "for s in ResNet18 ConvNeXtTiny SwinTiny; do python evaluate_blackbox.py --source \$s --folds 2 --sanity && python evaluate_blackbox.py --source \$s --folds 2 || exit 1; done" > blackbox_fold2_all.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_fold2_all.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ResNet18_fold2.log
 
 # ------------------------------------------------------------------------------
-# 5B-1. CHẠY FOLD 2 - CHỈ MODEL NGUỒN ResNet18 (mỗi tài khoản chạy 1 mục 5B khác nhau)
-#    Log: blackbox_ResNet18.log
+# 6A-2. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN ConvNeXtTiny (sau khi 5-2 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
+#    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
+#    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
+#    Log: blackbox_ConvNeXtTiny_fold2.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 2 --sanity && python evaluate_blackbox.py --source ResNet18 --folds 2" > blackbox_ResNet18.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ResNet18.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ConvNeXtTiny_fold2.log
 
 # ------------------------------------------------------------------------------
-# 5B-2. CHẠY FOLD 2 - CHỈ MODEL NGUỒN ConvNeXtTiny (mỗi tài khoản chạy 1 mục 5B khác nhau)
-#    Log: blackbox_ConvNeXtTiny.log
+# 6A-3. CHÍNH THỨC - CHỈ FOLD ĐẠI DIỆN 2 - NGUỒN SwinTiny (sau khi 5-3 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
+#    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
+#    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
+#    Log: blackbox_SwinTiny_fold2.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 2 --sanity && python evaluate_blackbox.py --source ConvNeXtTiny --folds 2" > blackbox_ConvNeXtTiny.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ConvNeXtTiny.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny_fold2.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_SwinTiny_fold2.log
 
 # ------------------------------------------------------------------------------
-# 5B-3. CHẠY FOLD 2 - CHỈ MODEL NGUỒN SwinTiny (mỗi tài khoản chạy 1 mục 5B khác nhau)
-#    Log: blackbox_SwinTiny.log
+# 6B-1. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ResNet18 (sau khi 5-1 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
+#    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
+#    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
+#    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
+#    Log: blackbox_ResNet18_all_folds.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 2 --sanity && python evaluate_blackbox.py --source SwinTiny --folds 2" > blackbox_SwinTiny.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_SwinTiny.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 0 1 2 3 4" > blackbox_ResNet18_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ResNet18_all_folds.log
 
 # ------------------------------------------------------------------------------
-# 5C. SAU KHI FOLD 2 XONG: 4 FOLD CÒN LẠI (0 1 3 4) CHO CẢ 3 NGUỒN, LẦN LƯỢT TRÊN 1 MÁY
-#    Không chạy lại fold 2. Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Log: blackbox_other_folds_all.log
+# 6B-2. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN ConvNeXtTiny (sau khi 5-2 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
+#    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
+#    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
+#    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
+#    Log: blackbox_ConvNeXtTiny_all_folds.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "for s in ResNet18 ConvNeXtTiny SwinTiny; do python evaluate_blackbox.py --source \$s --folds 0 1 3 4 || exit 1; done" > blackbox_other_folds_all.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_other_folds_all.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 2 3 4" > blackbox_ConvNeXtTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ConvNeXtTiny_all_folds.log
 
 # ------------------------------------------------------------------------------
-# 5D-1. SAU KHI FOLD 2 XONG: 4 FOLD CÒN LẠI (0 1 3 4) - CHỈ NGUỒN ResNet18
-#    Log: blackbox_ResNet18_other_folds.log
+# 6B-3. CHÍNH THỨC - TOÀN BỘ 5 FOLD (0 1 2 3 4) - NGUỒN SwinTiny (sau khi 5-3 PASS)
+#    Chạy chính thức (đã test sanity ở bước 5):
+#    cả val và test, 17 mức epsilon. Mỗi fold xong tự upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục
+#    blackbox_from_<Nguồn>/, tên file multimodal_multimodal_blackbox_from_<Nguồn>_foldXX_val-test_full_<thời gian>.zip
+#    Không git checkout nhánh khác trong thư mục này khi đang chạy. Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy.
+#    Cần weight đủ 5 fold (bước 4b đủ 20 dòng OK). Đã chạy 6A (fold 2) rồi thì đổi '0 1 2 3 4' thành '0 1 3 4' để khỏi chạy lại fold 2.
+#    Log: blackbox_SwinTiny_all_folds.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ResNet18 --folds 0 1 3 4" > blackbox_ResNet18_other_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ResNet18_other_folds.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 0 1 2 3 4" > blackbox_SwinTiny_all_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_SwinTiny_all_folds.log
 
 # ------------------------------------------------------------------------------
-# 5D-2. SAU KHI FOLD 2 XONG: 4 FOLD CÒN LẠI (0 1 3 4) - CHỈ NGUỒN ConvNeXtTiny
-#    Log: blackbox_ConvNeXtTiny_other_folds.log
-# ------------------------------------------------------------------------------
-pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source ConvNeXtTiny --folds 0 1 3 4" > blackbox_ConvNeXtTiny_other_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_ConvNeXtTiny_other_folds.log
-
-# ------------------------------------------------------------------------------
-# 5D-3. SAU KHI FOLD 2 XONG: 4 FOLD CÒN LẠI (0 1 3 4) - CHỈ NGUỒN SwinTiny
-#    Log: blackbox_SwinTiny_other_folds.log
-# ------------------------------------------------------------------------------
-pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "python evaluate_blackbox.py --source SwinTiny --folds 0 1 3 4" > blackbox_SwinTiny_other_folds.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_SwinTiny_other_folds.log
-
-# ------------------------------------------------------------------------------
-# 6. KIỂM TRA TRẠNG THÁI TẤT CẢ LẦN CHẠY (copy toàn bộ kết quả gửi lại để kiểm tra)
+# 7. KIỂM TRA TRẠNG THÁI TẤT CẢ LẦN CHẠY (copy toàn bộ kết quả gửi lại để kiểm tra)
 #    Với mỗi file log: kết quả [sanity], số mức đã xong, dòng clean, upload, đoạn lỗi nếu có; cuối cùng là các tiến trình còn chạy, RAM, GPU.
 #    Fold 2 xong đủ khi có 36 dòng 'target accuracy=' (2 clean + 34 mức) và dòng 'Uploaded ..._fold02_val-test_full_...zip'.
 # ------------------------------------------------------------------------------
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && for f in blackbox_*.log; do echo "===================== $f ===================="; grep -E "\[sanity\]" $f | sed 's/.*\[sanity\]/[sanity]/'; echo "--- so dong 'target accuracy=': $(grep -c 'target accuracy=' $f)"; grep -E "clean: target|epsilon 0.0313|epsilon 1.0:" $f | sed 's/.*\] //' | tail -n 8; grep -E "Uploaded|Upload failed|Sanity checks failed" $f; if grep -qE "Traceback|Error|error:|Killed|out of memory" $f; then echo "--- LOI:"; grep -n -E "Traceback|Error|error:|Killed|out of memory" $f | head -n 5; echo "--- 25 dong cuoi:"; tail -n 25 $f; fi; done; echo "===================== TIEN TRINH DANG CHAY ====================="; ps aux | grep [e]valuate_blackbox | grep -o "evaluate_blackbox.py.*" | sort | uniq -c; free -h | head -n 2; nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv
 
 # ------------------------------------------------------------------------------
-# 7. BỊ NGẮT GIỮA CHỪNG: CHẠY TIẾP CÁC MỨC CHƯA XONG
-#    Sửa S= và FOLDS= ở đầu lệnh cho đúng lần chạy bị ngắt (S: ResNet18 | ConvNeXtTiny | SwinTiny; FOLDS: 2 hoặc '0 1 3 4').
+# 8. BỊ NGẮT GIỮA CHỪNG: CHẠY TIẾP CÁC MỨC CHƯA XONG
+#    Sửa S= và FOLDS= ở đầu lệnh cho đúng lần chạy bị ngắt (S: ResNet18 | ConvNeXtTiny | SwinTiny; FOLDS: 2 hoặc '0 1 2 3 4' hoặc '0 1 3 4').
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 S=ResNet18; FOLDS=2; cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup python evaluate_blackbox.py --source $S --folds $FOLDS --resume > blackbox_${S}_resume.log 2>&1 & sleep 2; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/blackbox_${S}_resume.log
 
 # ------------------------------------------------------------------------------
-# 8. UPLOAD LỖI: UPLOAD LẠI KẾT QUẢ ĐÃ CÓ, KHÔNG CHẠY LẠI
+# 9. UPLOAD LỖI: UPLOAD LẠI KẾT QUẢ ĐÃ CÓ, KHÔNG CHẠY LẠI
 #    Sửa S= và FOLDS= ở đầu lệnh (FOLDS là các fold đã chạy xong).
 # ------------------------------------------------------------------------------
 S=ResNet18; FOLDS=2; cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python evaluate_blackbox.py --source $S --upload-only --folds $FOLDS
 
 # ------------------------------------------------------------------------------
-# 9. DỪNG TẤT CẢ LẦN CHẠY BLACK-BOX TRÊN MÁY NÀY
-#    Kết quả các mức đã xong vẫn được giữ; chạy tiếp bằng bước 7. Lệnh in ra 0 là đã dừng hết.
+# 10. DỪNG TẤT CẢ LẦN CHẠY BLACK-BOX TRÊN MÁY NÀY
+#    Kết quả các mức đã xong vẫn được giữ; chạy tiếp bằng bước 8. Lệnh in ra 0 là đã dừng hết.
 # ------------------------------------------------------------------------------
 pkill -f evaluate_blackbox.py; sleep 2; ps aux | grep -c [e]valuate_blackbox
