@@ -18,7 +18,10 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-MODALITY = {"amaru": "audio", "efficientnet_b0": "video", "multimodal": "multimodal"}
+MODALITY = {
+    "amaru": "audio", "panns_cnn6": "audio", "panns_cnn10": "audio",
+    "efficientnet_b0": "video", "multimodal": "multimodal",
+}
 UPLOAD_LOG_FIELDS = ["uploaded_at", "repo_id", "path_in_repo", "local_zip"]
 
 

@@ -53,6 +53,9 @@ python -c "import torch, torchaudio; print('torch', torch.__version__, '| torcha
 # Audio - AMARU (5 fold)
 hf download hoangphihung442004/Results_U_FFIA27K_audio AMARU_cross_validation_random_sample_fold_00_20261001_195846.zip AMARU_cross_validation_random_sample_fold_01_20261001_213447.zip AMARU_cross_validation_random_sample_fold_02_20261001_200323.zip AMARU_cross_validation_random_sample_fold_03_20261001_200203.zip AMARU_cross_validation_random_sample_fold_04_20261001_200504.zip --repo-type dataset --local-dir /marimo/Results
 for f in /marimo/Results/AMARU_cross_validation_random_sample_fold_*.zip; do unzip -o "$f" -d "/marimo/Results/$(basename "$f" .zip)"; done
+# Audio - PANNS CNN6 và CNN10 (mỗi zip chứa cả 5 fold, ~0.3 GB mỗi file; bộ chạy ngày 2026-07-29, val 82.64 ± 0.45 / 81.18 ± 0.32)
+hf download hoangphihung442004/Results_U_FFIA27K_audio PANNS_Cnn6_cross_validation_random_sample__20260729_030425.zip PANNS_Cnn10_cross_validation_random_sample__20260729_030425.zip --repo-type dataset --local-dir /marimo/Results
+for n in PANNS_Cnn6_cross_validation_random_sample__20260729_030425 PANNS_Cnn10_cross_validation_random_sample__20260729_030425; do unzip -o "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
 # Video - EfficientNet-B0 (1 zip chứa cả 5 fold)
 hf download hoangphihung442004/Results_U_FFIA27K_video EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip --repo-type dataset --local-dir /marimo/Results
 unzip -o /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip -d /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611
@@ -64,28 +67,49 @@ hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal
 for f in /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_*.zip; do unzip -o "$f" -d "/marimo/Results/$(basename "$f" .zip)"; done
 
 # ------------------------------------------------------------------------------
-# 4b. KIỂM TRA WEIGHT fold 0-4 có trên máy (đường dẫn trong config/robustness_paths.json)
-#    Phải in ra 5 dòng OK. Có dòng MISSING thì chạy lại bước 4.
+# 4b. KIỂM TRA WEIGHT fold 0-4 có trên máy cho cả 3 model audio (AMARU, CNN6, CNN10)
+#    Phải in ra 15 dòng OK. Có dòng MISSING thì chạy lại bước 4.
 # ------------------------------------------------------------------------------
-python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', f, p) for f,p in json.load(open('config/robustness_paths.json'))['checkpoints'].items()]"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', c, f, p) for c in ('config/robustness_paths.json','config/robustness_paths_panns_cnn6.json','config/robustness_paths_panns_cnn10.json') for f,p in json.load(open(c))['checkpoints'].items()]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY: sanity ở fold 0, qua thì tự chạy TOÀN BỘ 5 fold (0,1,2,3,4). Mỗi fold xong tự upload.
-#    Không git checkout nhánh khác trong cùng thư mục khi lệnh này đang chạy.
+# 5. CHUẨN BỊ (chạy 1 lần trước bước 6): lấy code mới nhất + torchaudio khớp torch (máy marimo: torch 2.11.0)
+#    Phải in ra torch 2.11.0 | torchaudio 2.11.0
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_audio_robustness && git pull && cd U_FFIA27K_audio
-# Cài torchaudio cùng phiên bản với torch (máy marimo: torch 2.11.0), tránh lỗi libtorchaudio.so: undefined symbol
-pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
-nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness.log 2>&1 &
-tail -n +1 -f robustness.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_audio_robustness && git pull && cd U_FFIA27K_audio && pip install --no-deps --force-reinstall "torchaudio==2.11.0" && python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
-# Đọc log:
-#   - Sanity qua: các dòng [sanity] ... PASS, rồi chạy fold 0-4; mỗi fold xong có dòng "Uploaded ..._fold0X_full_....zip"
-#   - Sanity FAIL: dừng với "Sanity checks failed on folds: [0]" -> gửi robustness.log hoặc outputs/robustness/*/fold_00/sanity.json
+# ------------------------------------------------------------------------------
+# 6. CHẠY: mỗi model 1 lệnh riêng (copy cả dòng). Sanity ở fold 0, qua thì tự chạy 5 fold, mỗi fold xong tự upload.
+#    Model được chọn bằng file --paths (không có --paths = AMARU). Kết quả lên HF:
+#      audio_amaru/..., audio_panns_cnn6/..., audio_panns_cnn10/...
+#    Chạy lần lượt từng model (đợi model trước xong) để tránh quá tải RAM. Ctrl+C chỉ thoát xem log, lệnh vẫn chạy.
+#    Log: sanity qua có các dòng "[sanity] ... PASS"; mỗi fold xong có dòng "Uploaded audio_<model>/..._fold0X_full_....zip"
+#    6-1 CNN6 | 6-2 CNN10 | 6-3 AMARU (đã chạy xong trước đó, chỉ cần khi muốn chạy lại)
+# ------------------------------------------------------------------------------
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && nohup sh -c "python evaluate_robustness.py --paths config/robustness_paths_panns_cnn6.json --folds 0 --sanity && python evaluate_robustness.py --paths config/robustness_paths_panns_cnn6.json --folds 0 1 2 3 4" > robustness_panns_cnn6.log 2>&1 & sleep 2; tail -n +1 -f robustness_panns_cnn6.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && nohup sh -c "python evaluate_robustness.py --paths config/robustness_paths_panns_cnn10.json --folds 0 --sanity && python evaluate_robustness.py --paths config/robustness_paths_panns_cnn10.json --folds 0 1 2 3 4" > robustness_panns_cnn10.log 2>&1 & sleep 2; tail -n +1 -f robustness_panns_cnn10.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && nohup sh -c "python evaluate_robustness.py --folds 0 --sanity && python evaluate_robustness.py --folds 0 1 2 3 4" > robustness_amaru.log 2>&1 & sleep 2; tail -n +1 -f robustness_amaru.log
 
-# Nếu bị ngắt giữa chừng: chạy tiếp các mức chưa xong
-nohup python evaluate_robustness.py --resume > robustness.log 2>&1 &
+# ------------------------------------------------------------------------------
+# 7. XEM LẠI LOG / TRẠNG THÁI (CNN6 | CNN10 | tiến trình đang chạy)
+# ------------------------------------------------------------------------------
+tail -n 30 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio/robustness_panns_cnn6.log
+tail -n 30 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio/robustness_panns_cnn10.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && ps aux | grep -c "[e]valuate_robustness.py"; grep -h "Uploaded\|FAIL\|Error\|Traceback" robustness_*.log
 
-# Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
-python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
+# ------------------------------------------------------------------------------
+# 8. NẾU BỊ NGẮT GIỮA CHỪNG: chạy tiếp các mức chưa xong (CNN6 | CNN10)
+# ------------------------------------------------------------------------------
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && nohup python evaluate_robustness.py --paths config/robustness_paths_panns_cnn6.json --folds 0 1 2 3 4 --resume > robustness_panns_cnn6.log 2>&1 & sleep 2; tail -n +1 -f robustness_panns_cnn6.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && nohup python evaluate_robustness.py --paths config/robustness_paths_panns_cnn10.json --folds 0 1 2 3 4 --resume > robustness_panns_cnn10.log 2>&1 & sleep 2; tail -n +1 -f robustness_panns_cnn10.log
+
+# ------------------------------------------------------------------------------
+# 9. NẾU UPLOAD LỖI: upload lại kết quả đã có mà không chạy lại
+#    Lưu ý: lệnh này upload MỌI model có trong outputs/robustness (mỗi lần tên file có timestamp mới, không ghi đè).
+# ------------------------------------------------------------------------------
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
+
+# ------------------------------------------------------------------------------
+# 10. DỪNG TOÀN BỘ
+# ------------------------------------------------------------------------------
+pkill -f evaluate_robustness.py

@@ -1,4 +1,10 @@
-"""AMARU robustness: Gaussian noise at fixed SNR levels. PGD is not applied to audio."""
+"""Audio robustness: Gaussian noise at fixed SNR levels. PGD is not applied to audio.
+
+The backbone comes from `model.backbone` in the train config that the paths file points to:
+  config/robustness_paths.json             -> AMARU       (results under outputs/robustness/amaru)
+  config/robustness_paths_panns_cnn6.json  -> PANNS_Cnn6  (results under outputs/robustness/panns_cnn6)
+  config/robustness_paths_panns_cnn10.json -> PANNS_Cnn10 (results under outputs/robustness/panns_cnn10)
+"""
 
 import sys
 from pathlib import Path
@@ -13,17 +19,24 @@ from config import TrainConfig
 from dataset.data_split import _sample_identity_key
 from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
-from models import AMARU, AudioModel
+import models
+from models import AudioModel
 from robustness.core import Batch, BaseAdapter, fold_splitter_config, prepare_model, run_cli
 
 
+SUPPORTED_BACKBONES = ("AMARU", "PANNS_Cnn6", "PANNS_Cnn10")
+
+
 class AudioAdapter(BaseAdapter):
-    name = "amaru"
     supports = ("audio_noise",)
 
     def __init__(self, fold, config, paths, checkpoint_path, device) -> None:
         self.device = device
         train_config = TrainConfig.from_json(paths.train_config_path)
+        backbone_name = train_config.model.backbone
+        if backbone_name not in SUPPORTED_BACKBONES:
+            raise ValueError(f"Backbone {backbone_name!r} in {paths.train_config_path} is not one of {SUPPORTED_BACKBONES}.")
+        self.name = backbone_name.lower()
         manager = FishVoiceDataLoader(
             sample_rate=train_config.audio_features.sample_rate,
             batch_size=config.batch_size,
@@ -33,7 +46,8 @@ class AudioAdapter(BaseAdapter):
         )
         self.entries = manager.test_dict
         self.loader = manager.get_dataloader("test", shuffle=False, drop_last=False)
-        model = AudioModel(frontend=AudioFrontend(config=train_config.audio_features), backbone=AMARU(classes_num=4))
+        backbone = getattr(models, backbone_name)(classes_num=4)
+        model = AudioModel(frontend=AudioFrontend(config=train_config.audio_features), backbone=backbone)
         self.model = prepare_model(model, checkpoint_path, device)
 
     def batches(self, max_batches: Optional[int] = None) -> Iterator[Batch]:
