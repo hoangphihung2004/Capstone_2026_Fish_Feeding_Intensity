@@ -22,6 +22,12 @@ from dataset.dataloader_melspectrogram import FishVoiceDataLoader
 from features import AudioFrontend
 from models import (
     AMARU,
+    AMARU_TH1,
+    AMARU_TH2,
+    AMARU_TH3,
+    AMARU_TH4,
+    AMARU_TH5,
+    AMARU_TH6,
     AudioModel,
     Cnn14MobileV2,
     Cnn14MobileV2_1P9M,
@@ -52,6 +58,12 @@ logger = logging.getLogger(__name__)
 
 MODEL_REGISTRY = {
     "AMARU": AMARU,
+    "AMARU_TH1": AMARU_TH1,
+    "AMARU_TH2": AMARU_TH2,
+    "AMARU_TH3": AMARU_TH3,
+    "AMARU_TH4": AMARU_TH4,
+    "AMARU_TH5": AMARU_TH5,
+    "AMARU_TH6": AMARU_TH6,
     "Cnn14MobileV2": Cnn14MobileV2,
     "Cnn14MobileV2_1P9M": Cnn14MobileV2_1P9M,
     "MobileNetV1": MobileNetV1,

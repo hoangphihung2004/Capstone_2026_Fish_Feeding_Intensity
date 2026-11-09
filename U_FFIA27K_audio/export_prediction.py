@@ -43,6 +43,12 @@ from features import AudioFrontend
 from dataset.data_split import FishDataSplitter, LABEL_TO_CLASS, _sample_identity_key
 from models import (
     AMARU,
+    AMARU_TH1,
+    AMARU_TH2,
+    AMARU_TH3,
+    AMARU_TH4,
+    AMARU_TH5,
+    AMARU_TH6,
     AudioModel,
     Cnn14MobileV2,
     Cnn14MobileV2_1P9M,
@@ -57,6 +63,12 @@ from models import (
 
 MODEL_REGISTRY = {
     "AMARU": AMARU,
+    "AMARU_TH1": AMARU_TH1,
+    "AMARU_TH2": AMARU_TH2,
+    "AMARU_TH3": AMARU_TH3,
+    "AMARU_TH4": AMARU_TH4,
+    "AMARU_TH5": AMARU_TH5,
+    "AMARU_TH6": AMARU_TH6,
     "Cnn14MobileV2": Cnn14MobileV2,
     "Cnn14MobileV2_1P9M": Cnn14MobileV2_1P9M,
     "MobileNetV1": MobileNetV1,
