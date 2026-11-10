@@ -28,7 +28,7 @@ import json
 import logging
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -44,6 +44,7 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torchvision.models import efficientnet_b0
 
+from dataset.data_split import _sample_identity_key
 from evaluate_blackbox import MultimodalTarget
 from robustness.blackbox import _summary_accuracy, load_source, transfer_pgd, verify_split
 from robustness.core import CLASS_NAMES, _normalization, pgd_attack, prepare_model
@@ -79,6 +80,7 @@ class VizConfig(BaseModel):
     sources: List[str] = ["ConvNeXtTiny", "SwinTiny", "ResNet18"]
     per_class: int = Field(5, ge=1)
     sample_keys: List[str] = []
+    display_original_size: bool = True
     featured_samples: List[FeaturedSample] = []
 
 
@@ -117,6 +119,7 @@ class Models:
     effb0: nn.Module
     sources: Dict[str, nn.Module]
     checkpoints: Dict[str, Path]
+    video_paths: Dict[str, str] = field(default_factory=dict)
 
     def hmmf(self, waveform: torch.Tensor) -> Callable[[torch.Tensor], torch.Tensor]:
         return lambda video: self.target.forward(waveform, video)
@@ -166,7 +169,8 @@ def load_models(config: VizConfig, paths: VizPaths, device: torch.device, fold: 
     records = target.split_records("test")
     for path in checkpoints.values():
         verify_split(records, path, "test")
-    return Models(target, effb0, sources, checkpoints)
+    video_paths = {_sample_identity_key(entry[0]): entry[1] for entry in target.entries["test"]}
+    return Models(target, effb0, sources, checkpoints, video_paths)
 
 
 def clean_pass(models: Models) -> Dict[str, Dict[str, np.ndarray]]:
@@ -267,7 +271,7 @@ def search(models: Models, config: VizConfig, clean: Dict, max_batches: Optional
             logger.info("Search: %d batches done, %d clean-correct samples so far.", index + 1, len(rows))
     if not rows:
         raise ValueError("No test sample is classified correctly by all five models.")
-    rows.sort(key=lambda row: (not row["wb_both_fooled"], -row["bb_fooled_count"], -row["clean_min_confidence"], row["key"]))
+    rows.sort(key=lambda row: (not row["wb_both_fooled"], -row["clean_min_confidence"], -row["bb_fooled_count"], row["key"]))
     return rows
 
 
@@ -307,6 +311,40 @@ def _hwc(tensor: torch.Tensor) -> np.ndarray:
     return tensor.permute(1, 2, 0).cpu().numpy().astype(np.float64)
 
 
+def original_frames(video_path: str) -> Optional[List[np.ndarray]]:
+    """First and last frame of the clip at the original resolution, RGB HWC in [0, 1]. The model input is the
+    same two frames resized by the decoder to 224x224 (aspect ratio not kept); this is only for display."""
+    try:
+        from decord import VideoReader, cpu
+        reader = VideoReader(video_path, ctx=cpu(0))
+        batch = reader.get_batch([0, len(reader) - 1]).asnumpy()
+        return [batch[0].astype(np.float64) / 255.0, batch[1].astype(np.float64) / 255.0]
+    except Exception:
+        logger.exception("decord could not read %s; trying OpenCV.", video_path)
+    try:
+        import cv2
+        capture = cv2.VideoCapture(video_path)
+        count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        frames = []
+        for index in (0, max(count - 1, 0)):
+            capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+            ok, frame = capture.read()
+            if not ok:
+                return None
+            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float64) / 255.0)
+        capture.release()
+        return frames
+    except Exception:
+        logger.exception("Could not read the original frames of %s; showing the 224x224 model input.", video_path)
+        return None
+
+
+def _resize_delta(delta: torch.Tensor, height: int, width: int) -> np.ndarray:
+    """Bilinear resize of a [3, 224, 224] pixel-space perturbation to the original frame size, HWC."""
+    resized = F.interpolate(delta.unsqueeze(0).double().cpu(), size=(height, width), mode="bilinear", align_corners=False)
+    return resized[0].permute(1, 2, 0).numpy()
+
+
 def _pred_text(probs: torch.Tensor) -> str:
     index = int(probs.argmax())
     return f"{CLASS_NAMES[index].capitalize()} ({float(probs[index]):.2f})"
@@ -329,8 +367,16 @@ def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank:
             "clean": {target: _pred_text(probs) for target, probs in clean_probs.items()}, "attacks": {}}
     arrays = {"clean_pixels": clean_pixels.cpu().numpy()}
 
-    for frame, _, channels in FRAMES:
-        _save_png(out_dir / f"clean_{frame}.png", _hwc(clean_pixels[channels]))
+    # Display frames: the original resolution when available (the perturbation computed at the 224x224 model
+    # input is resized to it), otherwise the model input itself. The *_224.png files are the model input.
+    video_path = models.video_paths.get(batch.keys[0])
+    originals = original_frames(video_path) if (config.display_original_size and video_path) else None
+    info["video_path"] = video_path
+    info["display"] = (f"original {originals[0].shape[1]}x{originals[0].shape[0]}, perturbation resized from 224x224"
+                       if originals else "model input 224x224")
+    for index, (frame, _, channels) in enumerate(FRAMES):
+        _save_png(out_dir / f"clean_{frame}_224.png", _hwc(clean_pixels[channels]))
+        _save_png(out_dir / f"clean_{frame}.png", originals[index] if originals else _hwc(clean_pixels[channels]))
 
     for attack, result in results.items():
         adv_pixels = _pixels(result["video"])[0]
@@ -347,11 +393,19 @@ def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank:
                                attack, target, batch.keys[0], entry["predictions"][target], search_pred)
         if "source" in result:
             entry["predictions"]["source"] = _pred_text(result["source"][0])
-        for frame, _, channels in FRAMES:
+        for index, (frame, _, channels) in enumerate(FRAMES):
             clean_img, adv_img = _hwc(clean_pixels[channels]), _hwc(adv_pixels[channels])
             amplified = np.clip(_hwc(delta[channels]) / (2.0 * epsilon) + 0.5, 0.0, 1.0)
-            _save_png(out_dir / f"{attack}_{frame}_perturbation.png", amplified)
-            _save_png(out_dir / f"{attack}_{frame}_adversarial.png", adv_img)
+            _save_png(out_dir / f"{attack}_{frame}_perturbation_224.png", amplified)
+            _save_png(out_dir / f"{attack}_{frame}_adversarial_224.png", adv_img)
+            if originals:
+                height, width = originals[index].shape[:2]
+                big_delta = _resize_delta(delta[channels], height, width)
+                _save_png(out_dir / f"{attack}_{frame}_perturbation.png", np.clip(big_delta / (2.0 * epsilon) + 0.5, 0.0, 1.0))
+                _save_png(out_dir / f"{attack}_{frame}_adversarial.png", np.clip(originals[index] + big_delta, 0.0, 1.0))
+            else:
+                _save_png(out_dir / f"{attack}_{frame}_perturbation.png", amplified)
+                _save_png(out_dir / f"{attack}_{frame}_adversarial.png", adv_img)
             entry["frames"][frame] = {
                 "psnr_db_float": psnr(clean_img, adv_img), "ssim_float": ssim(clean_img, adv_img),
                 "png_identical_to_clean": bool(np.array_equal(_to_uint8(clean_img), _to_uint8(adv_img))),
@@ -382,7 +436,10 @@ def draw_figure(out_dir: Path, info: Dict, attacks: List[str]) -> None:
                      "Last frame: $\\delta$ (amplified)", "Last frame: $x+\\delta$"]
 
     rows = 1 + len(attacks)
-    fig, axes = plt.subplots(rows, 5, figsize=(7.16, 1.32 * rows), gridspec_kw={"width_ratios": [1, 1, 1, 1, 1.25]})
+    clean_first = imread(out_dir / "clean_first.png")
+    ratio = clean_first.shape[0] / clean_first.shape[1]
+    fig, axes = plt.subplots(rows, 5, figsize=(7.16, (1.3 * ratio + 0.3) * rows),
+                             gridspec_kw={"width_ratios": [1, 1, 1, 1, 1.25]})
     for ax in axes.flat:
         ax.set_xticks([]); ax.set_yticks([])
         for spine in ax.spines.values():
@@ -406,7 +463,9 @@ def draw_figure(out_dir: Path, info: Dict, attacks: List[str]) -> None:
         lines.append(f"PSNR {frame_info['psnr_db_float']:.1f} dB, SSIM {frame_info['ssim_float']:.4f}")
         axes[r, 4].text(0.0, 0.5, "\n".join(lines), fontsize=6.5, va="center", transform=axes[r, 4].transAxes)
 
-    fig.suptitle(f"PGD $L_\\infty$, {eps_text} ({info['epsilon_in_gray_levels']:.3f} gray levels), sample {info['key']}",
+    note = ("\n$\\delta$ computed at the 224$\\times$224 model input, resized to the original frame for display"
+            if info.get("display", "").startswith("original") else "")
+    fig.suptitle(f"PGD $L_\\infty$, {eps_text} ({info['epsilon_in_gray_levels']:.3f} gray levels), sample {info['key']}{note}",
                  fontsize=7, y=0.995)
     fig.tight_layout(h_pad=0.3, w_pad=0.2)
     for extension in ("pdf", "png"):
