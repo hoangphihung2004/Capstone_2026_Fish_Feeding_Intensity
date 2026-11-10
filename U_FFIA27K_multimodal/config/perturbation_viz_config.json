@@ -1,0 +1,14 @@
+{
+  "fold": 2,
+  "epsilon": 0.0001,
+  "seed": 42,
+  "batch_size": 32,
+  "pgd": {
+    "alpha_ratio": 0.25,
+    "steps": 20,
+    "random_start": true
+  },
+  "sources": ["ConvNeXtTiny", "SwinTiny", "ResNet18"],
+  "per_class": 1,
+  "sample_keys": []
+}
