@@ -64,6 +64,12 @@ class PGDSettings(BaseModel):
     random_start: bool = True
 
 
+class FeaturedSample(BaseModel):
+    """A sample to render in addition to the ranked ones, on the fold whose test split holds it."""
+    key: str
+    fold: int
+
+
 class VizConfig(BaseModel):
     fold: int = 2
     epsilon: float = Field(1e-4, gt=0.0, le=1.0)
@@ -71,8 +77,9 @@ class VizConfig(BaseModel):
     batch_size: int = Field(32, gt=0)
     pgd: PGDSettings = PGDSettings()
     sources: List[str] = ["ConvNeXtTiny", "SwinTiny", "ResNet18"]
-    per_class: int = Field(1, ge=1)
+    per_class: int = Field(5, ge=1)
     sample_keys: List[str] = []
+    featured_samples: List[FeaturedSample] = []
 
 
 class VizPaths(BaseModel):
@@ -145,8 +152,7 @@ def ssim(clean: np.ndarray, adversarial: np.ndarray) -> float:
 
 
 # ----------------------------------------------------------------------------- loading and checks
-def load_models(config: VizConfig, paths: VizPaths, device: torch.device) -> Models:
-    fold = config.fold
+def load_models(config: VizConfig, paths: VizPaths, device: torch.device, fold: int) -> Models:
     hmmf_path = paths.checkpoint(paths.hmmf_net[str(fold)], f"HMMF-Net fold {fold}")
     effb0_path = paths.checkpoint(paths.efficientnet_b0.format(fold=fold), f"EfficientNet-B0 fold {fold}")
     source_paths = {name: paths.checkpoint(paths.sources[name].format(fold=fold), f"{name} fold {fold}") for name in config.sources}
@@ -306,7 +312,8 @@ def _pred_text(probs: torch.Tensor) -> str:
     return f"{CLASS_NAMES[index].capitalize()} ({float(probs[index]):.2f})"
 
 
-def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank: int, search_row: Dict) -> Dict:
+def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank: Optional[int],
+                  search_row: Optional[Dict], fold: int) -> Dict:
     """Recompute the five attacks for one sample and save every image, the tensors and the figure."""
     out_dir.mkdir(parents=True, exist_ok=True)
     epsilon = config.epsilon
@@ -317,7 +324,7 @@ def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank:
                        "hmmf": models.target.forward(batch.waveform, batch.video).softmax(dim=1)[0]}
     clean_pixels = _pixels(batch.video)[0]
 
-    info = {"key": batch.keys[0], "label": CLASS_NAMES[label], "fold": config.fold, "epsilon": epsilon,
+    info = {"key": batch.keys[0], "label": CLASS_NAMES[label], "fold": fold, "epsilon": epsilon,
             "epsilon_in_gray_levels": epsilon * 255.0, "rank_in_search": rank,
             "clean": {target: _pred_text(probs) for target, probs in clean_probs.items()}, "attacks": {}}
     arrays = {"clean_pixels": clean_pixels.cpu().numpy()}
@@ -334,8 +341,8 @@ def render_sample(models: Models, config: VizConfig, batch, out_dir: Path, rank:
                  "predictions": {}, "frames": {}}
         for target in attack_targets(attack):
             entry["predictions"][target] = _pred_text(result[target][0])
-            search_pred = search_row[f"{attack}_{target}_pred"]
-            if CLASS_NAMES[int(result[target][0].argmax())] != search_pred:
+            search_pred = search_row[f"{attack}_{target}_pred"] if search_row else None
+            if search_pred is not None and CLASS_NAMES[int(result[target][0].argmax())] != search_pred:
                 logger.warning("%s %s on %s: prediction %s differs from the batched search (%s).",
                                attack, target, batch.keys[0], entry["predictions"][target], search_pred)
         if "source" in result:
@@ -424,8 +431,66 @@ def single_batch(models: Models, key: str):
 
 
 # ----------------------------------------------------------------------------- main
+def run_fold(config: VizConfig, paths: VizPaths, device: torch.device, fold: int, main_fold: bool,
+             featured: List[str], max_batches: Optional[int]) -> Dict:
+    """Main fold: checks, search over the test split, `per_class` samples per class, plus featured samples.
+    Other folds: checks and only the featured samples whose test split is this fold."""
+    fold_dir = Path(paths.output_dir) / f"fold_{fold:02d}"
+    fold_dir.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    logger.info("===== fold %d | %s | featured samples: %s", fold, "search + featured" if main_fold else "featured only", featured)
+    models = load_models(config, paths, device, fold)
+    clean = clean_pass(models)
+    accuracy = check_clean_accuracy(models, clean)
+    summary: Dict = {"fold": fold, "epsilon": config.epsilon, "clean_accuracy": accuracy, "n_test": len(clean["labels"])}
+    rendered = []
+
+    rows: List[Dict] = []
+    if main_fold:
+        rows = search(models, config, clean, max_batches)
+        attacks = ["wb_effb0", "wb_hmmf", *[f"bb_{name}" for name in config.sources]]
+        rates = success_rates(rows, attacks)
+        write_csv(fold_dir / "candidates.csv", rows)
+        for name, rate in rates.items():
+            logger.info("Attack success on the %d clean-correct samples: %-28s %.2f%%", len(rows), name, 100 * rate)
+        summary.update({"n_clean_correct_all_models": len(rows), "partial_search": max_batches is not None,
+                        "attack_success_rate": rates})
+        rank = {row["key"]: index for index, row in enumerate(rows)}
+        counters: Dict[str, int] = {}
+        for row in select(rows, config):
+            counters[row["label"]] = counters.get(row["label"], 0) + 1
+            sample_dir = fold_dir / f"{row['label']}_{counters[row['label']]:02d}_{row['key'].replace('/', '_')}"
+            info = render_sample(models, config, single_batch(models, row["key"]), sample_dir, rank[row["key"]], row, fold)
+            rendered.append({"dir": sample_dir.name, "key": info["key"], "label": info["label"], "featured": False,
+                             "wb_both_fooled": row["wb_both_fooled"], "bb_fooled_count": row["bb_fooled_count"]})
+            logger.info("Saved %s (white-box both fooled: %s, black-box transfers fooled: %d)",
+                        sample_dir, row["wb_both_fooled"], row["bb_fooled_count"])
+
+    by_key = {row["key"]: row for row in rows}
+    for key in featured:
+        if key not in clean["labels"]:
+            logger.error("Featured sample %s is not in the fold-%d test split; skipped.", key, fold)
+            continue
+        label = CLASS_NAMES[clean["labels"][key]]
+        sample_dir = fold_dir / f"featured_{label}_{key.replace('/', '_')}"
+        info = render_sample(models, config, single_batch(models, key), sample_dir, None, by_key.get(key), fold)
+        predictions = {attack: entry["predictions"] for attack, entry in info["attacks"].items()}
+        rendered.append({"dir": sample_dir.name, "key": key, "label": label, "featured": True,
+                         "clean": info["clean"], "predictions": predictions})
+        logger.info("Saved featured sample %s: clean %s, attacks %s", sample_dir, info["clean"], predictions)
+
+    summary.update({"samples": rendered, "seconds": round(time.time() - started, 1),
+                    "finished_at": datetime.now().isoformat(timespec="seconds")})
+    with (fold_dir / "summary.json").open("w", encoding="utf-8") as file:
+        json.dump(summary, file, indent=2)
+    del models
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return summary
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Save PGD perturbation visualizations for the paper (one fold).")
+    parser = argparse.ArgumentParser(description="Save PGD perturbation visualizations for the paper.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config/perturbation_viz_config.json"))
     parser.add_argument("--paths", default=str(PROJECT_ROOT / "config/perturbation_viz_paths.json"))
     parser.add_argument("--upload-config", default=str(PROJECT_ROOT / "config/robustness_upload.json"))
@@ -443,54 +508,33 @@ def main() -> None:
         upload_config.enabled = False
     check_ready(upload_config)
 
-    fold_dir = Path(paths.output_dir) / f"fold_{config.fold:02d}"
-    fold_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(paths.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s",
-                        handlers=[logging.StreamHandler(), logging.FileHandler(fold_dir / "run.log", mode="w", encoding="utf-8")])
+                        handlers=[logging.StreamHandler(), logging.FileHandler(output_dir / "run.log", mode="w", encoding="utf-8")])
     for noisy in ("fontTools", "matplotlib"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     started = time.time()
-    logger.info("Perturbation visualization | fold %d | epsilon %g | sources %s | device %s | command: %s",
+    logger.info("Perturbation visualization | main fold %d | epsilon %g | sources %s | device %s | command: %s",
                 config.fold, config.epsilon, config.sources, device, " ".join(sys.argv))
 
-    models = load_models(config, paths, device)
-    clean = clean_pass(models)
-    accuracy = check_clean_accuracy(models, clean)
-
-    rows = search(models, config, clean, args.max_batches)
-    attacks = ["wb_effb0", "wb_hmmf", *[f"bb_{name}" for name in config.sources]]
-    rates = success_rates(rows, attacks)
-    write_csv(fold_dir / "candidates.csv", rows)
-    for name, rate in rates.items():
-        logger.info("Attack success on the %d clean-correct samples: %-28s %.2f%%", len(rows), name, 100 * rate)
-
-    chosen = select(rows, config)
-    rank = {row["key"]: index for index, row in enumerate(rows)}
-    rendered = []
-    for row in chosen:
-        sample_dir = fold_dir / f"{row['label']}_{row['key'].replace('/', '_')}"
-        info = render_sample(models, config, single_batch(models, row["key"]), sample_dir, rank[row["key"]], row)
-        rendered.append({"dir": sample_dir.name, **{k: info[k] for k in ("key", "label")},
-                         "wb_both_fooled": row["wb_both_fooled"], "bb_fooled_count": row["bb_fooled_count"]})
-        logger.info("Saved %s (label %s, white-box both fooled: %s, black-box transfers fooled: %d)",
-                    sample_dir, row["label"], row["wb_both_fooled"], row["bb_fooled_count"])
-
-    summary = {"fold": config.fold, "epsilon": config.epsilon, "config": config.model_dump(),
-               "clean_accuracy": accuracy, "n_test": len(clean["labels"]), "n_clean_correct_all_models": len(rows),
-               "partial_search": args.max_batches is not None, "attack_success_rate": rates, "samples": rendered,
-               "seconds": round(time.time() - started, 1), "finished_at": datetime.now().isoformat(timespec="seconds")}
-    with (fold_dir / "summary.json").open("w", encoding="utf-8") as file:
-        json.dump(summary, file, indent=2)
-    logger.info("Done in %.1f s. Results in %s", time.time() - started, fold_dir)
+    featured: Dict[int, List[str]] = {}
+    for sample in config.featured_samples:
+        featured.setdefault(sample.fold, []).append(sample.key)
+    folds = [config.fold] + sorted(set(featured) - {config.fold})
+    summaries = [run_fold(config, paths, device, fold, fold == config.fold, featured.get(fold, []), args.max_batches)
+                 for fold in folds]
+    with (output_dir / "summary_all.json").open("w", encoding="utf-8") as file:
+        json.dump({"config": config.model_dump(), "folds": summaries}, file, indent=2)
+    logger.info("Done in %.1f s. Results in %s", time.time() - started, output_dir)
 
     if upload_config.enabled:
         kind = "partial" if args.max_batches is not None else "full"
-        name = f"perturbation_viz_fold{config.fold:02d}_eps{config.epsilon:g}_{kind}_{_stamp()}.zip"
-        output_dir = Path(paths.output_dir)
-        zip_path = _zip([fold_dir], output_dir, Path(f"{output_dir}_uploads") / name)
+        name = f"perturbation_viz_video_eps{config.epsilon:g}_{kind}_{_stamp()}.zip"
+        zip_path = _zip([output_dir], output_dir.parent, Path(f"{output_dir}_uploads") / name)
         _upload(upload_config, zip_path, f"perturbation_viz/{name}", output_dir)
 
 

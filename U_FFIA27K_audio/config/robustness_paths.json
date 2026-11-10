@@ -1,0 +1,13 @@
+{
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "",
+  "checkpoint_template": "",
+  "checkpoints": {
+    "0": "/marimo/Results/AMARU_cross_validation_random_sample_fold_00_20261001_195846/U_FFIA27K_audio/checkpoint/amaru/fold_00/audio_best.pt",
+    "1": "/marimo/Results/AMARU_cross_validation_random_sample_fold_01_20261001_213447/U_FFIA27K_audio/checkpoint/amaru/fold_01/audio_best.pt",
+    "2": "/marimo/Results/AMARU_cross_validation_random_sample_fold_02_20261001_200323/U_FFIA27K_audio/checkpoint/amaru/fold_02/audio_best.pt",
+    "3": "/marimo/Results/AMARU_cross_validation_random_sample_fold_03_20261001_200203/U_FFIA27K_audio/checkpoint/amaru/fold_03/audio_best.pt",
+    "4": "/marimo/Results/AMARU_cross_validation_random_sample_fold_04_20261001_200504/U_FFIA27K_audio/checkpoint/amaru/fold_04/audio_best.pt"
+  },
+  "output_dir": "outputs/robustness"
+}

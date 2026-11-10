@@ -1,0 +1,16 @@
+{
+  "fold": 2,
+  "seed": 42,
+  "snr_db": [20, 0, -20],
+  "batch_size": 32,
+  "per_class": 5,
+  "sample_keys": [],
+  "featured_samples": [
+    {"key": "2022_6_21/pm_70/none/21_sample_14", "fold": 2},
+    {"key": "2022_6_21/pm_70/medium/21_sample_7", "fold": 1},
+    {"key": "2022_6_21/pm_70/weak/21_sample_9", "fold": 3},
+    {"key": "2022_6_21/pm_70/strong/21_sample_3", "fold": 3}
+  ],
+  "amaru_predictions": "../U_FFIA27K_audio/outputs/audio_noise_viz/amaru_fold{fold:02d}.json",
+  "figure_width_in": 7.16
+}

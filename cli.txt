@@ -1,8 +1,13 @@
 # ==============================================================================
-# VISUALIZE NHIỄU PGD TRÊN VIDEO (hình cho paper) - U_FFIA27K_multimodal, chỉ nạp weight, KHÔNG train lại
+# VISUALIZE NHIỄU CHO PAPER - chỉ nạp weight đã train, KHÔNG train lại
 # Branch: U_FFIA27K_perturbation_viz
-# Fold đại diện 2, epsilon 1e-4, tập test. 5 tấn công: white-box EfficientNet-B0, white-box HMMF-Net (audio sạch),
-# black-box từ ConvNeXt-T / Swin-T / ResNet18 (cùng 1 video bị nhiễu đưa vào cả EfficientNet-B0 và HMMF-Net).
+# (A) VIDEO: nhiễu PGD L-inf epsilon 1e-4 trên 2 frame (đầu, cuối). 5 tấn công: white-box EfficientNet-B0,
+#     white-box HMMF-Net (audio sạch), black-box từ ConvNeXt-T / Swin-T / ResNet18 (cùng video nhiễu đưa vào cả 2 model).
+# (B) AUDIO: nhiễu trắng Gaussian ở Clean / 20 / 0 / -20 dB (cùng hàm, cùng seed với thí nghiệm audio-noise),
+#     log-mel + waveform + file wav, dự đoán của AMARU và HMMF-Net (video sạch).
+# Fold đại diện 2: tìm trên toàn bộ tập test, vẽ 5 mẫu mỗi lớp (20 mẫu) để chọn.
+# Thêm 4 mẫu trong hình minh họa dataset (2022_6_21/PM_70: None 21_14, Weak 21_9, Medium 21_7, Strong 21_3), mỗi mẫu
+# chạy ở fold mà nó nằm trong tập test: None -> fold 2, Medium -> fold 1, Weak và Strong -> fold 3 (thư mục featured_*).
 # Mỗi bước: chú thích nằm ở tiêu đề, khối bên dưới chỉ toàn lệnh -> copy nguyên khối để chạy.
 # ==============================================================================
 
@@ -18,40 +23,49 @@ export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' /marimo/token.txt | head -n 1) && 
 apt update && apt install -y git-lfs && git lfs install && git config --global lfs.concurrenttransfers 64 && cd /marimo && git clone https://huggingface.co/datasets/manhmitcf/Fish_Feeding_Intensity_Dataset && mv /marimo/Fish_Feeding_Intensity_Dataset/audio/audio/* /marimo/Fish_Feeding_Intensity_Dataset/audio/ && mv /marimo/Fish_Feeding_Intensity_Dataset/video/video/* /marimo/Fish_Feeding_Intensity_Dataset/video/ && rm -rf /marimo/Fish_Feeding_Intensity_Dataset/audio/audio /marimo/Fish_Feeding_Intensity_Dataset/video/video && find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l && find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
 
 # ------------------------------------------------------------------------------
-# 3. LẤY CODE VÀ CÀI THƯ VIỆN (dòng cuối phải in 2 số giống nhau; torch khác 2.11.0 thì đổi số)
+# 3. LẤY CODE VÀ CÀI THƯ VIỆN CHO CẢ 2 THƯ MỤC (multimodal + audio)
+#    Dòng cuối phải in 2 số giống nhau; torch khác 2.11.0 thì đổi số.
 # ------------------------------------------------------------------------------
-cd /marimo && ([ -d Capstone_2026_Fish_Feeding_Intensity ] || git clone https://github.com/hoangphihung2004/Capstone_2026_Fish_Feeding_Intensity.git) && cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_perturbation_viz && git pull && cd U_FFIA27K_multimodal && pip install --upgrade pip && pip install -r requirements.txt
+cd /marimo && ([ -d Capstone_2026_Fish_Feeding_Intensity ] || git clone https://github.com/hoangphihung2004/Capstone_2026_Fish_Feeding_Intensity.git) && cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_perturbation_viz && git pull && pip install --upgrade pip && pip install -r U_FFIA27K_multimodal/requirements.txt -r U_FFIA27K_audio/requirements.txt
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
 python -c "import torch, torchaudio; print('torch', torch.__version__, '| torchaudio', torchaudio.__version__)"
 
 # ------------------------------------------------------------------------------
-# 4. TẢI WEIGHT VỀ /marimo/Results (bỏ qua file nào đã có)
-#    Dòng 1: HMMF-Net fold 2. Dòng 2: EfficientNet-B0 video. Dòng 3: 3 model nguồn black-box.
+# 4. TẢI WEIGHT VỀ /marimo/Results (bỏ qua dòng nào đã có)
+#    Dòng 1: HMMF-Net fold 1, 2, 3. Dòng 2: AMARU fold 1, 2, 3. Dòng 3: EfficientNet-B0 video (đủ 5 fold).
+#    Dòng 4: 3 model nguồn black-box (mỗi zip đủ 5 fold). Dòng 5: kiểm tra, phải in 10 dòng OK.
 # ------------------------------------------------------------------------------
-hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009.zip --repo-type dataset --local-dir /marimo/Results && unzip -o -q /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009.zip -d /marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009
-hf download hoangphihung442004/Results_U_FFIA27K_video EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip --repo-type dataset --local-dir /marimo/Results && unzip -o -q /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip -d /marimo/Results/EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611
+hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009.zip U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_03_20260922_120215.zip --repo-type dataset --local-dir /marimo/Results && for n in U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800 U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_02_20260923_062009 U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_03_20260922_120215; do unzip -o -q "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
+hf download hoangphihung442004/Results_U_FFIA27K_audio AMARU_cross_validation_random_sample_fold_01_20261001_213447.zip AMARU_cross_validation_random_sample_fold_02_20261001_200323.zip AMARU_cross_validation_random_sample_fold_03_20261001_200203.zip --repo-type dataset --local-dir /marimo/Results && for n in AMARU_cross_validation_random_sample_fold_01_20261001_213447 AMARU_cross_validation_random_sample_fold_02_20261001_200323 AMARU_cross_validation_random_sample_fold_03_20261001_200203; do unzip -o -q "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
+hf download hoangphihung442004/Results_U_FFIA27K_video EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip --repo-type dataset --local-dir /marimo/Results && for n in EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611; do unzip -o -q "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
 hf download hoangphihung442004/Results_U_FFIA27K_video ResNet18_cross_validation_random_sample_1_49_channels_20260908_060115.zip ConvNeXtTiny_cross_validation_random_sample_1_49_channels_20260906_052820.zip SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039.zip --repo-type dataset --local-dir /marimo/Results && for n in ResNet18_cross_validation_random_sample_1_49_channels_20260908_060115 ConvNeXtTiny_cross_validation_random_sample_1_49_channels_20260906_052820 SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039; do unzip -o -q "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && python -c "import json,os;v=json.load(open('U_FFIA27K_multimodal/config/perturbation_viz_paths.json'));a=json.load(open('U_FFIA27K_audio/config/robustness_paths.json'));ps=[v['hmmf_net'][str(f)] for f in (1,2,3)]+[a['checkpoints'][str(f)] for f in (1,2,3)]+[v['efficientnet_b0'].format(fold=f) for f in (1,2,3)]+[t.format(fold=2) for t in v['sources'].values()];[print('OK     ' if os.path.isfile(p) else 'MISSING', p) for p in sorted(set(ps))]"
 
 # ------------------------------------------------------------------------------
-# 5. CHẠY (1 LỆNH LÀM HẾT): kiểm tra đủ weight (thiếu thì báo lỗi ngay) -> kiểm tra split + accuracy sạch khớp summary.csv của cả 5 model
-#    -> tấn công mọi mẫu test mà cả 5 model đều đoán đúng -> chọn 1 mẫu mỗi lớp -> lưu ảnh + hình ghép -> zip và upload
-#    lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục perturbation_viz/.
-#    Kết quả local: /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/outputs/perturbation_viz/fold_02/
-#      summary.json (accuracy sạch, tỉ lệ bị lừa của từng tấn công), candidates.csv (mọi mẫu, để chọn mẫu khác), run.log
-#      <lop>_<mau>/: clean_first.png, clean_last.png, <tan_cong>_<first|last>_<perturbation|adversarial>.png,
-#                   figure.pdf/.png (hình ghép), info.json (dự đoán, PSNR, SSIM), tensors.npz
-#    Muốn chọn mẫu khác: điền key vào "sample_keys" trong config/perturbation_viz_config.json rồi chạy lại lệnh này.
-#    Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy. Log: perturbation_viz_fold2.log
+# 5. CHẠY TẤT CẢ (1 LỆNH, chạy nền):
+#    (B1) AMARU: dự đoán test dưới nhiễu ở fold 2, 1, 3 (kiểm tra split + accuracy sạch khớp summary.csv)
+#    (B2) HMMF-Net + vẽ audio: kiểm tra split + accuracy sạch, chọn mẫu, vẽ, zip và upload
+#    (A)  Video: kiểm tra split + accuracy sạch của 5 model, tấn công toàn bộ test fold 2, vẽ 20 mẫu + 4 mẫu featured, zip và upload
+#    Upload lên HF hoangphihung442004/Adversarial_Attack_Model, thư mục perturbation_viz/ (audio_noise_viz_*.zip, perturbation_viz_video_*.zip).
+#    Kết quả local:
+#      /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/outputs/audio_noise_viz/fold_XX/
+#        overview_<lớp>.png (so sánh nhanh 5 mẫu mỗi lớp), <lớp>_NN_<mẫu>/ và featured_<lớp>_<mẫu>/:
+#        figure.pdf/.png, logmel_<mức>.png, waveform_<mức>.png, audio_<mức>.wav, info.json
+#      /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/outputs/perturbation_viz/fold_XX/
+#        <lớp>_NN_<mẫu>/ và featured_<lớp>_<mẫu>/: figure.pdf/.png, clean_first/last.png,
+#        <tấn công>_<first|last>_<perturbation|adversarial>.png, info.json (dự đoán, PSNR, SSIM), tensors.npz
+#      candidates.csv (mọi mẫu ứng viên, để chọn mẫu khác qua "sample_keys" trong config), summary.json, run.log
+#    Ctrl+C chỉ thoát xem log, tiến trình vẫn chạy. Log: viz_all.log
 # ------------------------------------------------------------------------------
 pip install --no-deps --force-reinstall "torchaudio==2.11.0"
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup python visualize_perturbation.py > perturbation_viz_fold2.log 2>&1 & sleep 5; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/perturbation_viz_fold2.log
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && nohup sh -c "cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_audio && python export_noise_predictions.py --folds 2 1 3 && cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python visualize_audio_noise.py && python visualize_perturbation.py" > viz_all.log 2>&1 & sleep 5; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/viz_all.log
 
 # ------------------------------------------------------------------------------
-# 6. KIỂM TRA KẾT QUẢ (copy kết quả gửi lại để kiểm tra)
+# 6. KIỂM TRA KẾT QUẢ (copy kết quả gửi lại để kiểm tra; dòng cuối = số tiến trình còn chạy, 0 là xong)
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && grep -E "clean test accuracy|Attack success|Saved|Done in|Uploaded|Upload failed|Traceback|Error" perturbation_viz_fold2.log | sed 's/^[0-9-]* [0-9:,]* - //'; ls outputs/perturbation_viz/fold_02/; ps aux | grep -c [v]isualize_perturbation
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && grep -E "=====|accuracy|Attack success|featured|Saved featured|Done in|Uploaded|Upload failed|Traceback|Error" viz_all.log | sed 's/^[0-9-]* [0-9:,]* - //' | cut -c1-300; ls outputs/audio_noise_viz/fold_02 outputs/perturbation_viz/fold_02 2>/dev/null | head -n 60; ps aux | grep -cE "[e]xport_noise_predictions|[v]isualize_audio_noise|[v]isualize_perturbation"
 
 # ------------------------------------------------------------------------------
-# 7. UPLOAD LỖI: upload lại thư mục kết quả đã có, KHÔNG chạy lại
+# 7. UPLOAD LỖI: upload lại 2 thư mục kết quả đã có, KHÔNG chạy lại
 # ------------------------------------------------------------------------------
-cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -c "from pathlib import Path;from robustness.hub import _zip,_upload,_stamp,load_upload_config;c=load_upload_config(Path('config/robustness_upload.json'));o=Path('outputs/perturbation_viz');n=f'perturbation_viz_fold02_eps0.0001_full_{_stamp()}.zip';z=_zip([o/'fold_02'],o,Path(str(o)+'_uploads')/n);_upload(c,z,'perturbation_viz/'+n,o)"
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -c "from pathlib import Path;from robustness.hub import _zip,_upload,_stamp,load_upload_config;c=load_upload_config(Path('config/robustness_upload.json'));[(lambda o,n: _upload(c,_zip([o],o.parent,Path(str(o)+'_uploads')/n),'perturbation_viz/'+n,o))(o,f'{o.name}_{_stamp()}.zip') for o in (Path('outputs/audio_noise_viz'),Path('outputs/perturbation_viz')) if o.is_dir()]"

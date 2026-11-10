@@ -1,0 +1,13 @@
+{
+  "train_config_path": "config/train_config_panns_cnn10.json",
+  "dataset_path": "",
+  "checkpoint_template": "",
+  "checkpoints": {
+    "0": "/marimo/Results/PANNS_Cnn10_cross_validation_random_sample__20260729_030425/DL_audio/checkpoint/panns_cnn10/fold_00/audio_best.pt",
+    "1": "/marimo/Results/PANNS_Cnn10_cross_validation_random_sample__20260729_030425/DL_audio/checkpoint/panns_cnn10/fold_01/audio_best.pt",
+    "2": "/marimo/Results/PANNS_Cnn10_cross_validation_random_sample__20260729_030425/DL_audio/checkpoint/panns_cnn10/fold_02/audio_best.pt",
+    "3": "/marimo/Results/PANNS_Cnn10_cross_validation_random_sample__20260729_030425/DL_audio/checkpoint/panns_cnn10/fold_03/audio_best.pt",
+    "4": "/marimo/Results/PANNS_Cnn10_cross_validation_random_sample__20260729_030425/DL_audio/checkpoint/panns_cnn10/fold_04/audio_best.pt"
+  },
+  "output_dir": "outputs/robustness"
+}

@@ -9,6 +9,12 @@
     "random_start": true
   },
   "sources": ["ConvNeXtTiny", "SwinTiny", "ResNet18"],
-  "per_class": 1,
-  "sample_keys": []
+  "per_class": 5,
+  "sample_keys": [],
+  "featured_samples": [
+    {"key": "2022_6_21/pm_70/none/21_sample_14", "fold": 2},
+    {"key": "2022_6_21/pm_70/medium/21_sample_7", "fold": 1},
+    {"key": "2022_6_21/pm_70/weak/21_sample_9", "fold": 3},
+    {"key": "2022_6_21/pm_70/strong/21_sample_3", "fold": 3}
+  ]
 }
