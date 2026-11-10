@@ -1,0 +1,7 @@
+{
+  "train_config_path": "config/train_config.json",
+  "dataset_path": "",
+  "checkpoint_template": "/marimo/Results/SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039/U_FFIA27K_video/checkpoint/swin_tiny/fold_{fold:02d}/video_best.pt",
+  "checkpoints": {},
+  "output_dir": "outputs/robustness"
+}

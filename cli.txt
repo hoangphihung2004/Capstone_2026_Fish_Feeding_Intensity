@@ -86,3 +86,38 @@ nohup python evaluate_robustness.py --resume > robustness.log 2>&1 &
 
 # Nếu upload lỗi (log in ra fold nào lỗi): upload lại mà không chạy lại
 python evaluate_robustness.py --upload-only --folds 0 1 2 3 4
+
+# ==============================================================================
+# 6. WHITE-BOX PGD CHO ConvNeXt-Tiny VÀ Swin-Tiny (cùng config PGD với EfficientNet-B0)
+#    Weight đã tải ở bước 4 (dòng "model nguồn sinh nhiễu cho black-box"). Chọn model bằng --model;
+#    mỗi model đọc đường dẫn weight ở config/robustness_paths_<model>.json, kết quả ở outputs/robustness/<model>/fold_XX,
+#    upload lên HF: video_convnext_tiny/... và video_swin_tiny/...
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 6a. KIỂM TRA WEIGHT: phải in ra 10 dòng OK (5 fold x 2 model)
+# ------------------------------------------------------------------------------
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_video_robustness && git pull && cd U_FFIA27K_video
+python -c "import json,os;[print('OK     ' if os.path.isfile(p) else 'MISSING', m, f, p) for m in ('convnext_tiny','swin_tiny') for f in range(5) for p in [json.load(open(f'config/robustness_paths_{m}.json'))['checkpoint_template'].format(fold=f)]]"
+
+# ------------------------------------------------------------------------------
+# 6b. CHẠY (1 lệnh, chạy nền): ConvNeXt-Tiny sanity fold 0 rồi 5 fold; sau đó Swin-Tiny sanity fold 0 rồi 5 fold.
+#     Sanity của model nào FAIL thì model đó dừng, model còn lại vẫn chạy. Log: robustness_wb_convnext_swin.log
+# ------------------------------------------------------------------------------
+nohup sh -c "(python evaluate_robustness.py --model convnext_tiny --folds 0 --sanity && python evaluate_robustness.py --model convnext_tiny --folds 0 1 2 3 4); (python evaluate_robustness.py --model swin_tiny --folds 0 --sanity && python evaluate_robustness.py --model swin_tiny --folds 0 1 2 3 4)" > robustness_wb_convnext_swin.log 2>&1 &
+tail -n +1 -f robustness_wb_convnext_swin.log
+
+# ------------------------------------------------------------------------------
+# 6c. KIỂM TRA KẾT QUẢ (dòng cuối = số tiến trình còn chạy, 0 là xong)
+# ------------------------------------------------------------------------------
+grep -E "\[sanity\]|accuracy=|Uploaded|Upload failed|Sanity checks failed|Traceback|Error" robustness_wb_convnext_swin.log | sed 's/^[0-9-]* [0-9:,]* - //' | cut -c1-200; ps aux | grep -c "[e]valuate_robustness.py"
+
+# ------------------------------------------------------------------------------
+# 6d. BỊ NGẮT GIỮA CHỪNG: chạy tiếp các mức chưa xong (đổi --model cho đúng model bị ngắt)
+# ------------------------------------------------------------------------------
+nohup python evaluate_robustness.py --model swin_tiny --resume > robustness_wb_resume.log 2>&1 &
+
+# ------------------------------------------------------------------------------
+# 6e. UPLOAD LỖI: upload lại mà không chạy lại
+# ------------------------------------------------------------------------------
+python evaluate_robustness.py --model convnext_tiny --upload-only --folds 0 1 2 3 4

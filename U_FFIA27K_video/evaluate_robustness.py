@@ -1,8 +1,19 @@
-"""EfficientNet-B0 robustness: first-last 6-channel video under PGD."""
+"""White-box robustness of the video models: first-last 6-channel video under PGD.
 
+`--model` picks the attacked (and evaluated) video model; default efficientnet_b0:
+    python evaluate_robustness.py --model efficientnet_b0
+    python evaluate_robustness.py --model convnext_tiny
+    python evaluate_robustness.py --model swin_tiny
+Each model reads its own checkpoint paths (config/robustness_paths*.json, overridable with --paths) and writes
+to <output_dir>/<model>/fold_XX. Every other option is the same as before (see robustness/core.py run_cli).
+"""
+
+import argparse
 import sys
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Dict, Iterator, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -12,24 +23,37 @@ import torch
 from config import TrainConfig
 from dataset import FishVideoDataLoader
 from dataset.data_split import _sample_identity_key
-from models import EfficientNetB0, VideoModel
+from models import ConvNeXtTiny, EfficientNetB0, SwinTiny, VideoModel
 from robustness.core import Batch, BaseAdapter, fold_splitter_config, prepare_model, run_cli
 
 FRAME_POLICY = "1_49_channels"
 TARGET_CHANNELS = 6
 
 
+@dataclass(frozen=True)
+class VideoBackbone:
+    build: Callable[..., torch.nn.Module]
+    paths: str
+
+
+BACKBONES: Dict[str, VideoBackbone] = {
+    "efficientnet_b0": VideoBackbone(EfficientNetB0, "config/robustness_paths.json"),
+    "convnext_tiny": VideoBackbone(ConvNeXtTiny, "config/robustness_paths_convnext_tiny.json"),
+    "swin_tiny": VideoBackbone(SwinTiny, "config/robustness_paths_swin_tiny.json"),
+}
+
+
 class VideoAdapter(BaseAdapter):
-    name = "efficientnet_b0"
     supports = ("video_pgd",)
 
-    def __init__(self, fold, config, paths, checkpoint_path, device) -> None:
+    def __init__(self, fold, config, paths, checkpoint_path, device, backbone: str = "efficientnet_b0") -> None:
+        self.name = backbone
         self.device = device
         train_config = TrainConfig.from_json(paths.train_config_path)
-        if train_config.model.backbone != "EfficientNetB0" or train_config.video_features.frame_policy != FRAME_POLICY:
+        if train_config.video_features.frame_policy != FRAME_POLICY:
             raise ValueError(
-                f"Robustness evaluates EfficientNetB0 with {FRAME_POLICY}, but {paths.train_config_path} says "
-                f"{train_config.model.backbone} with {train_config.video_features.frame_policy}."
+                f"Robustness evaluates {FRAME_POLICY} video, but {paths.train_config_path} says "
+                f"{train_config.video_features.frame_policy}."
             )
         manager = FishVideoDataLoader(
             batch_size=config.batch_size,
@@ -42,7 +66,7 @@ class VideoAdapter(BaseAdapter):
         )
         self.entries = manager.test_dict
         self.loader = manager.get_dataloader("test", shuffle=False, drop_last=False)
-        model = VideoModel(backbone=EfficientNetB0(classes_num=4, pretrained=False), target_channels=TARGET_CHANNELS)
+        model = VideoModel(backbone=BACKBONES[backbone].build(classes_num=4, pretrained=False), target_channels=TARGET_CHANNELS)
         self.model = prepare_model(model, checkpoint_path, device)
 
     def batches(self, max_batches: Optional[int] = None) -> Iterator[Batch]:
@@ -63,5 +87,16 @@ class VideoAdapter(BaseAdapter):
         return {(_sample_identity_key(entry[1]), int(entry[-1])) for entry in self.entries}
 
 
+def main() -> None:
+    selector = argparse.ArgumentParser(add_help=False)
+    selector.add_argument("--model", choices=sorted(BACKBONES), default="efficientnet_b0",
+                          help="Video model to attack (white-box) and evaluate.")
+    args, rest = selector.parse_known_args()
+    if not any(arg == "--paths" or arg.startswith("--paths=") for arg in rest):
+        rest += ["--paths", str(PROJECT_ROOT / BACKBONES[args.model].paths)]
+    sys.argv = [sys.argv[0], *rest]
+    run_cli(partial(VideoAdapter, backbone=args.model), PROJECT_ROOT)
+
+
 if __name__ == "__main__":
-    run_cli(VideoAdapter, PROJECT_ROOT)
+    main()
