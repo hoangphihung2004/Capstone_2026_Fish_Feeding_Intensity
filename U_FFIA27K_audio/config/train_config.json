@@ -9,7 +9,8 @@
   "cache_audio": true,
   "model": {
     "backbone": "AMARU",
-    "pretrained": false
+    "pretrained": false,
+    "dropout": 0.0
   },
   "dataset_splitter": {
     "dataset_path": "/marimo/Fish_Feeding_Intensity_Dataset",

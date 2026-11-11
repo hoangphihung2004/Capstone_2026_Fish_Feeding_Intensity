@@ -169,6 +169,9 @@ class AMARU(BaseBackbone):
         branches: branches built inside every MultiAxisResidualUnit.
         use_selector: keep the adaptive branch selection (True) or use an
             equal-weight mean of the branches (False).
+        dropout: dropout probability on the pooled embedding before
+            fc_audioset (0.0 = no dropout, the original behaviour). Dropout has
+            no weights, so state_dict keys are unchanged.
     """
 
     channels = (16, 24, 40, 112, 320)
@@ -181,11 +184,18 @@ class AMARU(BaseBackbone):
         num_blocks: int = 5,
         branches: Sequence[str] = ALL_BRANCHES,
         use_selector: bool = True,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError(f"dropout must be in [0, 1), got {dropout}.")
         if not 1 <= num_blocks <= len(self.channels):
             raise ValueError(f"num_blocks must be in [1, {len(self.channels)}], got {num_blocks}.")
         self.model_name = self.model_name_default
+        if dropout > 0:
+            # Separate checkpoint dir / artifact name so dropout runs never
+            # overwrite or get confused with the dropout-free runs.
+            self.model_name += f"_dropout{dropout:g}"
         self.num_blocks = num_blocks
         channels = self.channels[:num_blocks]
         hidden_channels = self.hidden_channels[:num_blocks]
@@ -201,6 +211,7 @@ class AMARU(BaseBackbone):
         # This is the only layer added to the multimodal audio encoder so that
         # it satisfies the standalone BaseBackbone classification contract.
         # Keep this name for compatibility with extract_features.py.
+        self.dropout = nn.Dropout(p=dropout)
         self.fc_audioset = nn.Linear(channels[-1], classes_num)
 
     @staticmethod
@@ -211,7 +222,7 @@ class AMARU(BaseBackbone):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for block in self.blocks:
             x = block(x)
-        return self.fc_audioset(self.pool(x))
+        return self.fc_audioset(self.dropout(self.pool(x)))
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +236,8 @@ class AMARU_TH1(AMARU):
 
     model_name_default = "amaru_th1_no_block5"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, num_blocks=4)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, num_blocks=4, dropout=dropout)
 
 
 class AMARU_TH2(AMARU):
@@ -234,8 +245,8 @@ class AMARU_TH2(AMARU):
 
     model_name_default = "amaru_th2_no_block45"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, num_blocks=3)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, num_blocks=3, dropout=dropout)
 
 
 class AMARU_TH3(AMARU):
@@ -243,8 +254,8 @@ class AMARU_TH3(AMARU):
 
     model_name_default = "amaru_th3_no_selector"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, use_selector=False)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, use_selector=False, dropout=dropout)
 
 
 class AMARU_TH4(AMARU):
@@ -252,8 +263,8 @@ class AMARU_TH4(AMARU):
 
     model_name_default = "amaru_th4_no_selector_no_temporal"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, branches=("frequency", "local"), use_selector=False)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, branches=("frequency", "local"), use_selector=False, dropout=dropout)
 
 
 class AMARU_TH5(AMARU):
@@ -261,8 +272,8 @@ class AMARU_TH5(AMARU):
 
     model_name_default = "amaru_th5_no_selector_no_frequency"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, branches=("temporal", "local"), use_selector=False)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, branches=("temporal", "local"), use_selector=False, dropout=dropout)
 
 
 class AMARU_TH6(AMARU):
@@ -270,5 +281,5 @@ class AMARU_TH6(AMARU):
 
     model_name_default = "amaru_th6_no_selector_no_local"
 
-    def __init__(self, classes_num: int = 4) -> None:
-        super().__init__(classes_num=classes_num, branches=("temporal", "frequency"), use_selector=False)
+    def __init__(self, classes_num: int = 4, dropout: float = 0.0) -> None:
+        super().__init__(classes_num=classes_num, branches=("temporal", "frequency"), use_selector=False, dropout=dropout)

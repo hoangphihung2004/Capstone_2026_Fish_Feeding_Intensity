@@ -48,6 +48,15 @@ class ModelConfig(BaseModel):
         default=False,
         description="Whether to request pretrained weights for backbones that support them."
     )
+    dropout: float = Field(
+        default=0.0,
+        ge=0.0,
+        lt=1.0,
+        description=(
+            "Dropout probability applied to the pooled embedding right before the classifier "
+            "(fc_audioset). Supported by AMARU and AMARU_TH1..TH6; 0.0 disables it."
+        )
+    )
 
 
 class SplitterConfig(BaseModel):

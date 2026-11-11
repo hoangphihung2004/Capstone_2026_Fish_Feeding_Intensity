@@ -76,6 +76,7 @@ MODEL_REGISTRY = {
 }
 
 PRETRAINED_BACKBONES = {"EfficientNetB0"}
+DROPOUT_BACKBONES = {"AMARU", "AMARU_TH1", "AMARU_TH2", "AMARU_TH3", "AMARU_TH4", "AMARU_TH5", "AMARU_TH6"}
 
 
 def validate_backbone_config(config: TrainConfig) -> None:
@@ -90,6 +91,12 @@ def validate_backbone_config(config: TrainConfig) -> None:
             "Ignoring model.pretrained=true."
         )
 
+    if config.model.dropout > 0 and backbone_name not in DROPOUT_BACKBONES:
+        logger.warning(
+            f"Backbone '{backbone_name}' does not take a configurable dropout in this codebase. "
+            f"Ignoring model.dropout={config.model.dropout}."
+        )
+
 
 def build_backbone(config: TrainConfig):
     backbone_name = config.model.backbone
@@ -99,6 +106,8 @@ def build_backbone(config: TrainConfig):
     kwargs = {"classes_num": 4}
     if backbone_name in PRETRAINED_BACKBONES:
         kwargs["pretrained"] = config.model.pretrained
+    if backbone_name in DROPOUT_BACKBONES:
+        kwargs["dropout"] = config.model.dropout
 
     return backbone_cls(**kwargs)
 
@@ -233,6 +242,8 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
     ]
+    if config.model.dropout > 0:
+        filename_parts.append(f"dropout{config.model.dropout:g}")
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
         and config.dataset_splitter.fold_index is not None
@@ -418,6 +429,7 @@ def main():
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
     logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
     logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
+    logger.info(f"  - Classifier Dropout:       {config.model.dropout}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     if config.dataset_splitter.evaluation_mode == "cross_validation":
