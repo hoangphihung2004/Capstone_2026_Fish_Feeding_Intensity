@@ -9,7 +9,7 @@ if project_root not in sys.path:
 
 import json
 import logging
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 # Logging configuration
@@ -34,6 +34,26 @@ class AudioFeaturesConfig(BaseModel):
     time_stripes_num: int = Field(default=2, description="Number of masked time stripes.")
     freq_drop_width: int = Field(default=8, description="Maximum frequency masking width.")
     freq_stripes_num: int = Field(default=2, description="Number of masked frequency stripes.")
+
+    # Frame-level pre-emphasis applied inside the STFT, before windowing/FFT.
+    pre_emphasis: Literal["none", "fixed", "tkeo"] = Field(
+        default="none",
+        description=(
+            "'none': original torchlibrosa STFT (no pre-emphasis). "
+            "'fixed': y[n] = x[n] - fixed_alpha * x[n-1] in every STFT frame. "
+            "'tkeo': TKEO-guided adaptive pre-emphasis (Algorithm 1, MIWAI 2026), one alpha per STFT frame."
+        )
+    )
+    fixed_alpha: float = Field(default=0.97, ge=0.0, le=1.0, description="Coefficient for pre_emphasis='fixed'.")
+    alpha_max: float = Field(default=0.99, ge=0.0, le=1.0, description="Maximum coefficient for pre_emphasis='tkeo'.")
+    beta: float = Field(default=0.8, ge=0.0, lt=1.0, description="Temporal smoothing factor for pre_emphasis='tkeo'.")
+    tkeo_clamp_raw: bool = Field(
+        default=False,
+        description=(
+            "Also clip alpha_raw to [0.1, alpha_max] before smoothing, as in the multimodal code. "
+            "False follows Algorithm 1 of the paper (clip only after smoothing)."
+        )
+    )
 
 
 class ModelConfig(BaseModel):

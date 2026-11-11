@@ -88,7 +88,28 @@ def build_backbone(config: TrainConfig):
     if backbone_name in PRETRAINED_BACKBONES:
         kwargs["pretrained"] = config.model.pretrained
 
-    return backbone_cls(**kwargs)
+    backbone = backbone_cls(**kwargs)
+    tag = pre_emphasis_tag(config)
+    if tag and hasattr(backbone, "model_name"):
+        # Separate checkpoint dir (checkpoint/<model_name>/) for pre-emphasis runs so they
+        # never overwrite the original runs; extract_features.py resolves the same name.
+        backbone.model_name = f"{backbone.model_name}_{tag}"
+    return backbone
+
+
+def pre_emphasis_tag(config: TrainConfig) -> str:
+    """Short name of the frontend pre-emphasis setting ('' when pre_emphasis='none')."""
+    audio = config.audio_features
+    if audio.pre_emphasis == "fixed":
+        return f"preemph_fixed{audio.fixed_alpha:g}"
+    if audio.pre_emphasis == "tkeo":
+        tag = "tkeo"
+        if (audio.alpha_max, audio.beta) != (0.99, 0.8):
+            tag += f"_a{audio.alpha_max:g}_b{audio.beta:g}"
+        if audio.tkeo_clamp_raw:
+            tag += "_clampraw"
+        return tag
+    return ""
 
 
 def model_cv_dir(base_ckpt_dir: str, model_name: str) -> str:
@@ -221,6 +242,8 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
         config.dataset_splitter.evaluation_mode,
         config.dataset_splitter.split_strategy,
     ]
+    if pre_emphasis_tag(config):
+        filename_parts.append(pre_emphasis_tag(config))
     if (
         config.dataset_splitter.evaluation_mode == "cross_validation"
         and config.dataset_splitter.fold_index is not None
@@ -406,6 +429,8 @@ def main():
     logger.info(f"  - Monitor Metric:           '{config.monitor}'")
     logger.info(f"  - Backbone Model:           '{config.model.backbone}'")
     logger.info(f"  - Pretrained Backbone:      {config.model.pretrained}")
+    logger.info(f"  - Pre-emphasis:             '{config.audio_features.pre_emphasis}'"
+                f"{' (' + pre_emphasis_tag(config) + ')' if pre_emphasis_tag(config) else ''}")
     logger.info(f"  - Evaluation Mode:          '{config.dataset_splitter.evaluation_mode}'")
     logger.info(f"  - Split Strategy:           '{config.dataset_splitter.split_strategy}'")
     if config.dataset_splitter.evaluation_mode == "cross_validation":
