@@ -32,7 +32,7 @@
     "time_stripes_num": 2,
     "freq_drop_width": 8,
     "freq_stripes_num": 2,
-    "pre_emphasis": "none",
+    "pre_emphasis": "tkeo",
     "fixed_alpha": 0.97,
     "alpha_max": 0.99,
     "beta": 0.8,
