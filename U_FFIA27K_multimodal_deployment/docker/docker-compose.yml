@@ -1,22 +1,61 @@
-version: '3.8'
+# AquaFFIA Edge on Jetson Orin.
+#
+# Paths are relative to this file (docker/). Expected layout on the Jetson:
+#   aquaffia_edge_deployment/
+#   ├── weights/               TensorRT engines (*.engine)
+#   ├── samples/               manifest.csv, manifests/, continuous_simulation/
+#   │   ├── video/ audio/      empty mount points for the dataset
+#   ├── cache/                 input tensor cache (auto-created)
+#   └── benchmarking/results/  benchmark outputs
+#
+# Overridable with environment variables or docker/.env:
+#   AQUAFFIA_IMAGE, AQUAFFIA_PORT, DATASET_DIR
+name: aquaffia-edge
+
+x-runtime: &runtime
+  image: ${AQUAFFIA_IMAGE:-aquaffia-edge:v1.2.0}
+  runtime: nvidia
+  network_mode: host
+  environment:
+    - PYTHONUNBUFFERED=1
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - AQUAFFIA_INPUT_CACHE=${AQUAFFIA_INPUT_CACHE:-1}
+    - AQUAFFIA_CACHE_DIR=/app/cache
+  volumes:
+    # Project data
+    - ../weights:/app/weights:ro
+    - ../samples:/app/samples:ro
+    - ${DATASET_DIR:-/home/fptdanang/Desktop/Fish_Feeding_Intensity_Dataset}/video:/app/samples/video:ro
+    - ${DATASET_DIR:-/home/fptdanang/Desktop/Fish_Feeding_Intensity_Dataset}/audio:/app/samples/audio:ro
+    - ../cache:/app/cache
+    - ../benchmarking/results:/app/benchmarking/results
+    # TensorRT 10 + cuDLA from JetPack host
+    - /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro
+    - /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro
+    - /lib/aarch64-linux-gnu/libnvonnxparser.so.10:/lib/aarch64-linux-gnu/libnvonnxparser.so.10:ro
+    - /usr/local/cuda-12.6/targets/aarch64-linux/lib/libcudla.so.1:/lib/aarch64-linux-gnu/libcudla.so.1:ro
+    - /usr/lib/python3.10/dist-packages/tensorrt:/usr/local/lib/python3.10/dist-packages/tensorrt:ro
+    # cuda-python bindings installed on host (pip --user)
+    - /home/fptdanang/.local/lib/python3.10/site-packages/cuda:/usr/local/lib/python3.10/dist-packages/cuda:ro
+    - /home/fptdanang/.local/lib/python3.10/site-packages/cuda_python-12.9.7.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_python-12.9.7.dist-info:ro
+    - /home/fptdanang/.local/lib/python3.10/site-packages/cuda_bindings-12.9.9.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_bindings-12.9.9.dist-info:ro
 
 services:
-  aquaffia-edge:
-    # Image pulled directly from Docker Hub
-    image: ${DOCKER_IMAGE:-hoanghung442004/aquaffia-edge:v1.1.0}
+  web:
+    <<: *runtime
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: aquaffia-edge
-    restart: always
-    runtime: nvidia
-    network_mode: host
-    volumes:
-      # Runtime data only. Application source is immutable inside the image.
-      - ./samples:/app/samples:ro
-      - ./cache:/app/cache
-      - ./results:/app/benchmarking/results
-    environment:
-      - PYTHONUNBUFFERED=1
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=all
-      - AQUAFFIA_INPUT_CACHE=${AQUAFFIA_INPUT_CACHE:-1}
-      - AQUAFFIA_CACHE_DIR=/app/cache
-    command: uvicorn web_dashboard.app:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    command: >
+      uvicorn web_dashboard.app:app --host 0.0.0.0 --port ${AQUAFFIA_PORT:-8001}
+
+  benchmark:
+    <<: *runtime
+    profiles: ["benchmark"]
+    container_name: aquaffia-edge-benchmark
+    restart: "no"
+    entrypoint: ["python3", "/app/benchmarking/eval_tensorrt.py"]
+    command: []

@@ -14,10 +14,10 @@ __pycache__
 venv
 ENV
 
-# Large video/audio data (mounted externally as runtime volume)
-samples/continuous_simulation
-samples/*.mp4
-samples/*.wav
+# Runtime data (mounted by docker/docker-compose.yml, never baked into the image)
+weights/
+samples/
+checkpoint/
 cache/
 benchmarking/results/
 
