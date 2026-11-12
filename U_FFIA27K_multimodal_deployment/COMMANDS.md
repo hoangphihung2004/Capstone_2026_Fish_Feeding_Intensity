@@ -40,28 +40,46 @@ bash data_preparation/build_continuous_simulation.sh \
 
 ---
 
-## 2. Web Dashboard
+## 2. Web Dashboard (Deployment 1, 2, 3)
+
+* Web Dashboard URL: `http://192.168.55.1:8001` (served by `aquaffia-edge-gateway`)
+* Switch deployments with the buttons in the top-right corner, or open `http://192.168.55.1:8001/?d=2`.
+* Only ONE deployment runs at a time. Deployment 1 starts by default after boot.
+* Architecture and API: `docs/DEPLOYMENT_API.md`. Guide for Deployment 2/3: `deployment_template/README.md`.
+
+| Container | Port | Folder |
+|---|---|---|
+| `aquaffia-edge-gateway` (page + switching) | 8001 | `deployment_gateway/` |
+| `aquaffia-edge` (Deployment 1) | 8011 | `docker/` |
+| `aquaffia-edge-2` (Deployment 2) | 8012 | `~/aquaffia_edge_deployment_2` |
+| `aquaffia-edge-3` (Deployment 3) | 8013 | `~/aquaffia_edge_deployment_3` |
+| `deploy_jetson_web` (other project) | 8000 | `~/Desktop/Deploy_JETSON` |
 
 ```bash
-docker/run_web.sh build      # build image aquaffia-edge:v1.2.0 from source
-docker/run_web.sh up         # start (restarts automatically on boot)
-docker/run_web.sh stop
-docker/run_web.sh restart
+# Switch / inspect
+curl -X POST http://127.0.0.1:8001/gateway/switch/1      # 1, 2 or 3
+curl -s http://127.0.0.1:8001/gateway/state | python3 -m json.tool
+
+# Gateway (once; restarts automatically on boot)
+cd deployment_gateway && docker compose up -d --build && cd ..
+
+# Deployment 1 after changing source code (image aquaffia-edge:v1.3.0)
+docker/run_web.sh build
+docker compose -f docker/docker-compose.yml up --no-start web
+curl -X POST http://127.0.0.1:8001/gateway/switch/1
 docker/run_web.sh logs
-docker/run_web.sh status
 ```
 
-* Web Dashboard URL: `http://192.168.55.1:8001`
-  (port 8000 is used by `deploy_jetson_web`; change with `AQUAFFIA_PORT=...`)
-
-After changing source code: `docker/run_web.sh build && docker/run_web.sh up`.
+Do not start deployment containers with `docker start` / `docker compose up -d`;
+let the gateway do it so that only one model is loaded.
 
 ---
 
 ## 3. Full Test Set Benchmark
 
 Runs the TensorRT pipeline on the test split of one fold (fold 04 by default: 5,412 samples).
-The web container is stopped during the run and restarted afterwards.
+Switch the dashboard to Deployment 1 first (so Deployment 2/3 are stopped).
+The Deployment 1 container is stopped during the run and restarted afterwards.
 
 ```bash
 docker/run_benchmark.sh                          # fold 04, full test set

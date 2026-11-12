@@ -24,3 +24,8 @@ benchmarking/results/
 # Docker & logs
 docker/*.log
 *.log
+
+# Not part of the Deployment 1 image
+deployment_template/
+deployment_gateway/
+docs/

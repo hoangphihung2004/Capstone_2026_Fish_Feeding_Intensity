@@ -10,10 +10,12 @@
 #
 # Overridable with environment variables or docker/.env:
 #   AQUAFFIA_IMAGE, AQUAFFIA_PORT, DATASET_DIR
+# Deployment 1 API listens on 8011; the dashboard page is served on 8001 by
+# deployment_gateway (aquaffia-edge-gateway), which also starts/stops this container.
 name: aquaffia-edge
 
 x-runtime: &runtime
-  image: ${AQUAFFIA_IMAGE:-aquaffia-edge:v1.2.0}
+  image: ${AQUAFFIA_IMAGE:-aquaffia-edge:v1.3.0}
   runtime: nvidia
   network_mode: host
   environment:
@@ -50,7 +52,7 @@ services:
     container_name: aquaffia-edge
     restart: unless-stopped
     command: >
-      uvicorn web_dashboard.app:app --host 0.0.0.0 --port ${AQUAFFIA_PORT:-8001}
+      uvicorn web_dashboard.app:app --host 0.0.0.0 --port ${AQUAFFIA_PORT:-8011}
 
   benchmark:
     <<: *runtime
