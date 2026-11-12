@@ -108,6 +108,22 @@
       <span class="text-[9px] font-label-sm text-outline tracking-wider uppercase font-semibold mt-1">FISH FEEDING INTENSITY ASSESSMENT</span>
     </div>
 
+    <!-- Deployment switch (served by aquaffia-edge-gateway; hidden when the page is served by a deployment directly) -->
+    <div id="deploy-switch-wrap" class="hidden items-center gap-3">
+      <span id="deploy-status-text" class="hidden md:inline text-[10px] font-label-sm text-outline font-semibold uppercase tracking-wider"></span>
+      <div id="deploy-switch" class="flex items-center gap-0.5 bg-surface-container-low border border-surface-container rounded-full p-0.5">
+        <button type="button" data-deployment="1" class="deploy-btn flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-label-sm font-bold transition-all">
+          <span class="deploy-dot w-1.5 h-1.5 rounded-full bg-slate-300"></span>Deployment 1
+        </button>
+        <button type="button" data-deployment="2" class="deploy-btn flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-label-sm font-bold transition-all">
+          <span class="deploy-dot w-1.5 h-1.5 rounded-full bg-slate-300"></span>Deployment 2
+        </button>
+        <button type="button" data-deployment="3" class="deploy-btn flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-label-sm font-bold transition-all">
+          <span class="deploy-dot w-1.5 h-1.5 rounded-full bg-slate-300"></span>Deployment 3
+        </button>
+      </div>
+    </div>
+
   </header>
 
   <!-- ============================================================================== -->
@@ -331,12 +347,120 @@
     let isLiveRunning = true;
     let currentAudioWaveform = null;
 
+    // ------------------------------------------------------------------------
+    // Multi-deployment support (Deployment 1 / 2 / 3).
+    // When the page is served by aquaffia-edge-gateway (port 8001), inference
+    // requests go to the active deployment (8011 / 8012 / 8013) and only one
+    // deployment runs at a time. When the page is served by a deployment
+    // directly, it calls its own /api/live/step exactly as before.
+    // ------------------------------------------------------------------------
+    let gatewayMode = false;
+    let deployState = null;
+    let activeDeployment = 1;
+    let deploySwitching = false;
+    let nextStep = null;
+
+    function deploymentBase(id) {
+      if (!gatewayMode || !deployState) return '';
+      const dep = deployState.deployments.find(d => d.id === id);
+      return dep ? `${location.protocol}//${location.hostname}:${dep.port}` : '';
+    }
+
+    function setDeployStatusText(text) {
+      const el = document.getElementById('deploy-status-text');
+      if (el) el.textContent = text || '';
+    }
+
+    function renderDeploySwitch() {
+      if (!deployState) return;
+      document.querySelectorAll('.deploy-btn').forEach(btn => {
+        const id = parseInt(btn.dataset.deployment, 10);
+        const dep = deployState.deployments.find(d => d.id === id);
+        const dot = btn.querySelector('.deploy-dot');
+        const isActive = id === activeDeployment;
+        const target = deploySwitching ? (deployState.target || null) : null;
+        btn.className = 'deploy-btn flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-label-sm font-bold transition-all ' +
+          (isActive ? 'bg-primary text-white shadow-xs' : 'text-outline hover:bg-surface-container');
+        let dotColor = 'bg-slate-300';
+        let title = 'Stopped - click to start';
+        if (!dep || dep.status === 'missing') { title = 'Not deployed yet'; }
+        else if (dep.ready) { dotColor = 'bg-emerald-400'; title = 'Running'; }
+        else if (dep.status === 'running' || target === id) { dotColor = 'bg-amber-400'; title = 'Starting'; }
+        if (dot) dot.className = 'deploy-dot w-1.5 h-1.5 rounded-full ' + dotColor;
+        btn.disabled = !dep || dep.status === 'missing' || deploySwitching;
+        btn.style.opacity = (!dep || dep.status === 'missing') ? '0.45' : '1';
+        btn.title = title;
+      });
+    }
+
+    async function refreshDeployState() {
+      try {
+        const res = await fetch('/gateway/state', { cache: 'no-store' });
+        if (!res.ok) throw new Error(res.status);
+        deployState = await res.json();
+        if (!gatewayMode) {
+          gatewayMode = true;
+          const wrap = document.getElementById('deploy-switch-wrap');
+          if (wrap) { wrap.classList.remove('hidden'); wrap.classList.add('flex'); }
+        }
+        // Follow switches made by other viewers.
+        if (!deploySwitching && !deployState.switching && deployState.active !== activeDeployment) {
+          activeDeployment = deployState.active;
+        }
+        if (deployState.switching) {
+          const t = deployState.deployments.find(d => d.id === deployState.target);
+          setDeployStatusText(t ? `Starting ${t.name}…` : 'Switching…');
+        } else if (!deploySwitching) {
+          setDeployStatusText(deployState.message || '');
+        }
+        renderDeploySwitch();
+      } catch (err) {
+        gatewayMode = false;
+      }
+    }
+
+    async function switchDeployment(id) {
+      if (!gatewayMode || deploySwitching || id === activeDeployment) return;
+      const dep = deployState && deployState.deployments.find(d => d.id === id);
+      deploySwitching = true;
+      if (deployState) deployState.target = id;
+      setDeployStatusText(`Starting ${dep ? dep.name : 'Deployment ' + id}…`);
+      renderDeploySwitch();
+      try {
+        const res = await fetch(`/gateway/switch/${id}`, { method: 'POST' });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body.ok) {
+          activeDeployment = id;
+          setDeployStatusText('');
+        } else {
+          activeDeployment = body.active || activeDeployment;
+          setDeployStatusText(body.error || body.detail || `${dep ? dep.name : 'Deployment ' + id} unavailable`);
+        }
+      } catch (err) {
+        setDeployStatusText('Gateway unreachable');
+      } finally {
+        deploySwitching = false;
+        const url = new URL(location.href);
+        url.searchParams.set('d', activeDeployment);
+        history.replaceState(null, '', url);
+        await refreshDeployState();
+      }
+    }
+
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.deploy-btn');
+      if (btn) switchDeployment(parseInt(btn.dataset.deployment, 10));
+    });
+
     async function runLiveStep() {
       if (!isLiveRunning) return;
+      if (gatewayMode && (deploySwitching || (deployState && deployState.switching))) return;
       try {
-        const res = await fetch('/api/live/step');
+        const query = nextStep !== null ? `?step=${nextStep}` : '';
+        const res = await fetch(deploymentBase(activeDeployment) + '/api/live/step' + query, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
+        if (data.stream_info && data.stream_info.next_step !== undefined) nextStep = data.stream_info.next_step;
         updateLiveFarmUI(data);
       } catch (err) {
         console.warn('Live step error:', err);
@@ -601,7 +725,16 @@
       }
     });
 
-    document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('DOMContentLoaded', async function () {
+      // Detect the gateway (multi-deployment mode) before the first inference call.
+      await refreshDeployState();
+      if (gatewayMode) {
+        setInterval(refreshDeployState, 3000);
+        const requested = parseInt(new URLSearchParams(location.search).get('d'), 10);
+        if ([1, 2, 3].includes(requested) && requested !== activeDeployment) {
+          switchDeployment(requested);
+        }
+      }
       // Start the Continuous Live Simulation immediately on load
       startLiveSimulation();
     });

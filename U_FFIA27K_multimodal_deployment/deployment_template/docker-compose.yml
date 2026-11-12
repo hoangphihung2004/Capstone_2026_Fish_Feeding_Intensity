@@ -1,0 +1,40 @@
+# AquaFFIA deployment container (Deployment 2 / 3).
+# All per-deployment values come from .env (copy .env.example to .env).
+#
+# Create the container WITHOUT starting it; the dashboard gateway starts and
+# stops it so that only one model runs at a time:
+#   docker compose up --no-start --build
+services:
+  deployment:
+    build:
+      context: .
+    image: ${IMAGE:-aquaffia-edge-2:latest}
+    container_name: ${CONTAINER_NAME:-aquaffia-edge-2}
+    runtime: nvidia
+    network_mode: host
+    restart: "no"          # started/stopped by aquaffia-edge-gateway only
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-2}
+      - DEPLOYMENT_NAME=${DEPLOYMENT_NAME:-Deployment 2}
+      - PORT=${PORT:-8012}
+      - MODEL_MODULE=${MODEL_MODULE:-model}
+      - SIM_DIR=/data/continuous_simulation
+      - WEIGHTS_DIR=/srv/deployment/weights
+    volumes:
+      # Shared 598 s simulation stream (same input as Deployment 1), read-only
+      - ${SIM_SOURCE:-../aquaffia_edge_deployment/samples/continuous_simulation}:/data/continuous_simulation:ro
+      # Your model files (TensorRT engines, checkpoints, ...)
+      - ${WEIGHTS_SOURCE:-./weights}:/srv/deployment/weights:ro
+      # TensorRT 10 + cuDLA from JetPack host
+      - /lib/aarch64-linux-gnu/libnvinfer.so.10:/lib/aarch64-linux-gnu/libnvinfer.so.10:ro
+      - /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10:ro
+      - /lib/aarch64-linux-gnu/libnvonnxparser.so.10:/lib/aarch64-linux-gnu/libnvonnxparser.so.10:ro
+      - /usr/local/cuda-12.6/targets/aarch64-linux/lib/libcudla.so.1:/lib/aarch64-linux-gnu/libcudla.so.1:ro
+      - /usr/lib/python3.10/dist-packages/tensorrt:/usr/local/lib/python3.10/dist-packages/tensorrt:ro
+      # cuda-python bindings installed on host (pip --user)
+      - /home/fptdanang/.local/lib/python3.10/site-packages/cuda:/usr/local/lib/python3.10/dist-packages/cuda:ro
+      - /home/fptdanang/.local/lib/python3.10/site-packages/cuda_python-12.9.7.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_python-12.9.7.dist-info:ro
+      - /home/fptdanang/.local/lib/python3.10/site-packages/cuda_bindings-12.9.9.dist-info:/usr/local/lib/python3.10/dist-packages/cuda_bindings-12.9.9.dist-info:ro

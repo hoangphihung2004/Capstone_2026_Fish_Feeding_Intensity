@@ -1,0 +1,22 @@
+# AquaFFIA dashboard gateway (port 8001). Always on; starts Deployment 1 after boot.
+#   cd deployment_gateway && docker compose up -d --build
+name: aquaffia-edge-gateway
+
+services:
+  gateway:
+    build:
+      context: .
+    image: aquaffia-edge-gateway:latest
+    container_name: aquaffia-edge-gateway
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEFAULT_DEPLOYMENT=1
+    volumes:
+      # Dashboard page + static files of Deployment 1 (single source of the UI)
+      - ../web_dashboard:/web:ro
+      # Simulation media shown in the video player
+      - ../samples/continuous_simulation:/samples/continuous_simulation:ro
+      # Start/stop deployment containers (only the ones listed in gateway.py)
+      - /var/run/docker.sock:/var/run/docker.sock
