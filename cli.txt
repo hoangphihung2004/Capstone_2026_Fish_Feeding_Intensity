@@ -79,6 +79,13 @@ cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && python -
 #      figure.pdf/.png, info.json (dự đoán, PSNR, SSIM, loss PGD), tensors.npz; upload HF: perturbation_viz/perturbation_viz_video_whitebox_*.zip
 #    Mẫu khác: thêm --sample <key>:<fold> (lặp lại được). Log: viz_whitebox.log
 # ==============================================================================
+# 8a. TẢI WEIGHT (bỏ qua dòng nào đã có): dòng 1 HMMF-Net fold 1, dòng 2 EfficientNet-B0 + ConvNeXt-T + Swin-T (mỗi zip đủ 5 fold),
+#     dòng 3 pull code + kiểm tra, phải in 4 dòng OK rồi mới chạy bước dưới.
+hf download hoangphihung442004/U_FFIA27K_multimodal_results U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800.zip --repo-type dataset --local-dir /marimo/Results && unzip -o -q "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800.zip" -d "/marimo/Results/U_FFIA27K_multimodal_LightweightAudioEncoder_EfficientNetB0_S7_cross_validation_random_sample_first_last_fold_01_20260921_074800"
+hf download hoangphihung442004/Results_U_FFIA27K_video EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611.zip ConvNeXtTiny_cross_validation_random_sample_1_49_channels_20260906_052820.zip SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039.zip --repo-type dataset --local-dir /marimo/Results && for n in EfficientNetB0_cross_validation_random_sample_1_49_channels_20260906_214611 ConvNeXtTiny_cross_validation_random_sample_1_49_channels_20260906_052820 SwinTiny_cross_validation_random_sample_1_49_channels_20260905_234039; do unzip -o -q "/marimo/Results/$n.zip" -d "/marimo/Results/$n"; done
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_perturbation_viz && git pull && python -c "import json,os;v=json.load(open('U_FFIA27K_multimodal/config/perturbation_viz_paths.json'));ps=[v['hmmf_net']['1'],v['efficientnet_b0'].format(fold=1)]+[v['sources'][k].format(fold=1) for k in ('ConvNeXtTiny','SwinTiny')];[print('OK     ' if os.path.isfile(p) else 'MISSING', p) for p in ps]"
+
+# 8. CHẠY
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity && git fetch origin && git checkout U_FFIA27K_perturbation_viz && git pull && cd U_FFIA27K_multimodal && nohup python visualize_perturbation_whitebox.py > viz_whitebox.log 2>&1 & sleep 5; tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/viz_whitebox.log
 
 # 8b. KIỂM TRA (dòng cuối = số tiến trình còn chạy, 0 là xong)
